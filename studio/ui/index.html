@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>studio — код → граф → код</title>
+<style>
+:root{--bg:#232428;--panel:#2e2f33;--panel2:#38393e;--hdr:#1b1c1f;--line:#45464c;--txt:#d7d7db;--dim:#9a9aa2;--acc:#e8833a;--blue:#5aa0ff;--red:#ff5d5d;--green:#7fc97f}
+*{box-sizing:border-box}html,body{height:100%}body{margin:0;background:var(--bg);color:var(--txt);font:13px/1.45 "Segoe UI",Roboto,Arial,sans-serif;display:flex;flex-direction:column;overflow:hidden}
+header{background:var(--hdr);display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #000}
+header .logo{font-weight:700;color:var(--acc);letter-spacing:.5px}
+.fmenu{position:relative;display:inline-block}#fileDrop button{border:none}
+button,select,input,textarea{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:12px}
+button{cursor:pointer}button:hover{border-color:var(--acc)}button.primary{background:var(--acc);border-color:var(--acc);color:#141310;font-weight:700}
+button.danger{border-color:var(--red);color:var(--red)}
+main{flex:1;display:grid;grid-template-columns:250px 1fr 290px;min-height:0}
+#left{background:var(--panel);border-right:1px solid #000;display:flex;flex-direction:column;min-height:0}
+#left h3{margin:8px 10px 4px;font-size:11px;text-transform:uppercase;color:var(--dim);letter-spacing:.6px}
+#palette{padding:0 10px 8px;overflow:auto}
+.pal{border:1px dashed var(--line);border-radius:8px;padding:6px 8px;margin:6px 0;cursor:grab;font-size:12px}
+.pal small{color:var(--dim)}
+#outliner{flex:1;overflow:auto;border-top:1px solid #000;padding:4px 6px}
+#outliner details{margin:2px 0}#outliner summary{cursor:pointer;color:var(--dim)}
+.onode{padding:2px 6px;border-radius:5px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.onode:hover{background:var(--panel2)}.onode.sel{background:#4a3a28;outline:1px solid var(--acc)}
+#center{display:flex;flex-direction:column;min-width:0}
+#toolbar{display:flex;gap:6px;align-items:center;padding:6px 10px;background:var(--panel);border-bottom:1px solid #000;flex-wrap:wrap}
+#toolbar .modes button.on{background:var(--acc);color:#141310;border-color:var(--acc);font-weight:700}
+#canvas{flex:1;position:relative;overflow:auto;background:radial-gradient(circle at 1px 1px,#34353b 1px,transparent 1px);background-size:22px 22px;min-height:0}
+#stage{position:relative;min-width:100%;min-height:100%}
+#edges{position:absolute;inset:0;pointer-events:none}
+.node{position:absolute;width:230px;background:#313236;border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 14px #0008;user-select:none}
+.node.sel{outline:2px solid var(--acc)}
+.node.viol{border-color:var(--red);box-shadow:0 0 0 2px #ff5d5d55}
+.node .hd{padding:6px 8px;border-radius:10px 10px 0 0;font-weight:700;display:flex;justify-content:space-between;gap:6px;align-items:center;cursor:move}
+.node .chips{display:flex;gap:4px;padding:4px 8px;font-size:11px;color:var(--dim)}
+.chip{border:1px solid var(--line);border-radius:20px;padding:0 8px}
+.node .bd{padding:4px 8px 8px;max-height:300px;overflow:auto}
+.crow{display:flex;align-items:center;gap:6px;padding:2px 0;font-size:12px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--blue);border:1px solid #000;cursor:crosshair;flex:none}
+.dot.abs{background:var(--acc)}.dot:hover{transform:scale(1.4)}
+.crow .nm{flex:1;overflow:hidden;text-overflow:ellipsis}
+.node textarea{width:100%;height:180px;font:11px Consolas,monospace;background:#1e1f22;color:#d7d7db;border:1px solid var(--line);border-radius:6px}
+.nbtns{display:flex;gap:4px;padding:0 8px 8px}
+.nbtns button{font-size:11px;padding:2px 6px}
+#right{background:var(--panel);border-left:1px solid #000;overflow:auto;padding:10px;min-height:0}
+#right h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;color:var(--dim)}
+#right label{display:block;font-size:11px;color:var(--dim);margin:8px 0 2px}
+#right input,#right select,#right textarea{width:100%}
+#toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#111;border:1px solid var(--acc);color:var(--txt);padding:8px 14px;border-radius:8px;display:none;z-index:99}
+.modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:50}
+.modal .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;max-width:760px;width:92%;max-height:86%;overflow:auto;padding:14px}
+.modal pre{background:#1e1f22;padding:10px;border-radius:8px;overflow:auto;font-size:11px}
+table.grid{border-collapse:collapse;width:100%;font-size:12px}
+table.grid td,table.grid th{border:1px solid var(--line);padding:3px 6px;text-align:center}
+.kv{display:flex;gap:6px;margin:4px 0}.kv input{flex:1}
+footer{background:var(--hdr);border-top:1px solid #000;padding:3px 10px;font-size:11px;color:var(--dim);display:flex;gap:14px}
+</style>
+</head>
+<body>
+<header>
+<span class="logo">⬢ studio</span>
+<span class="fmenu"><button id="bFile">File ▾</button><span id="fileDrop" style="display:none;position:absolute;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px;z-index:60">
+<button id="fExport" style="display:block;width:100%;text-align:left">Экспорт graph.json</button>
+<button id="fReset" style="display:block;width:100%;text-align:left">Сбросить буфер (scan)</button>
+<button id="fAbout" style="display:block;width:100%;text-align:left">О studio</button>
+</span></span>
+<button id="bScan" title="scan: код → граф">Scan</button>
+<button id="bSave" class="primary" title="save: граф → код">Save</button>
+<button id="bValidate" title="проверить архитектуру">Validate</button>
+<button id="bDiff" title="показать изменения без записи">Показать изменения</button>
+<span style="flex:1"></span>
+<span style="color:var(--dim);font-size:11px" id="stats">—</span>
+<button id="bConfig">⚙ Конфигурация</button>
+</header>
+<main>
+<div id="left">
+<h3>Палитра — домен × слой</h3>
+<div id="palette"></div>
+<h3>Аутлайнер</h3>
+<div id="outliner"></div>
+</div>
+<div id="center">
+<div id="toolbar">
+<span style="color:var(--dim);font-size:11px">РЕЖИМ:</span>
+<span class="modes">
+<button data-m="global" class="on">глобально</button>
+<button data-m="domain">по домену</button>
+<button data-m="layer">по слою</button>
+<button data-m="viol">только нарушения</button>
+</span>
+<select id="fDomain" title="фильтр домена"><option value="">домен: все</option></select>
+<select id="fLayer" title="фильтр слоя"><option value="">слой: все</option></select>
+<span style="flex:1"></span>
+<span style="font-size:11px;color:var(--dim)">тяни узел за шапку · клик по точке = связь · double-click = code view</span>
+</div>
+<div id="canvas"><div id="stage"><svg id="edges"></svg></div></div>
+</div>
+<div id="right"><h3>Инспектор</h3><div id="insp"><p style="color:var(--dim)">Выбери узел или связь.</p></div></div>
+</main>
+<footer><span id="fViol">нарушений: —</span><span id="fInfo">scan → edit → save · офлайн · проект не запущен</span></footer>
+<div id="toast"></div>
+<div class="modal" id="mDiff"><div class="box"><h3>Изменения (без записи)</h3><pre id="diffPre">…</pre><button id="mDiffClose">Закрыть</button></div></div>
+<div class="modal" id="mConfig"><div class="box"><h3>Меню конфигурации → config.toml</h3>
+<div id="cfgBody"></div>
+<div style="display:flex;gap:8px;margin-top:10px"><button id="cfgSave" class="primary">Сохранить в config.toml</button><button id="cfgClose">Закрыть</button></div>
+</div></div>
+<script>
+const LAYER_COLORS={domain:"#a9b665",logic:"#7aa2f7",io:"#bb9af7",representation:"#e0af68",validation:"#f7768e"};
+let G={nodes:[],links:[]},CFG=null,VIOL=[],mode="global",sel=null,linkSrc=null,codeCache={};
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+function toast(m){const t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",2600)}
+async function api(m,u,b){const r=await fetch(u,{method:m,headers:{"Content-Type":"application/json"},body:b?JSON.stringify(b):undefined});if(!r.ok)throw new Error(await r.text());return r.json()}
+async function loadAll(){CFG=await api("GET","/api/config");G=await api("GET","/api/graph");VIOL=(await api("GET","/api/validate")).violations||[];renderAll()}
+/** Раскладка узлов под режим канваса: домен — колонки, слой — ряды, глобально — сетка. */
+function layoutGraph(m){const domains=(CFG.studio.domains||[]).map(d=>d.name),layers=(CFG.studio.layers||[]).map(l=>l.name);const X=300,Y=240;
+const di=n=>{const i=domains.indexOf(n.domain);return i<0?domains.length:i},li=n=>{const i=layers.indexOf(n.layer);return i<0?layers.length:i};
+if(m==="domain"){const col={};G.nodes.forEach(n=>{const k=n.domain;col[k]=col[k]||0;n.ui.x=di(n)*X;n.ui.y=(col[k]++)*Y})}
+else if(m==="layer"){const row={};G.nodes.forEach(n=>{const k=n.layer;row[k]=row[k]||0;n.ui.y=li(n)*Y;n.ui.x=(row[k]++)*X})}
+else if(m==="global"){const cell={};G.nodes.forEach(n=>{const k=di(n)+"x"+li(n);cell[k]=cell[k]||0;const j=cell[k]++;n.ui.x=di(n)*X+(j%2)*50;n.ui.y=li(n)*Y+Math.floor(j/2)*50})}}
+function allowed(a,b){if(a===b)return true;return (CFG.studio.rules.allowed||[]).some(p=>p[0]===a&&p[1]===b)}
+// ---------- палитра / аутлайнер ----------
+function renderPalette(){const p=$("palette");p.innerHTML="";(CFG.studio.domains||[]).forEach(d=>{(CFG.studio.layers||[]).forEach(l=>{const el=document.createElement("div");el.className="pal";el.draggable=true;el.innerHTML=`<b>${esc(d.name)}</b> · ${esc(l.name)}<br><small>перетащи на канвас → новый узел</small>`;el.ondragstart=e=>e.dataTransfer.setData("text/plain",JSON.stringify({domain:d.name,layer:l.name}));p.appendChild(el)})});
+const fd=$("fDomain"),fl=$("fLayer"),cd=fd.value,cl=fl.value;fd.innerHTML='<option value="">домен: все</option>';fl.innerHTML='<option value="">слой: все</option>';(CFG.studio.domains||[]).forEach(d=>{const o=document.createElement("option");o.value=d.name;o.textContent=d.name;fd.appendChild(o)});(CFG.studio.layers||[]).forEach(l=>{const o=document.createElement("option");o.value=l.name;o.textContent=l.name;fl.appendChild(o)});fd.value=cd;fl.value=cl}
+function renderOutliner(){const o=$("outliner");o.innerHTML="";const byD={};G.nodes.forEach(n=>{(byD[n.domain]=byD[n.domain]||{});(byD[n.domain][n.layer]=byD[n.domain][n.layer]||[]).push(n)});Object.keys(byD).sort().forEach(d=>{const det=document.createElement("details");det.open=true;const sm=document.createElement("summary");sm.textContent=d;det.appendChild(sm);Object.keys(byD[d]).sort().forEach(l=>{const d2=document.createElement("details");d2.open=true;const s2=document.createElement("summary");s2.textContent="↳ "+l;d2.appendChild(s2);byD[d][l].sort((a,b)=>a.id.localeCompare(b.id)).forEach(n=>{const e=document.createElement("div");e.className="onode"+(sel&&sel.id===n.id?" sel":"");e.textContent="▤ "+n.id;e.onclick=()=>{select({t:"node",id:n.id});centerOn(n)};d2.appendChild(e)});det.appendChild(d2)});o.appendChild(det)})}
+// ---------- канвас ----------
+function visible(n){const vs=new Set(VIOL.flatMap(v=>[v.from_node,v.to_node]));if(mode==="viol"&&!vs.has(n.id))return false;if(mode==="domain"&&$("fDomain").value&&n.domain!==$("fDomain").value)return false;if(mode==="layer"&&$("fLayer").value&&n.layer!==$("fLayer").value)return false;return true}
+function centerOn(n){const c=$("canvas");c.scrollTo({left:Math.max(0,n.ui.x-300),top:Math.max(0,n.ui.y-200),behavior:"smooth"})}
+function renderAll(){renderPalette();renderOutliner();renderCanvas();renderInspector();const vv=VIOL.length;$("fViol").textContent="нарушений: "+vv;$("stats").textContent=`узлов ${G.nodes.length} · связей ${G.links.length}`}
+function renderCanvas(){const st=$("stage");st.querySelectorAll(".node").forEach(e=>e.remove());const svg=$("edges");svg.innerHTML="";const vis=G.nodes.filter(visible);const byId={};G.nodes.forEach(n=>byId[n.id]=n);
+vis.forEach(n=>{const el=document.createElement("div");el.className="node"+(sel&&sel.id===n.id?" sel":"")+(VIOL.some(v=>v.from_node===n.id||v.to_node===n.id)?" viol":"");el.style.left=n.ui.x+"px";el.style.top=n.ui.y+"px";el.dataset.id=n.id;const col=LAYER_COLORS[n.layer]||"#888";
+let inner=`<div class="hd" style="background:${col}33;border-bottom:2px solid ${col}"><span title="${esc(n.id)}">▤ ${esc(n.id.split("/").pop())}</span><span style="font-weight:400;font-size:10px">${esc(n.status||"")}</span></div><div class="chips"><span class="chip">${esc(n.domain)}</span><span class="chip" style="border-color:${col};color:${col}">${esc(n.layer)}</span></div><div class="bd">`;
+if(n.ui.state==="code"){const code=n.code!=null?n.code:(codeCache[n.id]??"(загрузка…)");inner+=`<textarea id="ta-${esc(n.id)}" spellcheck="false">${esc(code)}</textarea><div class="nbtns"><button data-a="savecode">в буфер</button><button data-a="collapse">свернуть</button></div>`}
+else if(n.ui.state==="expanded"){inner+=n.contracts.map(c=>`<div class="crow"><span class="dot ${c.kind==="abstraction"?"abs":""}" data-c="${esc(c.name)}" title="${esc(c.kind)}: ${esc(c.name)}"></span><span class="nm">${esc(c.name)}</span><small style="color:var(--dim)">${c.kind==="abstraction"?"abs":"impl"}</small></div>`).join("")||'<p style="color:var(--dim)">контрактов нет</p>';inner+=`<div class="nbtns"><button data-a="collapse">свернуть</button><button data-a="code">code view</button><button data-a="del" class="danger">✕</button></div>`}
+else{inner+=`<div style="color:var(--dim);font-size:11px;padding:0 0 4px">${n.contracts.length} контрактов · double-click развернуть</div><div class="nbtns"><button data-a="expand">развернуть</button><button data-a="code">code</button></div>`}
+inner+="</div>";el.innerHTML=inner;
+el.querySelector(".hd").onmousedown=e=>{if(e.target.tagName==="BUTTON")return;const sx=e.clientX,sy=e.clientY,ox=n.ui.x,oy=n.ui.y;const mv=ev=>{n.ui.x=ox+ev.clientX-sx;n.ui.y=oy+ev.clientY-sy;el.style.left=n.ui.x+"px";el.style.top=n.ui.y+"px";drawEdges()};const up=()=>{document.removeEventListener("mousemove",mv);document.removeEventListener("mouseup",up);persist()};document.addEventListener("mousemove",mv);document.addEventListener("mouseup",up)};
+el.onclick=e=>{const b=e.target.closest("button");if(b){nodeAction(n,b.dataset.a);e.stopPropagation();return}const d=e.target.closest(".dot");if(d){contractClick(n,d.dataset.c);e.stopPropagation();return}select({t:"node",id:n.id})};
+el.ondblclick=e=>{if(e.target.closest("button")||e.target.closest("textarea"))return;n.ui.state=n.ui.state==="expanded"?"collapsed":"expanded";persist().then(renderAll)};
+st.appendChild(el);
+if(n.ui.state==="code"&&n.code==null&&codeCache[n.id]===undefined){fetch("/api/file?path="+encodeURIComponent(n.id)).then(r=>r.json()).then(j=>{codeCache[n.id]=j.code||"";if(byId[n.id]&&byId[n.id].ui.state==="code")renderCanvas()}).catch(()=>{})}
+else if(n.code!=null){codeCache[n.id]=n.code}
+});
+drawEdges();st.style.width="3000px";st.style.height="2000px";svg.setAttribute("width","3000");svg.setAttribute("height","2000")}
+function nodeXY(id){const n=G.nodes.find(x=>x.id===id);return n?[n.ui.x+115,n.ui.y+30]:[0,0]}
+function drawEdges(){const svg=$("edges");svg.innerHTML="";const vis=new Set(G.nodes.filter(visible).map(n=>n.id));G.links.forEach(l=>{if(l.status==="deleted")return;if(!vis.has(l.from_node)||!vis.has(l.to_node))return;const [x1,y1]=nodeXY(l.from_node),[x2,y2]=nodeXY(l.to_node);const viol=VIOL.some(v=>v.link_id===l.id)||l.violation;const isSel=sel&&sel.t==="link"&&sel.id===l.id;const c=isSel?"#ffb35d":(viol?"#ff5d5d":(l.weak?"#8a8a93":"#5aa0ff"));const mx=(x1+x2)/2;svg.innerHTML+=`<g data-l="${esc(l.id)}" style="pointer-events:auto;cursor:pointer"><path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" stroke="${c}" stroke-width="${isSel?3.2:(viol?3:1.6)}" fill="none" ${l.weak?'stroke-dasharray="5,4"':""}/><circle cx="${x2}" cy="${y2}" r="4" fill="${c}"/><text x="${mx}" y="${(y1+y2)/2-4}" fill="${c}" font-size="10">${esc(l.contract)}</text></g>`});svg.querySelectorAll("g").forEach(g=>g.onclick=()=>select({t:"link",id:g.dataset.l}))}
+function nodeAction(n,a){if(a==="expand"){n.ui.state="expanded"}else if(a==="collapse"){n.ui.state="collapsed"}else if(a==="code"){n.ui.state="code"}else if(a==="del"){if(confirm("Удалить узел "+n.id+"? (файл удалится только по Save)")){n.status="deleted";sel=null}}else if(a==="savecode"){const ta=document.getElementById("ta-"+n.id);if(ta){n.code=ta.value;codeCache[n.id]=ta.value;if(n.status==="tracked")n.status="modified";toast("правки в буфере, файлы не тронуты — жми Save")}else{toast("не найден редактор — открой code view заново")}}persist().then(renderAll)}
+function contractClick(n,cname){if(!linkSrc){linkSrc={node:n.id,contract:cname};toast("источник: "+n.id+" :: "+cname+" — кликни точку приёмника")}else{if(linkSrc.node===n.id){linkSrc=null;toast("отмена связи");return}const a=G.nodes.find(x=>x.id===linkSrc.node),b=n;if(!allowed(a.layer,b.layer)){toast(`⛔ запрещено: ${a.layer} → ${b.layer}`);linkSrc=null;return}const id=`${a.id}::${cname}>>${b.id}`;if(!G.links.some(l=>l.id===id)){G.links.push({id,contract:cname,from_node:a.id,to_node:b.id,weak:false,violation:false,status:"added"});toast("связь в буфере: "+cname)}linkSrc=null;persist().then(loadAll)}}
+// ---------- инспектор ----------
+function select(s){sel=s;renderCanvas();renderOutliner();renderInspector()}
+async function persist(){await api("PUT","/api/graph",G)}
+function renderInspector(){const d=$("insp");if(!sel){d.innerHTML='<p style="color:var(--dim)">Выбери узел или связь.</p>';return}
+if(sel.t==="node"){const n=G.nodes.find(x=>x.id===sel.id);if(!n){d.innerHTML="удалён";return}const doms=(CFG.studio.domains||[]).map(x=>x.name),lays=(CFG.studio.layers||[]).map(x=>x.name);
+d.innerHTML=`<label>файл (id)</label><input id="iId" value="${esc(n.id)}" disabled><label>домен</label><select id="iDom">${doms.map(x=>`<option ${x===n.domain?"selected":""}>${esc(x)}</option>`).join("")}</select><label>слой</label><select id="iLay">${lays.map(x=>`<option ${x===n.layer?"selected":""}>${esc(x)}</option>`).join("")}</select><label>имя</label><input id="iName" value="${esc((n.properties&&n.properties.name)||"")}"><label>описание</label><input id="iDesc" value="${esc((n.properties&&n.properties.description)||"")}"><label>контракты (имя — abs|impl, по строке)</label><textarea id="iC" rows="7" spellcheck="false">${esc(n.contracts.map(c=>c.name+" — "+(c.kind==="abstraction"?"abs":"impl")).join("\n"))}</textarea><div class="kv"><button id="iApply" class="primary">Применить</button><button id="iCode">code view</button></div><div class="kv"><button id="iDel" class="danger">удалить узел</button></div>${VIOL.filter(v=>v.from_node===n.id||v.to_node===n.id).map(v=>`<p style="color:var(--red)">⚠ ${esc(v.reason)}</p>`).join("")}`;
+$("iApply").onclick=async()=>{try{n.domain=$("iDom").value;n.layer=$("iLay").value;n.properties={name:$("iName").value,description:$("iDesc").value,metadata:(n.properties&&n.properties.metadata)||{}};n.contracts=$("iC").value.split("\n").map(s=>s.trim()).filter(Boolean).map(s=>{const parts=s.split("—").map(x=>x.trim());const name=parts[0],kind=(parts[1]||"").toLowerCase();return{name,kind:(kind==="abs"||kind==="abstraction")?"abstraction":"implementation",owner:null,line:null}}).filter(c=>c.name);if(n.status==="tracked")n.status="modified";await persist();await loadAll()}catch(e){toast("ошибка: "+e.message)}};$("iCode").onclick=async()=>{n.ui.state="code";await persist();renderAll()};$("iDel").onclick=async()=>{if(confirm("Удалить?")){n.status="deleted";sel=null;await persist();await loadAll()}}}
+else{const l=G.links.find(x=>x.id===sel.id);if(!l){d.innerHTML="связь удалена";return}d.innerHTML=`<label>контракт</label><input value="${esc(l.contract)}" disabled><label>из (реализация)</label><input value="${esc(l.from_node)}" disabled><label>в (абстракция)</label><input value="${esc(l.to_node)}" disabled><p>${l.weak?"weak-связь (обе стороны concrete)":"impl → abs"}${l.status==="added"?" · <b>новая (в буфере)</b>":""}</p>${VIOL.some(v=>v.link_id===l.id)?'<p style="color:var(--red)">⚠ нарушает чистую архитектуру</p>':""}<button id="iLDel" class="danger">удалить связь</button>`;$("iLDel").onclick=async()=>{try{if(l.status==="added"){G.links=G.links.filter(x=>x.id!==l.id)}else{l.status="deleted"}sel=null;await persist();await loadAll()}catch(e){toast("ошибка: "+e.message)}}}}
+// ---------- конфиг ----------
+function renderCfg(){const c=CFG.studio;let h=`<h4>Домены (имя → папка)</h4>`;c.domains.forEach((d,i)=>{h+=`<div class="kv"><input data-d="${i}" data-k="name" value="${esc(d.name)}"><input data-d="${i}" data-k="path" value="${esc(d.path)}"><button data-dd="${i}">✕</button></div>`});h+=`<button id="addD">+ домен</button><h4>Слои (имя → папка, порядок)</h4>`;c.layers.forEach((l,i)=>{h+=`<div class="kv"><input data-l="${i}" data-k="name" value="${esc(l.name)}"><input data-l="${i}" data-k="path" value="${esc(l.path)}"><input data-l="${i}" data-k="order" value="${esc(l.order)}" style="max-width:60px"><button data-dl="${i}">✕</button></div>`});h+=`<button id="addL">+ слой</button><h4>Правила именования (regex)</h4>`;Object.keys(c.naming||{}).forEach(k=>{h+=`<div class="kv"><b style="width:130px">${esc(k)}</b><input data-n="${esc(k)}" data-k="abstraction" value="${esc(c.naming[k].abstraction)}" title="абстракция"><input data-n="${esc(k)}" data-k="implementation" value="${esc(c.naming[k].implementation)}" title="реализация"></div>`});h+=`<h4>Правила связей (разрешено ✓)</h4><table class="grid"><tr><th>from \\ to</th>${c.layers.map(l=>`<th>${esc(l.name)}</th>`).join("")}</tr>`;c.layers.forEach(a=>{h+=`<tr><td><b>${esc(a.name)}</b></td>`;c.layers.forEach(b=>{const on=(c.rules.allowed||[]).some(p=>p[0]===a.name&&p[1]===b.name);h+=`<td><input type="checkbox" data-r="${esc(a.name)}→${esc(b.name)}" ${on?"checked":""} ${a.name===b.name?"disabled":""}></td>`});h+=`</tr>`});h+=`</table><h4>Save</h4><div class="kv"><label><input type="checkbox" id="cShow" ${c.save.show_diff?"checked":""}> show_diff</label><select id="cMode"><option ${c.save.diff_mode==="always"?"selected":""}>always</option><option ${c.save.diff_mode==="on_danger"?"selected":""}>on_danger</option><option ${c.save.diff_mode==="manual"?"selected":""}>manual</option></select></div>`;$("cfgBody").innerHTML=h;
+$("cfgBody").querySelectorAll("[data-dd]").forEach(b=>b.onclick=()=>{c.domains.splice(+b.dataset.dd,1);renderCfg()});$("addD").onclick=()=>{c.domains.push({name:"new",path:"new"});renderCfg()};$("cfgBody").querySelectorAll("[data-dl]").forEach(b=>b.onclick=()=>{c.layers.splice(+b.dataset.dl,1);renderCfg()});$("addL").onclick=()=>{c.layers.push({name:"new",path:"new",order:c.layers.length});renderCfg()};
+$("cfgBody").querySelectorAll("[data-d]").forEach(i=>i.oninput=()=>{c.domains[+i.dataset.d][i.dataset.k]=i.value});$("cfgBody").querySelectorAll("[data-l]").forEach(i=>i.oninput=()=>{const v=i.dataset.k==="order"?+i.value:i.value;c.layers[+i.dataset.l][i.dataset.k]=v});$("cfgBody").querySelectorAll("[data-n]").forEach(i=>i.oninput=()=>{c.naming[i.dataset.n][i.dataset.k]=i.value});$("cfgBody").querySelectorAll("[data-r]").forEach(ch=>ch.onchange=()=>{const[a,b]=ch.dataset.r.split("→");c.rules.allowed=c.rules.allowed.filter(p=>!(p[0]===a&&p[1]===b));if(ch.checked)c.rules.allowed.push([a,b])});$("cShow").onchange=e=>c.save.show_diff=e.target.checked;$("cMode").onchange=e=>c.save.diff_mode=e.target.value}
+// ---------- события ----------
+document.querySelectorAll("#toolbar .modes button").forEach(b=>b.onclick=async()=>{document.querySelectorAll("#toolbar .modes button").forEach(x=>x.classList.remove("on"));b.classList.add("on");mode=b.dataset.m;try{if(mode!=="viol"){layoutGraph(mode);await persist()}renderCanvas()}catch(e){toast("ошибка: "+e.message)}});
+$("fDomain").onchange=renderCanvas;$("fLayer").onchange=renderCanvas;
+$("bFile").onclick=e=>{e.stopPropagation();const dd=$("fileDrop");dd.style.display=dd.style.display==="none"?"block":"none"};
+document.addEventListener("click",()=>{$("fileDrop").style.display="none"});
+$("fExport").onclick=()=>{const blob=new Blob([JSON.stringify(G,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="graph.json";a.click();URL.revokeObjectURL(a.href)};
+$("fReset").onclick=async()=>{if(confirm("Сбросить буфер и пересобрать граф по коду?")){try{await api("POST","/api/scan");codeCache={};await loadAll();toast("scan готов")}catch(e){toast("ошибка: "+e.message)}}};
+$("fAbout").onclick=()=>toast("studio: код → граф → код · офлайн · проект не запускается");
+$("bScan").onclick=async()=>{try{if(!confirm("scan пересоберёт граф по коду (буфер правок затрется). Продолжить?"))return;await api("POST","/api/scan");codeCache={};await loadAll();toast("scan готов")}catch(e){toast("ошибка: "+e.message)}};
+$("bValidate").onclick=async()=>{try{await loadAll();toast(VIOL.length?`нарушений: ${VIOL.length}`:"нарушений нет")}catch(e){toast("ошибка: "+e.message)}};
+$("bDiff").onclick=async()=>{try{const d=await api("GET","/api/diff");$("diffPre").textContent=d.diff||"(пусто)";$("mDiff").style.display="flex"}catch(e){toast("ошибка: "+e.message)}};
+$("mDiffClose").onclick=()=>$("mDiff").style.display="none";
+$("bSave").onclick=async()=>{try{const r=await api("POST","/api/save",{confirm:false});if(r.need_confirm){$("diffPre").textContent=r.diff;if(confirm("Есть изменения/нарушения. Записать в код?")){const r2=await api("POST","/api/save",{confirm:true});toast("save: "+r2.ops.length+" операций");codeCache={};await loadAll()}else{$("mDiff").style.display="flex"}}else{toast("save: "+r.ops.length+" операций");codeCache={};await loadAll()}}catch(e){toast("save отклонён: "+e.message)}};
+$("bConfig").onclick=()=>{renderCfg();$("mConfig").style.display="flex"};
+$("cfgClose").onclick=()=>$("mConfig").style.display="none";
+$("cfgSave").onclick=async()=>{try{await api("PUT","/api/config",CFG);await loadAll();$("mConfig").style.display="none";toast("config.toml сохранён. Сменились имена/правила — сделай Scan")}catch(e){toast("ошибка: "+e.message)}};
+$("canvas").ondragover=e=>e.preventDefault();
+$("canvas").ondrop=async e=>{e.preventDefault();try{let d;try{d=JSON.parse(e.dataTransfer.getData("text/plain"))}catch{return}const r=$("canvas").getBoundingClientRect();const x=e.clientX-r.left+$("canvas").scrollLeft,y=e.clientY-r.top+$("canvas").scrollTop;const base=`${d.domain}/${d.layer}/new_node.py`;let id=base,i=2;while(G.nodes.some(n=>n.id===id&&n.status!=="deleted")){id=`${d.domain}/${d.layer}/new_node${i}.py`;i++}G.nodes.push({id,path:id,domain:d.domain,layer:d.layer,contracts:[],properties:{name:id.split("/").pop().replace(".py",""),description:"",metadata:{}},ui:{x,y,state:"expanded"},status:"added",code:null});await persist();await loadAll();select({t:"node",id})}catch(err){toast("ошибка: "+err.message)}};
+loadAll().catch(e=>{document.body.innerHTML="<pre>studio server недоступен: "+e.message+"</pre>"});
+</script>
+</body>
+</html>

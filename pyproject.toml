@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pacage-studio"
+version = "0.1.0"
+description = "Studio — офлайн dev-инструмент: код → граф → код (три пакета: infra / logic / presentation)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2"]
+authors = [{name="studio"}]
+license = {text="MIT"}
+
+[project.optional-dependencies]
+# Полный стек одной командой: pip install "pacage-studio[full]"
+# Тянет fastbase + core-package + event-infra из гит-репозитория.
+full = ["fastbase[full] @ git+https://github.com/senia-glitch/fastapi-transport.git"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+studio = "studio.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["studio*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
