@@ -27,6 +27,14 @@ def test_по_умолчанию_зависимостей_почти_нет():
     assert deps == ["pydantic>=2"]
 
 
+def test_версия_2_0_0():
+    """Пакет и pyproject разом: студия v2, версии не разъезжаются."""
+    import studio
+
+    assert studio.__version__ == "2.0.0"
+    assert _pyproject()["project"]["version"] == "2.0.0"
+
+
 def test_ui_html_упакован_в_дистрибутив():
     """Без package-data wheel ставится без index.html и studio dev падает — ловим это метаданными."""
     data = _pyproject()["tool"]["setuptools"].get("package-data", {})

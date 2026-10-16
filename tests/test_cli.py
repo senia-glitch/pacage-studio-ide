@@ -1,136 +1,148 @@
-"""Что проверяется: команды целиком на проекте под стек.
+"""Что проверяется: CLI scan / dev / list / help (только чтение кода).
 
-Описание словами: init создаёт .studio с конфигом стека, scan строит граф
-только из пользовательского кода (каркас пакетов пропускается),
-validate ловит нарушение, save пишет правки, а удаление .studio
-и повторный scan восстанавливают граф.
+Описание словами: scan пишет исключительно .studio/graph.json (версия 2) и
+лог, код проекта не меняется ни на байт; list группирует сценариев по
+endpoint'ам; help описывает команды; --project работает и до, и после подкоманды.
 """
 
-import shutil
+import hashlib
+import json
 from types import SimpleNamespace
 
 from studio import store
-from studio.cli import cmd_init, cmd_save, cmd_scan, cmd_validate
-
-
-def _demo(root):
-    """Мини-проект в раскладке стека: модели, сценарий, роут, схемы."""
-    (root / "app" / "scenarios").mkdir(parents=True)
-    (root / "app" / "api" / "v1" / "routes").mkdir(parents=True)
-    (root / "app" / "schemas").mkdir(parents=True)
-    (root / "models.py").write_text(
-        "from sqlmodel import SQLModel\nclass User(SQLModel, table=True):\n"
-        "    __tablename__ = 'users'\n", encoding="utf-8")
-    (root / "run_infrastructure.py").write_text("def main():\n    return 1\n", encoding="utf-8")
-    (root / "app" / "scenarios" / "create_user.py").write_text(
-        "from core import BaseScenario, register_scenario\n@register_scenario('create_user')\n"
-        "class CreateUser(BaseScenario):\n    async def execute(self, dto):\n        return {}\n",
-        encoding="utf-8")
-    (root / "app" / "api" / "v1" / "routes" / "users.py").write_text(
-        "from fastapi import APIRouter\nrouter = APIRouter()\n\n\ndef create_user(dto):\n    return {}\n",
-        encoding="utf-8")
-    (root / "app" / "schemas" / "user.py").write_text(
-        "from pydantic import BaseModel\nclass UserOut(BaseModel):\n    name: str\n", encoding="utf-8")
-    (root / "app" / "schemas" / "contracts.py").write_text(
-        "from abc import ABC, abstractmethod\nclass ApiContract(ABC):\n"
-        "    @abstractmethod\n    def create_user(self, dto): ...\n", encoding="utf-8")
+from studio.cli import build_parser, cmd_help, cmd_list, cmd_scan, main
 
 
 def _args(project, **kw):
-    base = {"project": str(project), "force": False, "yes": True,
-            "show_diff": False, "diff_only": False}
-    base.update(kw)
-    return SimpleNamespace(**base)
+    return SimpleNamespace(project=str(project), host="127.0.0.1", port=0, **kw)
 
 
-def test_init_даёт_конфиг_стека(tmp_path):
-    """init на пустой папке: 6 слоёв, 3 домена-пакета, default_domain=shared."""
-    assert cmd_init(_args(tmp_path, force=True)) == 0
-    text = (tmp_path / ".studio" / "config.toml").read_text(encoding="utf-8")
-    assert "presentation" in text
-    cfg = store.read_config(tmp_path)["studio"]
-    assert [layer["name"] for layer in cfg["layers"]] == [
-        "models", "scenarios", "interfaces", "utils", "routes", "schemas"]
-    assert [d["name"] for d in cfg["domains"]] == ["infra", "core", "presentation"]
-    assert cfg["default_domain"] == "shared"
+def _hashes(root):
+    out = {}
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or ".studio" in path.parts:
+            continue
+        rel = path.relative_to(root).as_posix()
+        out[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return out
 
 
-def test_scan_пустого_проекта(tmp_path):
-    """Пустой проект: ноль узлов, ноль связей — и это нормально."""
-    cmd_init(_args(tmp_path, force=True))
-    assert cmd_scan(_args(tmp_path)) == 0
+class TestScan:
+    def test_scan_печатает_итог(self, demo, capsys):
+        assert cmd_scan(_args(demo)) == 0
+        out = capsys.readouterr().out
+        assert "scan: endpoints 4, scenarios 4" in out
+        assert "io 7" in out
+        assert "models 2" in out
+
+    def test_scan_пишет_граф_версии_2(self, demo):
+        cmd_scan(_args(demo))
+        graph = store.read_graph(demo)
+        assert graph is not None
+        assert graph.version == 2
+        assert len(graph.endpoints) == 4
+        assert len(graph.scenarios) == 4
+        assert set(graph.scenario_paths) == set(graph.scenarios)
+
+    def test_scan_не_меняет_код_проекта(self, demo):
+        before = _hashes(demo)
+        cmd_scan(_args(demo))
+        assert _hashes(demo) == before
+
+    def test_scan_пишет_только_studio(self, demo):
+        cmd_scan(_args(demo))
+        created = {p.name for p in (demo / ".studio").iterdir()}
+        assert created == {"graph.json", "studio.log", ".gitignore"}
+        assert store.graph_path(demo).read_text(encoding="utf-8").endswith("\n")
+
+    def test_scan_пустого_проекта(self, tmp_path, capsys):
+        assert cmd_scan(_args(tmp_path)) == 0
+        out = capsys.readouterr().out
+        assert "endpoints 0, scenarios 0" in out
+        assert store.read_graph(tmp_path).nodes == []
+
+    def test_scan_перезаписывает_лог(self, demo):
+        (demo / ".studio").mkdir(exist_ok=True)
+        (demo / ".studio" / "studio.log").write_text("старое\n", encoding="utf-8")
+        cmd_scan(_args(demo))
+        log = (demo / ".studio" / "studio.log").read_text(encoding="utf-8")
+        assert "старое" not in log
+        assert "studio scan" in log.splitlines()[0]
 
 
-def test_полный_цикл_init_scan_validate(tmp_path, capsys):
-    """init -> scan -> validate: 5 узлов (каркас пропущен), 1 связь routes->schemas, нарушений ноль."""
-    _demo(tmp_path)
-    assert cmd_init(_args(tmp_path, force=True)) == 0
-    assert cmd_scan(_args(tmp_path)) == 0
-    assert cmd_validate(_args(tmp_path)) == 0
-    out = capsys.readouterr().out
-    assert "nodes 5" in out and "links 1" in out and "ok" in out
+class TestList:
+    def test_list_группы(self, demo, capsys):
+        cmd_scan(_args(demo))
+        capsys.readouterr()
+        assert cmd_list(_args(demo)) == 0
+        out = capsys.readouterr().out
+        assert "endpoint POST /create" in out
+        assert "endpoint GET /list" in out
+        assert "(без endpoint)" in out
+        assert "charge_payment" in out
+        assert "_db.create(orders) -> Order" in out
+        assert "calls: charge_payment" in out
+
+    def test_list_без_графа(self, tmp_path, capsys):
+        assert cmd_list(_args(tmp_path)) == 2
+        assert "no graph" in capsys.readouterr().out
+
+    def test_list_пустой_граф(self, tmp_path, capsys):
+        cmd_scan(_args(tmp_path))
+        capsys.readouterr()
+        assert cmd_list(_args(tmp_path)) == 0
+        assert "no scenarios" in capsys.readouterr().out
 
 
-def test_validate_ловит_нарушение_и_выходит_с_единицей(tmp_path):
-    """Роут реализует контракт моделей: validate печатает нарушение, код возврата 1."""
-    (tmp_path / "app" / "api" / "v1" / "routes").mkdir(parents=True)
-    (tmp_path / "models.py").write_text(
-        "from abc import ABC, abstractmethod\nclass Store(ABC):\n"
-        "    @abstractmethod\n    def put(self, x): ...\n", encoding="utf-8")
-    (tmp_path / "app" / "api" / "v1" / "routes" / "store.py").write_text(
-        "from fastapi import APIRouter\nrouter = APIRouter()\n\n\ndef put(x):\n    return x\n",
-        encoding="utf-8")
-    cmd_init(_args(tmp_path, force=True))
-    cmd_scan(_args(tmp_path))
-    assert cmd_validate(_args(tmp_path)) == 1
+class TestHelp:
+    def test_help_печатает_команды(self, capsys):
+        assert cmd_help(_args(".")) == 0
+        out = capsys.readouterr().out
+        for word in ("scan", "dev", "list", "help", "только просмотр"):
+            assert word in out
+
+    def test_main_help(self, capsys):
+        assert main(["help"]) == 0
+        assert "studio" in capsys.readouterr().out
 
 
-def test_save_пишет_код_и_лог_перезаписывается(tmp_path):
-    """Правка через code-буфер доходит до файла; второй запуск стирает старый лог."""
-    _demo(tmp_path)
-    cmd_init(_args(tmp_path, force=True))
-    cmd_scan(_args(tmp_path))
-    log = tmp_path / ".studio" / "studio.log"
-    assert log.exists() and "scan" in log.read_text(encoding="utf-8")
-    first = log.read_text(encoding="utf-8")
+class TestParser:
+    def test_project_до_подкоманды(self):
+        args = build_parser().parse_args(["--project", "X", "scan"])
+        assert args.project == "X" and args.cmd == "scan"
 
-    g = store.read_graph(tmp_path)
-    node = next(n for n in g.nodes if n.id == "app/scenarios/create_user.py")
-    node.code = (tmp_path / "app" / "scenarios" / "create_user.py").read_text(encoding="utf-8") + "\n# пометка\n"
-    node.status = "modified"
-    store.write_graph(tmp_path, g)
-    assert cmd_save(_args(tmp_path)) == 0
-    assert "# пометка" in (tmp_path / "app" / "scenarios" / "create_user.py").read_text(encoding="utf-8")
+    def test_project_после_подкоманды(self):
+        args = build_parser().parse_args(["scan", "--project", "Y"])
+        assert args.project == "Y" and args.cmd == "scan"
 
-    second = log.read_text(encoding="utf-8")
-    assert "save" in second and first not in second, "лог должен перезаписываться, а не расти"
-    assert "записано: modify app/scenarios/create_user.py" in second
+    def test_dev_дефолты(self):
+        args = build_parser().parse_args(["dev"])
+        assert args.host == "127.0.0.1" and args.port == 8777
 
 
-def test_save_diff_only_не_трогает_файлы(tmp_path, capsys):
-    """Флаг --diff-only: diff показан, файл без изменений."""
-    _demo(tmp_path)
-    cmd_init(_args(tmp_path, force=True))
-    cmd_scan(_args(tmp_path))
-    g = store.read_graph(tmp_path)
-    node = next(n for n in g.nodes if n.id == "app/scenarios/create_user.py")
-    node.code = "changed = True\n"
-    node.status = "modified"
-    store.write_graph(tmp_path, g)
-    assert cmd_save(_args(tmp_path, diff_only=True)) == 0
-    assert "async def execute" in (tmp_path / "app" / "scenarios" / "create_user.py").read_text(encoding="utf-8")
-    assert "modify" in capsys.readouterr().out
+class TestStore:
+    def test_roundtrip(self, demo):
+        cmd_scan(_args(demo))
+        graph = store.read_graph(demo)
+        again = store.read_graph(demo)
+        assert again.model_dump() == graph.model_dump()
 
+    def test_нет_файла(self, tmp_path):
+        assert store.read_graph(tmp_path) is None
 
-def test_удаление_studio_и_рескан_восстанавливают_граф(tmp_path):
-    """Снёс .studio, заново init+scan: те же узлы и связи."""
-    _demo(tmp_path)
-    cmd_init(_args(tmp_path, force=True))
-    cmd_scan(_args(tmp_path))
-    before = store.read_graph(tmp_path)
-    shutil.rmtree(tmp_path / ".studio")
-    cmd_init(_args(tmp_path, force=True))
-    cmd_scan(_args(tmp_path))
-    after = store.read_graph(tmp_path)
-    assert sorted(n.id for n in after.nodes) == sorted(n.id for n in before.nodes)
-    assert sorted(link.id for link in after.links) == sorted(link.id for link in before.links)
+    def test_битый_json(self, demo):
+        cmd_scan(_args(demo))
+        store.graph_path(demo).write_text("{oops", encoding="utf-8")
+        assert store.read_graph(demo) is None
+
+    def test_старая_версия(self, demo):
+        cmd_scan(_args(demo))
+        raw = json.loads(store.graph_path(demo).read_text(encoding="utf-8"))
+        raw["version"] = 1
+        store.graph_path(demo).write_text(json.dumps(raw), encoding="utf-8")
+        assert store.read_graph(demo) is None
+
+    def test_gitignore(self, demo):
+        store.ensure_layout(demo)
+        text = (demo / ".studio" / ".gitignore").read_text(encoding="utf-8")
+        assert "graph.json" in text and "studio.log" in text

@@ -1,6 +1,7 @@
-"""Pydantic-схема графа. Файл = узел, контракт = имя, связь = совпадение имён.
+"""Pydantic-схема графа студии v2.
 
-Измерения узла: домен (пакет), слой (тип файла), бизнес-домен (предметная область).
+Один запрос: HTTP → endpoint (fastbase) → scenario (core) → _db.<method> (io) → model (event-infra).
+Только модели данных, никакой логики. Версия схемы — 2.
 """
 
 from __future__ import annotations
@@ -9,60 +10,87 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from studio.config import DEFAULT_BIZ
-
-ContractKind = Literal["abstraction", "implementation"]
-NodeState = Literal["collapsed", "expanded", "code"]
-NodeStatus = Literal["tracked", "added", "modified", "deleted"]
-LinkStatus = Literal["tracked", "added", "deleted"]
+NodeKind = Literal["endpoint", "scenario", "io", "model", "helper"]
+Layer = Literal["representation", "logic", "io", ""]
+EdgeKind = Literal["dispatch", "scenario_call", "port_call", "table", "uses", "depends"]
 
 
-class Contract(BaseModel):
+class EndpointDetails(BaseModel):
+    http_method: str
+    path: str
+    function_name: str
+    router_module: str
+    tags: list[str] = Field(default_factory=list)
+
+
+class ScenarioDetails(BaseModel):
     name: str
-    kind: ContractKind = "implementation"
-    owner: str | None = None  # имя класса-владельца (None = функция уровня модуля)
-    line: int | None = None
+    class_name: str
+    module: str
+    dto: str | None = None
+    response: str | None = None
 
 
-class NodeUI(BaseModel):
-    x: float = 0.0
-    y: float = 0.0
-    state: NodeState = "collapsed"
+class IODetails(BaseModel):
+    method: str
+    table: str | None = None
+    via_attr: str = "_db"
+    called_from: str
 
 
-class NodeProperties(BaseModel):
-    name: str = ""
-    description: str = ""
-    metadata: dict = Field(default_factory=dict)
+class ModelDetails(BaseModel):
+    tablename: str
+    class_name: str
+    source_file: str
+
+
+class HelperDetails(BaseModel):
+    role: Literal["schema", "dependency", "exception", "settings", "utils", "other"]
+    module: str
 
 
 class Node(BaseModel):
-    id: str  # относительный posix-путь файла, напр. "app/scenarios/order/create.py"
-    path: str  # то же, что id (оставлено для читаемости writer'а)
-    domain: str = "shared"  # пакет: infra | core | presentation | shared
-    layer: str = "unknown"  # тип файла: models | scenarios | ...
-    business: str = DEFAULT_BIZ  # предметная область: папка после scenarios/routes/schemas, иначе общее
-    contracts: list[Contract] = Field(default_factory=list)
-    properties: NodeProperties = Field(default_factory=NodeProperties)
-    ui: NodeUI = Field(default_factory=NodeUI)
-    status: NodeStatus = "tracked"
-    code: str | None = None  # переопределение содержимого файла (code view). None = без правок.
+    id: str
+    kind: NodeKind
+    layer: Layer = ""
+    label: str
+    file_path: str
+    line: int = 1
+    details: dict = Field(default_factory=dict)
 
 
-class Link(BaseModel):
-    id: str  # f"{from}::{contract}>>{to}"
-    contract: str
-    from_node: str  # узел-реализация (зависимый)
-    to_node: str  # узел-абстракция (провайдер)
-    weak: bool = False  # True = обе стороны concrete, абстракции нет
-    violation: bool = False
-    status: LinkStatus = "tracked"
+class Edge(BaseModel):
+    id: str
+    from_node: str
+    to_node: str
+    kind: EdgeKind
+    label: str = ""
+    line: int = 1
+
+
+class ScenarioPath(BaseModel):
+    endpoint: str | None = None
+    scenario: str
+    io_calls: list[str] = Field(default_factory=list)
+    models: list[str] = Field(default_factory=list)
+    helpers: list[str] = Field(default_factory=list)
+    called_scenarios: list[str] = Field(default_factory=list)
 
 
 class Graph(BaseModel):
-    version: int = 1
+    version: int = 2
+    project_root: str = ""
     nodes: list[Node] = Field(default_factory=list)
-    links: list[Link] = Field(default_factory=list)
+    edges: list[Edge] = Field(default_factory=list)
+    endpoints: list[str] = Field(default_factory=list)
+    scenarios: list[str] = Field(default_factory=list)
+    scenario_paths: dict[str, ScenarioPath] = Field(default_factory=dict)
 
     def by_id(self) -> dict[str, Node]:
         return {n.id: n for n in self.nodes}
+
+    def edges_from(self, node_id: str) -> list[Edge]:
+        return [e for e in self.edges if e.from_node == node_id]
+
+    def edges_to(self, node_id: str) -> list[Edge]:
+        return [e for e in self.edges if e.to_node == node_id]

@@ -1,30 +1,88 @@
-# studio — код → граф → код
+# studio v2 — визуализатор пути одного запроса
 
-Офлайн dev-инструмент для проектов на трёх пакетах (инфраструктура / бизнес-логика / представление).
-Работает пока проект **не запущен**. Строит граф по коду, даёт править граф, по «Сохранить» пишет изменения обратно в код.
+Read-only инструмент для проектов на `fastbase` / `core-package` / `event-infra`.
+Сканирует код (AST, без запуска) и показывает путь одного HTTP-запроса:
 
-Цикл: `открыл studio → scan (код → граф) → edit (граф) → save (граф → код) → закрыл`.
+```
+HTTP → endpoint (fastbase) → scenario (core) → _db.<method> (io) → model (event-infra)
+```
 
-## Установка (для разработки)
+Студия **ничего не пишет** в проект — кроме служебных `.studio/graph.json`
+(граф сканирования) и `.studio/studio.log` (лог запуска). Никакого UI-редактирования,
+никаких POST/PUT/DELETE на сервере — только GET.
+
+## Установка
 
 ```bash
-pip install -e .
+pip install -e .            # голая студия: только pydantic
+pip install -e ".[full]"    # + fastbase / core / event-infra из гита
+pip install -e ".[dev]"     # + pytest для разработки самой студии
 ```
 
 ## Команды
 
 ```bash
-studio init [--project .] [--force]   # создать .studio/ с заготовкой config.toml
-studio scan [--project .]             # собрать граф по коду → .studio/graph.json
-studio dev [--project .]              # поднять UI (http://127.0.0.1:8777)
-studio save [--project .] [--show-diff] [--diff-only] [-y]  # граф → код
-studio validate [--project .]         # проверить чистую архитектуру
+studio scan  [--project .]                          # код → .studio/graph.json
+studio dev   [--project .] [--host 127.0.0.1] [--port 8777]
+studio list  [--project .]                          # сценарии в терминале
+studio help
 ```
 
-## Правила
+`dev` сам сканирует проект, если графа нет или его версия ≠ 2.
+Проект запускать не нужно — студия работает с текстом кода.
 
-- Узел = файл. Домен = пакет (`infra` / `core` / `presentation`, остальное → `shared`) — у каждого свой цвет. Слой = тип файла. Бизнес-домен = папка после `scenarios/` `routes/` `schemas/` (иначе «общее»).
-- Сканируется только пользовательский код: `alembic/*`, `run_infrastructure.py`, `app/main.py`, `app/core/*` пропускаются.
-- Связь = совпадение имён контрактов (абстрактный класс/метод ↔ реализация).
-- Канвас: «Вся система» (колонки пакетов), «Бизнес-домены» (сквозные срезы), «Нарушения». Узлы не накладываются друг на друга.
-- Связи с `unknown` не судятся. Импорты игнорируются, рантайма нет.
+## Как сканируется проект
+
+1. **Окружение** — `.env.fastbase` в корне (опционально):
+   `FAT_ROUTES_PACKAGE`, `FAT_CORE_DISCOVER`, `FAT_API_PREFIX`.
+   Модели — строго `models.py` в корне. Без файла работают дефолты.
+2. **Индексация** — endpoint'ы (`@router.<method>("<path>")` в пакете роутов),
+   сценарии (`@register_scenario("<name>")` в пакете сценариев),
+   модели (SQLModel с `__tablename__`).
+3. **Связи** — `run("<name>")` в endpoint'е → `dispatch`; `run()` внутри
+   `execute` → `scenario_call`; `self._db.<method>()` → `io`-узел; таблица
+   из аргумента или SQL → `table` к модели.
+4. **Helpers** — локальные модули, реально используемые ядерными узлами
+   (owner-scope: у endpoint'а — его функция, у сценария — тело `execute`),
+   не глубже 2 уровней. Внешние пакеты, stdlib, `tests/`, `alembic/`, `docs/`
+   в граф не попадают. Роль helper'а: `dependency` (Depends), `schema`,
+   `exception`, `settings`, `utils`, `other`.
+
+Форматы id — `endpoint:<file>:<func>`, `scenario:<file>:<class>`,
+`io:<scenario_id>:<method>:<table|_>:<line>`, `model:<file>:<class>`,
+`helper:<dotted>`. Ребро — `"<from>::<kind>::<to>"`.
+
+## Интерфейс
+
+Два режима (кнопки в шапке):
+
+- **Сценарий** — путь одного запроса: колонки `representation → logic → io → model`,
+  полка helpers под representation/logic, вложенный сценарий — полупрозрачный узел
+  в нижней части logic-колонки (клик — перейти в его путь).
+- **Обзор** — сетка всех сценариев + правая колонка shared-моделей с бледными
+  линиями от сценариев, которые их трогают.
+
+Клик по сценарию в левой панели или по узлу в обзоре открывает его путь;
+инспектор справа показывает свойства узла, кнопка `code view` — исходник файла.
+Глубокая ссылка: `#s=<scenario_id>` и `#overview`.
+Навигация: тяни фон — панорама, колесо — зум, `+`/`−`/`вписать`/`1:1` — масштаб,
+`Esc` — снять выделение.
+
+## Разработка студии
+
+```bash
+pytest tests/          # 92 теста: env, indexer, resolver, helpers, paths, CLI, server
+```
+
+Структура пакета:
+
+```
+studio/
+  metamodel/   pydantic-схемы Node/Edge/Graph/ScenarioPath (версия 2)
+  env/         .env.fastbase, пути к слоям
+  scanner/     ast_utils → indexer → resolver → helpers → scenario_paths
+  store/       .studio/graph.json (только версия 2) и .studio/.gitignore
+  server/      stdlib http.server, только GET
+  cli/         scan / dev / list / help
+  ui/          index.html (vanilla JS, без CDN)
+```

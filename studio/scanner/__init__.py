@@ -1,323 +1,179 @@
-"""AST-сканер: код → узлы, контракты, связи. Только чтение, код не трогает.
+"""AST-сканер студии v2: код → граф пути одного запроса.
 
-Адресация под стек event-infra / core-package / fastbase:
-- домены = три пакета (infra / core / presentation), остальное → default_domain;
-- слой: маркеры содержимого, затем пути из конфига, иначе "unknown";
-- сканируется только пользовательский код (каркас пакетов пропускается).
+    HTTP → endpoint (fastbase) → scenario (core) → _db.<method> (io) → model (event-infra)
+
+Три прохода: индексация (indexer) → связи (resolver) → helpers → scenario_paths.
+Только чтение: ни один файл проекта не изменяется.
 """
 
 from __future__ import annotations
 
-import ast
-import hashlib
 from pathlib import Path
 
-from studio.config import DEFAULT_BIZ, UNKNOWN_LAYER, matches
-from studio.metamodel import Contract, Graph, Link, Node, NodeProperties, NodeUI
+from studio.env import ProjectEnv, read_env
+from studio.metamodel import (
+    EndpointDetails,
+    Graph,
+    ModelDetails,
+    Node,
+    ScenarioDetails,
+    ScenarioPath,
+)
+from studio.scanner.ast_utils import EXCLUDED_DIRS  # noqa: F401  (реэкспорт §5.5)
+from studio.scanner.helpers import attach_helpers
+from studio.scanner.indexer import Index, build_index, scenario_node_id
+from studio.scanner.resolver import (
+    resolve_dispatch,
+    resolve_io_and_tables,
+    resolve_scenario_calls,
+)
+
+__all__ = [
+    "EXCLUDED_DIRS",
+    "Index",
+    "attach_helpers",
+    "build_core_graph",
+    "build_index",
+    "build_scenario_paths",
+    "scan",
+]
 
 
-def _is_abstract_class(node: ast.ClassDef) -> bool:
-    for base in node.bases:
-        if isinstance(base, ast.Name) and base.id in ("ABC", "ABCMeta"):
-            return True
-        if isinstance(base, ast.Attribute) and base.attr in ("ABC", "ABCMeta"):
-            return True
-    for item in node.body:
-        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            for dec in item.decorator_list:
-                if _expr_name(dec) == "abstractmethod":
-                    return True
-    return False
+def build_core_graph(env: ProjectEnv, index: Index) -> Graph:
+    """Узлы endpoint/scenario/model + рёбра dispatch, scenario_call, port_call, table."""
+    graph = Graph(project_root=env.project_root.as_posix())
+
+    for entry in index.endpoints:
+        graph.nodes.append(
+            Node(
+                id=entry.id,
+                kind="endpoint",
+                layer="representation",
+                label=f"{entry.http_method.upper()} {entry.path or '/'}",
+                file_path=entry.file_path,
+                line=entry.line,
+                details=EndpointDetails(
+                    http_method=entry.http_method,
+                    path=entry.path,
+                    function_name=entry.function_name,
+                    router_module=entry.router_module,
+                    tags=list(entry.tags),
+                ).model_dump(),
+            )
+        )
+
+    for entry in index.scenarios.values():
+        node_id = scenario_node_id(entry)
+        graph.nodes.append(
+            Node(
+                id=node_id,
+                kind="scenario",
+                layer="logic",
+                label=entry.name,
+                file_path=entry.file_path,
+                line=entry.line,
+                details=ScenarioDetails(
+                    name=entry.name,
+                    class_name=entry.class_name,
+                    module=entry.module,
+                    dto=entry.dto,
+                    response=entry.response,
+                ).model_dump(),
+            )
+        )
+
+    for entry in index.models.values():
+        graph.nodes.append(
+            Node(
+                id=f"model:{entry.file_path}:{entry.class_name}",
+                kind="model",
+                layer="io",
+                label=entry.class_name,
+                file_path=entry.file_path,
+                line=entry.line,
+                details=ModelDetails(
+                    tablename=entry.tablename,
+                    class_name=entry.class_name,
+                    source_file=entry.file_path,
+                ).model_dump(),
+            )
+        )
+
+    resolve_dispatch(graph, index, env)
+    resolve_scenario_calls(graph, index, env)
+    resolve_io_and_tables(graph, index, env)
+
+    graph.endpoints = sorted(n.id for n in graph.nodes if n.kind == "endpoint")
+    graph.scenarios = sorted(n.id for n in graph.nodes if n.kind == "scenario")
+    return graph
 
 
-def _expr_name(e: ast.expr | None) -> str:
-    """Имя из выражения: Name.id / Attribute.attr / Call.func (для декораторов и баз)."""
-    if isinstance(e, ast.Name):
-        return e.id
-    if isinstance(e, ast.Attribute):
-        return e.attr
-    if isinstance(e, ast.Call):
-        return _expr_name(e.func)
-    return ""
+def build_scenario_paths(graph: Graph) -> None:
+    """scenario_paths[id]: endpoint, io по line, модели, helpers и вложенные сценарии."""
+    nodes = graph.by_id()
+    paths: dict[str, ScenarioPath] = {}
 
-
-def _has_base(node: ast.ClassDef, base: str) -> bool:
-    return any(_expr_name(b) == base for b in node.bases)
-
-
-def _tablename(node: ast.ClassDef) -> str | None:
-    """Значение __tablename__ = "..." в теле класса, если есть."""
-    for item in node.body:
-        targets = []
-        value = None
-        if isinstance(item, ast.Assign):
-            targets, value = item.targets, item.value
-        elif isinstance(item, ast.AnnAssign):
-            targets, value = [item.target], item.value
-        else:
+    for scenario_id in graph.scenarios:
+        if scenario_id not in nodes:
             continue
-        if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            if any(isinstance(t, ast.Name) and t.id == "__tablename__" for t in targets):
-                return value.value
-    return None
+        io_nodes = sorted(
+            (
+                n
+                for n in graph.nodes
+                if n.kind == "io" and n.details.get("called_from") == scenario_id
+            ),
+            key=lambda n: n.line,
+        )
 
+        models: list[str] = []
+        for io_node in io_nodes:
+            for edge in graph.edges:
+                if edge.kind == "table" and edge.from_node == io_node.id:
+                    if edge.to_node not in models:
+                        models.append(edge.to_node)
 
-def _module_signals(tree: ast.Module) -> tuple[set[str], set[str], set[str]]:
-    """Один проход по AST: (декораторы, базовые классы, атрибуты модуля)."""
-    decorators, bases, attrs = set(), set(), set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-            for dec in getattr(node, "decorator_list", []):
-                name = _expr_name(dec)
-                if name:
-                    decorators.add(name)
-        if isinstance(node, ast.ClassDef):
-            for b in node.bases:
-                name = _expr_name(b)
-                if name:
-                    bases.add(name)
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            targets = node.targets
-        elif isinstance(node, ast.AnnAssign):
-            targets = [node.target]
-        else:
-            continue
-        for t in targets:
-            if isinstance(t, ast.Name):
-                attrs.add(t.id)
-    return decorators, bases, attrs
+        endpoint = next(
+            (
+                edge.from_node
+                for edge in graph.edges
+                if edge.kind == "dispatch" and edge.to_node == scenario_id
+            ),
+            None,
+        )
 
-
-def _layer_by_markers(tree: ast.Module, layers: list[dict], markers: dict) -> str | None:
-    """Слой по содержимому файла. Первый совпавший (по order) выигрывает."""
-    if not markers:
-        return None
-    decorators, bases, attrs = _module_signals(tree)
-    for layer in sorted(layers, key=lambda l: l.get("order", 0)):
-        kinds = markers.get(layer["name"], {})
-        if not isinstance(kinds, dict):
-            continue
-        if kinds.get("decorator") and kinds["decorator"] in decorators:
-            return layer["name"]
-        if kinds.get("base_class") and kinds["base_class"] in bases:
-            return layer["name"]
-        if kinds.get("module_attr") and kinds["module_attr"] in attrs:
-            return layer["name"]
-    return None
-
-
-def _layer_by_path(posix: str, layers: list[dict]) -> str | None:
-    """Слой по путям из конфига. Точное совпадение или префикс с '/'; побеждает длиннейший."""
-    best, best_len = None, -1
-    for layer in layers:
-        paths = layer.get("paths", [layer.get("path", layer.get("name", ""))])
-        for p in paths:
-            if not p:
+        # Helpers: своё поддерево сценария + helpers endpoint'а этого пути.
+        sources = [scenario_id] + ([endpoint] if endpoint else [])
+        helpers: list[str] = []
+        called: list[str] = []
+        for edge in graph.edges:
+            if edge.from_node not in sources:
                 continue
-            if posix == p or posix.startswith(p + "/"):
-                if len(p) > best_len:
-                    best, best_len = layer["name"], len(p)
-    return best
+            if edge.kind in ("uses", "depends") and edge.to_node not in helpers:
+                helpers.append(edge.to_node)
+            if edge.kind == "scenario_call" and edge.to_node not in called:
+                called.append(edge.to_node)
+
+        paths[scenario_id] = ScenarioPath(
+            endpoint=endpoint,
+            scenario=scenario_id,
+            io_calls=[n.id for n in io_nodes],
+            models=models,
+            helpers=helpers,
+            called_scenarios=called,
+        )
+
+    graph.scenario_paths = paths
 
 
-def parse_contracts(source: str, layer: str, naming: dict) -> list[Contract]:
-    """Находит контракты: абстрактные классы/методы + реализации. Фильтр — паттерны слоя.
-
-    Дополнительно (стек): execute у наследников BaseScenario, публичные функции
-    модуля в representation и классы SQLModel в infrastructure — всегда контракты.
-    """
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return []
-    rules = naming.get(layer, {}) if isinstance(naming, dict) else {}
-    abs_pat = rules.get("abstraction", "") if isinstance(rules, dict) else ""
-    impl_pat = rules.get("implementation", "") if isinstance(rules, dict) else ""
-    out: list[Contract] = []
-    for node in tree.body:
-        if isinstance(node, ast.ClassDef):
-            abstract_cls = _is_abstract_class(node)
-            if layer == "models" and _has_base(node, "SQLModel"):
-                # SQLModel-модель: реализация, имя таблицы — в owner
-                out.append(Contract(name=node.name, kind="implementation", owner=_tablename(node), line=node.lineno))
-                continue
-            # Вид класса: структурно (ABC) либо по паттерну абстракции.
-            # Пустой/отсутствующий паттерн видом не управляет (иначе все классы слоя станут абстракциями).
-            kind = "abstraction" if (abstract_cls or (abs_pat and matches(abs_pat, node.name))) else "implementation"
-            pat = abs_pat if kind == "abstraction" else impl_pat
-            if matches(pat, node.name):
-                out.append(Contract(name=node.name, kind=kind, owner=None, line=node.lineno))
-            scenario_cls = layer == "scenarios" and _has_base(node, "BaseScenario")
-            for item in node.body:
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    if item.name.startswith("_"):
-                        continue
-                    is_abs = any(_expr_name(d) == "abstractmethod" for d in item.decorator_list)
-                    # Метод: абстрактность — структурная (декоратор / ABC-класс),
-                    # паттерны именуют классы, поэтому AST-абстракцию держим всегда.
-                    if is_abs or abstract_cls:
-                        out.append(Contract(name=item.name, kind="abstraction", owner=node.name, line=item.lineno))
-                    elif scenario_cls and item.name == "execute":
-                        # execute сценария — реализация по определению слоя
-                        out.append(Contract(name=item.name, kind="implementation", owner=node.name, line=item.lineno))
-                    elif matches(impl_pat, item.name):
-                        out.append(Contract(name=item.name, kind="implementation", owner=node.name, line=item.lineno))
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.name.startswith("_"):
-                continue
-            # публичные функции routes — реализации по определению слоя
-            if layer == "routes" or matches(impl_pat, node.name):
-                out.append(Contract(name=node.name, kind="implementation", owner=None, line=node.lineno))
-    # дедупликация по (name, kind, owner)
-    seen, uniq = set(), []
-    for c in out:
-        key = (c.name, c.kind, c.owner)
-        if key not in seen:
-            seen.add(key)
-            uniq.append(c)
-    return uniq
-
-
-def _domain_by_path(posix: str, parts: tuple, domains: list[dict]) -> str | None:
-    """Домен по путям: точное совпадение, префикс с '/' или сегмент пути."""
-    for d in domains:
-        if not isinstance(d, dict) or not d.get("name"):
-            continue
-        paths = d.get("paths", [d.get("path", "")] if d.get("path") else [])
-        for p in [str(x) for x in paths if x]:
-            if posix == p or posix.startswith(p + "/") or p in parts:
-                return d["name"]
-    return None
-
-
-def infer_domain_layer(rel: Path, cfg: dict, source: str | None = None) -> tuple[str, str]:
-    """Адрес узла (домен, слой).
-
-    Домен: первый совпавший путь из domains, иначе default_domain.
-    Слой: маркеры содержимого (нужен source) → пути из конфига (длиннейший матч) → "unknown".
-    """
-    st = cfg.get("studio", cfg) if isinstance(cfg, dict) else {}
-    domains = st.get("domains", []) if isinstance(st, dict) else []
-    layers = st.get("layers", []) if isinstance(st, dict) else []
-    markers = st.get("markers", {}) if isinstance(st, dict) else {}
-    default_domain = (st.get("default_domain") or "shared") if isinstance(st, dict) else "shared"
-    posix = rel.as_posix()
-    domain = _domain_by_path(posix, rel.parts, domains) or default_domain
-    layer = None
-    if source is not None:
-        try:
-            tree = ast.parse(source)
-        except SyntaxError:
-            tree = None
-        if tree is not None:
-            layer = _layer_by_markers(tree, layers, markers if isinstance(markers, dict) else {})
-    if layer is None:
-        layer = _layer_by_path(posix, layers)
-    return domain, layer or UNKNOWN_LAYER
-
-
-# Каркас пакетов: не код клиента, в граф не попадает.
-SKIP_DIRS = ("alembic", "app/core")
-SKIP_FILES = ("run_infrastructure.py", "app/main.py")
-
-
-def infer_business(rel: Path, layer: str, layers: list[dict], business: list[dict], default_biz: str) -> str:
-    """Бизнес-домен узла.
-
-    Сначала явные переопределения [[studio.business]] (сегмент/префикс/файл),
-    затем папка сразу после директории слоя (app/scenarios/order/x.py -> order),
-    иначе default_biz ("общее").
-    """
-    posix = rel.as_posix()
-    for b in business:
-        if not isinstance(b, dict) or not b.get("name"):
-            continue
-        for p in [str(x) for x in b.get("paths", []) if x]:
-            if posix == p or posix.startswith(p + "/") or p in rel.parts:
-                return b["name"]
-    anchors = set()
-    for lyr in layers:
-        if isinstance(lyr, dict) and lyr.get("name") == layer:
-            anchors.update(str(p) for p in lyr.get("paths", []) if p and not str(p).endswith(".py"))
-    parts = rel.parts
-    for i, seg in enumerate(parts):
-        if seg in anchors and i + 1 < len(parts) - 1:
-            return parts[i + 1]
-    return default_biz or DEFAULT_BIZ
-
-
-def iter_project_files(root: Path) -> list[Path]:
-    files = []
-    for p in root.rglob("*.py"):
-        parts = p.parts
-        if ".studio" in parts or "__pycache__" in parts or ".venv" in parts or "venv" in parts or ".git" in parts:
-            continue
-        rel = p.relative_to(root).as_posix()
-        if any(rel == d or rel.startswith(d + "/") for d in SKIP_DIRS):
-            continue
-        if rel in SKIP_FILES:
-            continue
-        files.append(p)
-    return sorted(files)
-
-
-def build_graph(project_root: Path, cfg: dict, old: Graph | None = None) -> tuple[Graph, dict[str, str]]:
-    """Строит граф по коду. Возвращает (graph, hashes). UI-координаты переносятся из старого графа."""
-    st = cfg.get("studio", cfg)
-    naming = st.get("naming", {})
-    layers = st.get("layers", [])
-    business_rules = st.get("business", [])
-    default_biz = st.get("default_biz", DEFAULT_BIZ) if isinstance(st, dict) else DEFAULT_BIZ
-    domains_order = [d["name"] for d in st.get("domains", [])] if isinstance(st, dict) else []
-    old_pos = {n.id: n.ui for n in (old.nodes if old else [])}
-    old_props = {n.id: n.properties for n in (old.nodes if old else []) if n.status != "deleted"}
-    col_count: dict[str, int] = {}
-    nodes: list[Node] = []
-    hashes: dict[str, str] = {}
-    for f in iter_project_files(project_root):
-        rel = f.relative_to(project_root).as_posix()
-        try:
-            src = f.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        hashes[rel] = hashlib.sha256(src.encode("utf-8")).hexdigest()
-        domain, layer = infer_domain_layer(f.relative_to(project_root), cfg, source=src)
-        biz = infer_business(f.relative_to(project_root), layer, layers, business_rules, default_biz)
-        contracts = parse_contracts(src, layer, naming)
-        # Новые узлы сразу встают в колонку своего домена: эксклюзивность видна с первого скана.
-        di = domains_order.index(domain) if domain in domains_order else len(domains_order)
-        n_in_col = col_count.get(domain, 0)
-        col_count[domain] = n_in_col + 1
-        ui = old_pos.get(rel, NodeUI(x=float(di) * 300.0, y=56.0 + float(n_in_col) * 240.0))
-        # Имя/описание из инспектора живут только в графе — переживают рескан.
-        props = old_props.get(rel, NodeProperties(name=Path(rel).stem))
-        nodes.append(Node(id=rel, path=rel, domain=domain, layer=layer, business=biz,
-                          contracts=contracts, properties=props, ui=ui))
-    # Связи: совпадение имён контрактов между узлами. Реализация → абстракция.
-    providers: dict[str, list[str]] = {}  # contract -> [node ids with abstraction]
-    implementors: dict[str, list[str]] = {}
-    concretes: dict[str, list[str]] = {}
-    for n in nodes:
-        for c in n.contracts:
-            if c.kind == "abstraction":
-                providers.setdefault(c.name, []).append(n.id)
-            else:
-                implementors.setdefault(c.name, []).append(n.id)
-                concretes.setdefault(c.name, []).append(n.id)
-    links: list[Link] = []
-    for name, impls in implementors.items():
-        provs = providers.get(name, [])
-        if provs:
-            for i in impls:
-                for p in provs:
-                    if i == p:
-                        continue
-                    links.append(Link(id=f"{i}::{name}>>{p}", contract=name, from_node=i, to_node=p))
-        elif len(concretes.get(name, [])) > 1:
-            # weak-связь: имя совпало, абстракции нет (цепочка по порядку файлов)
-            ids = sorted(concretes[name])
-            for a, b in zip(ids, ids[1:]):
-                links.append(Link(id=f"{a}::{name}>>{b}", contract=name, from_node=a, to_node=b, weak=True))
-    links.sort(key=lambda link: link.id)
-    return Graph(nodes=sorted(nodes, key=lambda n: n.id), links=links), hashes
+def scan(project_root: Path) -> Graph:
+    """Полный проход по проекту: env → индекс → связи → helpers → пути."""
+    env = read_env(project_root)
+    index = build_index(env)
+    graph = build_core_graph(env, index)
+    attach_helpers(graph, env, index)
+    build_scenario_paths(graph)
+    graph.nodes.sort(key=lambda n: n.id)
+    graph.edges.sort(key=lambda e: e.id)
+    graph.endpoints = sorted(n.id for n in graph.nodes if n.kind == "endpoint")
+    graph.scenarios = sorted(n.id for n in graph.nodes if n.kind == "scenario")
+    return graph

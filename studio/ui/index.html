@@ -3,213 +3,467 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>studio — код → граф → код</title>
+<title>studio — путь сценария</title>
 <style>
-:root{--bg:#232428;--panel:#2e2f33;--panel2:#38393e;--hdr:#1b1c1f;--line:#45464c;--txt:#d7d7db;--dim:#9a9aa2;--acc:#e8833a;--blue:#5aa0ff;--red:#ff5d5d;--green:#7fc97f}
+:root{--bg:#232428;--panel:#2e2f33;--panel2:#38393e;--hdr:#1b1c1f;--line:#45464c;--txt:#d7d7db;--dim:#9a9aa2;--acc:#e8833a;--blue:#5aa0ff;--red:#ff5d5d;--green:#7fc97f;--purple:#bb9af7}
 *{box-sizing:border-box}html,body{height:100%}body{margin:0;background:var(--bg);color:var(--txt);font:13px/1.45 "Segoe UI",Roboto,Arial,sans-serif;display:flex;flex-direction:column;overflow:hidden}
-header{background:var(--hdr);display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #000}
+header{background:var(--hdr);display:flex;align-items:center;gap:10px;padding:6px 10px;border-bottom:1px solid #000}
 header .logo{font-weight:700;color:var(--acc);letter-spacing:.5px}
-.fmenu{position:relative;display:inline-block}#fileDrop button{border:none}
-button,select,input,textarea{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:12px}
-button{cursor:pointer}button:hover{border-color:var(--acc)}button.primary{background:var(--acc);border-color:var(--acc);color:#141310;font-weight:700}
-button.danger{border-color:var(--red);color:var(--red)}
-main{flex:1;display:grid;grid-template-columns:250px 1fr 290px;min-height:0}
+.seg{display:inline-flex;gap:4px;align-items:center}
+button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer}
+button:hover{border-color:var(--acc)}
+button.on{background:var(--acc);border-color:var(--acc);color:#141310;font-weight:700}
+#zoomLabel{min-width:46px;text-align:center;font-size:11px;color:var(--dim)}
+#stats{color:var(--dim);font-size:11px}
+main{flex:1;display:grid;grid-template-columns:250px 1fr 300px;min-height:0}
 #left{background:var(--panel);border-right:1px solid #000;display:flex;flex-direction:column;min-height:0}
-#left h3{margin:8px 10px 4px;font-size:11px;text-transform:uppercase;color:var(--dim);letter-spacing:.6px}
-#palette{padding:0 10px 8px;overflow:auto}
-.pal{border:1px dashed var(--line);border-radius:8px;padding:6px 8px;margin:6px 0;cursor:grab;font-size:12px}
-.pal small{color:var(--dim)}
-#outliner{flex:1;overflow:auto;border-top:1px solid #000;padding:4px 6px}
-#outliner details{margin:2px 0}#outliner summary{cursor:pointer;color:var(--dim)}
-.onode{padding:2px 6px;border-radius:5px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.onode:hover{background:var(--panel2)}.onode.sel{background:#4a3a28;outline:1px solid var(--acc)}
-#center{display:flex;flex-direction:column;min-width:0}
-#toolbar{display:flex;gap:6px;align-items:center;padding:6px 10px;background:var(--panel);border-bottom:1px solid #000;flex-wrap:wrap}
-#toolbar .modes button.on{background:var(--acc);color:#141310;border-color:var(--acc);font-weight:700}
-#canvas{flex:1;position:relative;overflow:hidden;cursor:grab;background:#232428;min-height:0}
+#left h3,#right h3{margin:8px 10px 4px;font-size:11px;text-transform:uppercase;color:var(--dim);letter-spacing:.6px}
+#slist{flex:1;overflow:auto;border-top:1px solid #000;padding:4px 6px}
+#slist details{margin:3px 0}
+#slist summary{cursor:pointer;color:var(--dim);font-size:11px;padding:2px 4px}
+.sitem{padding:3px 8px;border-radius:5px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+.sitem:hover{background:var(--panel2)}
+.sitem.sel{background:#4a3a28;outline:1px solid var(--acc)}
+.sitem small{color:var(--dim)}
+#center{position:relative;display:flex;flex-direction:column;min-width:0}
+#canvas{flex:1;position:relative;overflow:hidden;cursor:grab;min-height:0;background:#232428}
+#canvas.grabbing{cursor:grabbing}
 #view{transform-origin:0 0;position:absolute;left:0;top:0}
-#stage{position:relative;min-width:100%;min-height:100%;background:radial-gradient(circle at 1px 1px,#34353b 1px,transparent 1px);background-size:22px 22px}
-#edges{position:absolute;inset:0;pointer-events:none}
-.node{position:absolute;width:230px;background:#313236;border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 14px #0008;user-select:none}
+#stage{position:relative;background:radial-gradient(circle at 1px 1px,#34353b 1px,transparent 1px);background-size:22px 22px}
+#edges{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.elab{font-size:10px;fill:#d7d7db;paint-order:stroke;stroke:#232428;stroke-width:3px;stroke-linejoin:round}
+.node{position:absolute;width:230px;background:#313236;border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 14px #0008;user-select:none;cursor:pointer}
+.node:hover{border-color:var(--acc)}
 .node.sel{outline:2px solid var(--acc)}
-.node.viol{border-color:var(--red);box-shadow:0 0 0 2px #ff5d5d55}
-.node .hd{padding:6px 8px;border-radius:10px 10px 0 0;font-weight:700;display:flex;justify-content:space-between;gap:6px;align-items:center;cursor:move}
-.colhead{position:absolute;font-weight:700;font-size:13px;padding:2px 12px;border-radius:6px;background:#1e1f22;border:1px solid var(--line);white-space:nowrap}
-.node.dim{opacity:.18}
-.node .chips{display:flex;gap:4px;padding:4px 8px;font-size:11px;color:var(--dim)}
-.chip{border:1px solid var(--line);border-radius:20px;padding:0 8px}
-.node .bd{padding:4px 8px 8px;max-height:300px;overflow:auto}
-.crow{display:flex;align-items:center;gap:6px;padding:2px 0;font-size:12px}
-.dot{width:10px;height:10px;border-radius:50%;background:var(--blue);border:1px solid #000;cursor:crosshair;flex:none}
-.dot.abs{background:var(--acc)}.dot:hover{transform:scale(1.4)}
-.crow .nm{flex:1;overflow:hidden;text-overflow:ellipsis}
-.node textarea{width:100%;height:180px;font:11px Consolas,monospace;background:#1e1f22;color:#d7d7db;border:1px solid var(--line);border-radius:6px}
-.nbtns{display:flex;gap:4px;padding:0 8px 8px}
-.nbtns button{font-size:11px;padding:2px 6px}
+.node .hd{padding:6px 8px;font-weight:700;color:var(--c,#888);border-bottom:2px solid var(--c,#888);background:rgba(255,255,255,.03);border-radius:10px 10px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node .mt{padding:5px 8px 7px;font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node.nested{opacity:.55;filter:saturate(.6)}
+.node.ghost{opacity:.5;border-style:dashed;cursor:default}
+.node.ghost:hover{border-color:var(--line)}
+.colhead{position:absolute;font-weight:700;font-size:12px;padding:2px 12px;border-radius:6px;background:#1e1f22;border:1px solid var(--line);white-space:nowrap;color:var(--txt)}
+.colhead i{font-style:normal;color:var(--dim);font-weight:400}
+.badge{position:absolute;background:#2a2b30;border:1px dashed #55565e;border-radius:16px;padding:4px 12px;font-size:11px;color:var(--dim);white-space:nowrap}
+.empty{position:absolute;left:40px;top:70px;color:var(--dim);font-size:13px}
+#hint{position:absolute;left:8px;bottom:6px;font-size:11px;color:#6c6d75;pointer-events:none}
 #right{background:var(--panel);border-left:1px solid #000;overflow:auto;padding:10px;min-height:0}
-#right h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;color:var(--dim)}
-#right label{display:block;font-size:11px;color:var(--dim);margin:8px 0 2px}
-#right input,#right select,#right textarea{width:100%}
+.kv{display:flex;gap:8px;align-items:baseline;margin:5px 0;font-size:12px}
+.kv span{color:var(--dim);min-width:76px;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+.kv b{font-weight:600;word-break:break-all}
+.dim{color:var(--dim)}
+#insp button{margin-top:8px}
+.codewrap{margin-top:10px;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.codehd{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:5px 8px;background:var(--panel2);font-size:11px;color:var(--dim)}
+.codehd button{padding:1px 7px;font-size:11px}
+#codePre{margin:0;padding:8px;background:#1e1f22;color:#d7d7db;font:11px/15px Consolas,monospace;max-height:420px;overflow:auto;white-space:pre}
 #toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#111;border:1px solid var(--acc);color:var(--txt);padding:8px 14px;border-radius:8px;display:none;z-index:99}
-.modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:50}
-.modal .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;max-width:760px;width:92%;max-height:86%;overflow:auto;padding:14px}
-.modal pre{background:#1e1f22;padding:10px;border-radius:8px;overflow:auto;font-size:11px}
-table.grid{border-collapse:collapse;width:100%;font-size:12px}
-table.grid td,table.grid th{border:1px solid var(--line);padding:3px 6px;text-align:center}
-.kv{display:flex;gap:6px;margin:4px 0}.kv input{flex:1}
-footer{background:var(--hdr);border-top:1px solid #000;padding:3px 10px;font-size:11px;color:var(--dim);display:flex;gap:14px}
 </style>
 </head>
 <body>
 <header>
 <span class="logo">⬢ studio</span>
-<span class="fmenu"><button id="bFile">File ▾</button><span id="fileDrop" style="display:none;position:absolute;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px;z-index:60">
-<button id="fExport" style="display:block;width:100%;text-align:left">Экспорт graph.json</button>
-<button id="fReset" style="display:block;width:100%;text-align:left">Сбросить буфер (scan)</button>
-<button id="fAbout" style="display:block;width:100%;text-align:left">О studio</button>
-</span></span>
-<button id="bScan" title="scan: код → граф">Scan</button>
-<button id="bSave" class="primary" title="save: граф → код">Save</button>
-<button id="bValidate" title="проверить архитектуру">Validate</button>
-<button id="bDiff" title="показать изменения без записи">Показать изменения</button>
+<span class="seg" id="modes">
+<button data-m="scenario">Сценарий</button>
+<button data-m="overview">Обзор</button>
+</span>
+<span class="seg">
+<button id="zOut" title="отдалить">−</button>
+<span id="zoomLabel">100%</span>
+<button id="zIn" title="приблизить">+</button>
+<button id="zFit" title="вписать">вписать</button>
+<button id="zReset" title="масштаб 100%">1:1</button>
+</span>
 <span style="flex:1"></span>
-<span style="color:var(--dim);font-size:11px" id="stats">—</span>
-<button id="bConfig">⚙ Конфигурация</button>
+<span id="stats">—</span>
 </header>
 <main>
 <div id="left">
-<h3 id="palTitle">Палитра</h3>
-<div id="palette"></div>
-<h3>Аутлайнер</h3>
-<div id="outliner"></div>
+<h3>Сценарии</h3>
+<div id="slist"></div>
 </div>
 <div id="center">
-<div id="toolbar">
-<span style="color:var(--dim);font-size:11px">ВИД:</span>
-<span class="modes">
-<button data-m="global" class="on">Вся система</button>
-<button data-m="biz">Бизнес-домены</button>
-<button data-m="viol">Только нарушения</button>
-</span>
-<span class="modes"><button id="zOut" title="отдалить">−</button><span id="zoomLabel" style="min-width:44px;text-align:center;font-size:11px;color:var(--dim)">100%</span><button id="zIn" title="приблизить">+</button><button id="zFit" title="вписать граф">вписать</button><button id="zReset" title="масштаб 100%">1:1</button></span>
-<span style="flex:1"></span>
-<span style="font-size:11px;color:var(--dim)">фон — панорама · колесо — зум · клик — цепочка · Esc — отмена</span>
+<div id="canvas"><div id="view"><div id="stage"><svg id="edges"></svg></div></div>
+<div id="hint">фон — панорама · колесо — зум · клик — узел · Esc — снять выделение</div>
 </div>
-<div id="canvas"><div id="view"><div id="stage"><svg id="edges"></svg></div></div></div>
 </div>
-<div id="right"><h3>Инспектор</h3><div id="insp"><p style="color:var(--dim)">Выбери узел или связь.</p></div></div>
+<div id="right"><h3>Инспектор</h3><div id="insp"></div></div>
 </main>
-<footer><span id="fViol">нарушений: —</span><span id="fInfo">scan → edit → save · офлайн · проект не запущен</span></footer>
 <div id="toast"></div>
-<div class="modal" id="mDiff"><div class="box"><h3>Изменения (без записи)</h3><pre id="diffPre">…</pre><button id="mDiffClose">Закрыть</button></div></div>
-<div class="modal" id="mConfig"><div class="box"><h3>Меню конфигурации → config.toml</h3>
-<div id="cfgBody"></div>
-<div style="display:flex;gap:8px;margin-top:10px"><button id="cfgSave" class="primary">Сохранить в config.toml</button><button id="cfgClose">Закрыть</button></div>
-</div></div>
 <script>
-const DOMAIN_COLORS={infra:"#bb9af7",core:"#7aa2f8",presentation:"#e0af68",shared:"#9a9aa2"};
-const DOM_ORDER=["infra","core","presentation","shared"];
-const HEAD_H=56,CELL_X=300,CELL_Y=240;
-let G={nodes:[],links:[]},CFG=null,VIOL=[],mode="global",sel=null,linkSrc=null,codeCache={};
+const KIND_COLORS={endpoint:"#5aa0ff",scenario:"#e8833a",io:"#7fc97f",model:"#bb9af7",helper:"#9a9aa2"};
+const EDGE_STYLE={
+ dispatch:{c:"#5aa0ff",m:"ar-dispatch"},
+ scenario_call:{c:"#e8833a",m:"ar-scenario"},
+ port_call:{c:"#7fc97f",m:"ar-port"},
+ table:{c:"#bb9af7",m:"ar-table"},
+ uses:{c:"#9a9aa2",m:"ar-plain",dash:"6,5"},
+ depends:{c:"#9a9aa2",m:"ar-plain",dash:"6,5"},
+ shared:{c:"#4c4e56",m:"ar-shared",dash:"4,6"}
+};
+const MARKERS=[
+ ["ar-dispatch","#5aa0ff"],["ar-scenario","#e8833a"],["ar-port","#7fc97f"],
+ ["ar-table","#bb9af7"],["ar-plain","#9a9aa2"],["ar-shared","#4c4e56"]
+];
+const NODE_W=230,ROW=132,TOP=56,COL={rep:40,logic:400,nested:420,io:860,model:1150};
+let G=null,byId={},mode="scenario",selScenario=null,selId=null,codeState=null,scenList=[];
+const view={x:40,y:40,k:1};
+let boxes={};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 function toast(m){const t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",2600)}
-async function api(m,u,b){const r=await fetch(u,{method:m,headers:{"Content-Type":"application/json"},body:b?JSON.stringify(b):undefined});if(!r.ok)throw new Error(await r.text());return r.json()}
-async function loadAll(){CFG=await api("GET","/api/config");G=await api("GET","/api/graph");VIOL=(await api("GET","/api/validate")).violations||[];renderAll()}
-function colIndex(d){const i=DOM_ORDER.indexOf(d);return i<0?DOM_ORDER.length:i}
-/** Раскладка: колонка = домен (строго, без примесей) или бизнес-домен; узлы идут сверху вниз. */
-function layoutGraph(m){const sorted=[...G.nodes].sort((a,b)=>colIndex(a.domain)-colIndex(b.domain)||a.id.localeCompare(b.id));
-if(m==="global"){const col={};sorted.forEach(n=>{const k=n.domain;col[k]=col[k]||0;n.ui.x=colIndex(n.domain)*CELL_X;n.ui.y=HEAD_H+(col[k]++)*CELL_Y})}
-else if(m==="biz"){const bizs=[...new Set(G.nodes.map(n=>n.business||"общее"))].sort((a,b)=>(a==="общее")-(b==="общее")||(a<b?-1:a>b?1:0));bizs.forEach((b,bi)=>{let y=HEAD_H;[...DOM_ORDER,""].forEach(d=>{sorted.filter(n=>(n.business||"общее")===b&&(d?n.domain===d:!DOM_ORDER.includes(n.domain))).sort((x,y)=>x.id.localeCompare(y.id)).forEach(n=>{n.ui.x=bi*CELL_X;n.ui.y=y;y+=CELL_Y})})})}}
-function allowed(a,b){if(a===b)return true;return (CFG.studio.rules.allowed||[]).some(p=>p[0]===a&&p[1]===b)}
-/* Цепочка узла: все связанные через контракты, в обе стороны. Клик показывает систему насквозь. */
-function chainOf(id){const adj={};G.links.forEach(l=>{if(l.status==="deleted")return;(adj[l.from_node]=adj[l.from_node]||[]).push(l.to_node);(adj[l.to_node]=adj[l.to_node]||[]).push(l.from_node)});const seen=new Set([id]);const q=[id];while(q.length){const c=q.pop();(adj[c]||[]).forEach(n=>{if(!seen.has(n)){seen.add(n);q.push(n)}})}return seen}
-function keepSet(){if(!sel)return null;if(sel.t==="node")return chainOf(sel.id);if(sel.t==="link"){const l=G.links.find(x=>x.id===sel.id);return l?new Set([l.from_node,l.to_node]):null}return null}
-// ---------- палитра / аутлайнер ----------
-function renderPalette(){const p=$("palette");p.innerHTML="";const doms=CFG.studio.domains||[],lays=CFG.studio.layers||[],dd=CFG.studio.default_domain||"app";$("palTitle").textContent=doms.length?"Палитра — домен × слой":"Палитра — слои";(doms.length?doms.map(d=>({dn:d.name})):[{dn:dd}]).forEach(g=>{lays.forEach(l=>{const el=document.createElement("div");el.className="pal";el.draggable=true;el.innerHTML=doms.length?`<b>${esc(g.dn)}</b> · ${esc(l.name)}<br><small>перетащи на канвас → новый узел</small>`:`<b>${esc(l.name)}</b><br><small>перетащи на канвас → узел в ${esc(dd)}</small>`;el.ondragstart=e=>e.dataTransfer.setData("text/plain",JSON.stringify({domain:g.dn,layer:l.name}));p.appendChild(el)})});}
-function renderOutliner(){const o=$("outliner");o.innerHTML="";const byD={};G.nodes.forEach(n=>{(byD[n.domain]=byD[n.domain]||{});(byD[n.domain][n.layer]=byD[n.domain][n.layer]||[]).push(n)});Object.keys(byD).sort().forEach(d=>{const det=document.createElement("details");det.open=true;const sm=document.createElement("summary");sm.textContent=d;det.appendChild(sm);Object.keys(byD[d]).sort().forEach(l=>{const d2=document.createElement("details");d2.open=true;const s2=document.createElement("summary");s2.textContent="↳ "+l;d2.appendChild(s2);byD[d][l].sort((a,b)=>a.id.localeCompare(b.id)).forEach(n=>{const e=document.createElement("div");e.className="onode"+(sel&&sel.id===n.id?" sel":"");e.textContent="▤ "+n.id;e.onclick=()=>{select({t:"node",id:n.id});centerOn(n)};d2.appendChild(e)});det.appendChild(d2)});o.appendChild(det)})}
+async function load(){
+ const r=await fetch("/api/graph");
+ if(!r.ok)throw new Error("HTTP "+r.status);
+ G=await r.json();
+ byId={};(G.nodes||[]).forEach(n=>byId[n.id]=n);
+ scenList=(G.scenarios||[]).filter(id=>byId[id]);
+ if(!selScenario||!G.scenario_paths[selScenario]){
+   selScenario=scenList.find(id=>G.scenario_paths[id]&&G.scenario_paths[id].endpoint)||scenList[0]||null;
+   mode=selScenario?"scenario":"overview";
+   selId=selScenario;
+ }
+ const hash=location.hash.slice(1);
+ if(hash==="overview")mode="overview";
+ else if(hash.indexOf("s=")===0){
+   const want=decodeURIComponent(hash.slice(2));
+   if(byId[want]){selScenario=want;selId=want;mode="scenario";}
+ }
+ setModeButtons();
+ renderAll();
+ fitView();
+}
+function setModeButtons(){
+ document.querySelectorAll("#modes button").forEach(b=>b.classList.toggle("on",b.dataset.m===mode));
+}
+function renderAll(){renderList();renderCanvas();renderInspector();renderStats();}
+function renderStats(){$("stats").textContent=G?`узлов ${G.nodes.length} · связей ${G.edges.length}`:"—"}
+// ---------- левая панель: сценарии по endpoint'ам ----------
+function renderList(){
+ const el=$("slist");el.innerHTML="";
+ if(!G)return;
+ const groups=new Map();
+ scenList.forEach(id=>{
+   const p=G.scenario_paths[id]||{};
+   let key,label,sub="";
+   if(p.endpoint&&byId[p.endpoint]){key=p.endpoint;label=byId[p.endpoint].label;}
+   else{key="";label="(без endpoint)";}
+   if(!groups.has(key))groups.set(key,{label,items:[]});
+   groups.get(key).items.push(id);
+ });
+ const order=[...(G.endpoints||[]).filter(k=>groups.has(k))];
+ if(groups.has(""))order.push("");
+ if(!order.length){el.innerHTML='<p class="dim" style="padding:6px">Сценариев нет.<br>Запусти <b>studio scan</b>.</p>';return;}
+ order.forEach(key=>{
+   const g=groups.get(key);
+   const det=document.createElement("details");det.open=true;
+   const sm=document.createElement("summary");
+   const ep=key?byId[key]:null;
+   const tags=ep&&ep.details&&ep.details.tags&&ep.details.tags.length?" · "+ep.details.tags.join(", "):"";
+   sm.textContent=g.label+tags;det.appendChild(sm);
+   g.items.forEach(id=>{
+     const n=byId[id];if(!n)return;
+     const item=document.createElement("div");
+     item.className="sitem"+(selScenario===id?" sel":"");
+     item.dataset.id=id;
+     const p=G.scenario_paths[id]||{};
+     item.innerHTML=`${esc(n.label)} <small>· io ${p.io_calls?p.io_calls.length:0}</small>`;
+     item.onclick=()=>selectScenario(id);
+     det.appendChild(item);
+   });
+   el.appendChild(det);
+ });
+}
+function selectScenario(id){
+ if(!byId[id])return;
+ selScenario=id;selId=id;codeState=null;mode="scenario";
+ setModeButtons();renderAll();fitView();
+}
 // ---------- канвас ----------
-function visible(n){if(mode!=="viol")return true;const vs=new Set(VIOL.flatMap(v=>[v.from_node,v.to_node]));return vs.has(n.id)}
-function centerOn(n){const c=$("canvas");view.x=c.clientWidth/2-(n.ui.x+115)*view.k;view.y=c.clientHeight/2-(n.ui.y+60)*view.k;applyView()}
-function guessBusiness(id,layer){for(const b of (CFG.studio.business||[])){for(const p of (b.paths||[])){if(p&&(id===p||id.startsWith(p+"/")||id.split("/").includes(p)))return b.name}}const l=(CFG.studio.layers||[]).find(x=>x.name===layer);const dirs=((l&&l.paths)||[]).filter(p=>p&&!p.endsWith(".py"));const parts=id.split("/");for(const a of dirs){const i=parts.indexOf(a);if(i>=0&&i+1<parts.length-1)return parts[i+1]}return "общее"}
-/* Путь нового узла: уникальные директории домена и слоя (без задвоений),
-   чтобы рескан находил файл ровно там, где его создали. */
-function firstDir(paths){const ds=(paths||[]).filter(p=>p&&!p.endsWith(".py"));return ds.length?ds[0]:""}
-function newNodeBase(domain,layerName){const dom=(CFG.studio.domains||[]).find(x=>x.name===domain);const l=(CFG.studio.layers||[]).find(x=>x.name===layerName);const parts=[...new Set([firstDir(dom&&dom.paths),firstDir(l&&l.paths)])].filter(Boolean);const rel=parts.join("/");return rel?rel+"/new_node":"new_node"}
-const view={x:40,y:40,k:1};
-function applyView(){const v=$("view");if(v)v.style.transform=`translate(${view.x}px,${view.y}px) scale(${view.k})`;const z=$("zoomLabel");if(z)z.textContent=Math.round(view.k*100)+"%"}
-/* ---------- панорама и зум канваса (экраные px <-> мировые координаты) ---------- */
-function toWorld(cx,cy){const r=$("canvas").getBoundingClientRect();return[(cx-r.left-view.x)/view.k,(cy-r.top-view.y)/view.k]}
-function zoomAt(cx,cy,f){const r=$("canvas").getBoundingClientRect();const px=cx-r.left,py=cy-r.top;const k2=Math.min(2.5,Math.max(.3,view.k*f));const s=k2/view.k;view.x=px-(px-view.x)*s;view.y=py-(py-view.y)*s;view.k=k2;applyView()}
+function addNode(stage,id,x,y,opts){
+ const n=byId[id];if(!n)return null;
+ const el=document.createElement("div");
+ el.className="node"+(opts&&opts.nested?" nested":"")+(selId===id?" sel":"");
+ el.style.left=x+"px";el.style.top=y+"px";el.dataset.id=id;
+ const c=KIND_COLORS[n.kind]||"#888";
+ el.innerHTML=`<div class="hd" style="--c:${c}">${esc(n.label)}</div><div class="mt">${esc(meta(n))}</div>`;
+ stage.appendChild(el);return el;
+}
+function meta(n){
+ const d=n.details||{};
+ if(n.kind==="endpoint")return "endpoint · "+(d.function_name||"");
+ if(n.kind==="scenario")return "scenario · "+(d.class_name||"");
+ if(n.kind==="io")return "io · line "+n.line;
+ if(n.kind==="model")return "model · "+(d.tablename||"");
+ if(n.kind==="helper")return "helper · "+(d.role||"");
+ return n.kind;
+}
+function colhead(stage,x,label,sub,y){
+ const el=document.createElement("div");
+ el.className="colhead";el.style.left=x+"px";el.style.top=(y==null?14:y)+"px";
+ el.innerHTML=esc(label)+(sub!=null?` <i>· ${sub}</i>`:"");
+ stage.appendChild(el);
+}
+function measure(){
+ boxes={};
+ document.querySelectorAll("#stage .node[data-id],#stage .badge").forEach(el=>{
+   boxes[el.dataset.id]={x:parseFloat(el.style.left)||0,y:parseFloat(el.style.top)||0,w:el.offsetWidth,h:el.offsetHeight};
+ });
+}
+function renderCanvas(){
+ const stage=$("stage"),svg=$("edges");
+ [...stage.children].forEach(ch=>{if(ch!==svg)ch.remove();});
+ svg.innerHTML="";boxes={};
+ if(!G){stage.style.width="100%";stage.style.height="100%";return;}
+ if(mode==="scenario"&&selScenario)layoutScenario(stage);else layoutOverview(stage);
+ measure();
+ if(mode==="scenario"&&selScenario)layoutShelf(stage);
+ if(mode==="overview")layoutBadges(stage);
+ measure();
+ drawEdges();
+ sizeStage();
+ applyView();
+}
+function layoutScenario(stage){
+ const p=G.scenario_paths[selScenario];
+ colhead(stage,COL.rep,"representation");
+ colhead(stage,COL.logic,"logic");
+ colhead(stage,COL.io,"io",p?(p.io_calls||[]).length:0);
+ if(!p){
+   const e=document.createElement("div");e.className="empty";e.textContent="У сценария нет записи в scenario_paths.";stage.appendChild(e);return;
+ }
+ if(p.endpoint&&byId[p.endpoint])addNode(stage,p.endpoint,COL.rep,TOP);
+ else{const g=document.createElement("div");g.className="node ghost";g.style.left=COL.rep+"px";g.style.top=TOP+"px";g.innerHTML='<div class="hd" style="--c:#6c6d75">нет endpoint</div><div class="mt">сценарий вызывается не из HTTP</div>';stage.appendChild(g);}
+ addNode(stage,selScenario,COL.logic,TOP);
+ // Вложенные сценарии — на нижней границе logic-колонки, полупрозрачные.
+ (p.called_scenarios||[]).forEach((id,i)=>{if(byId[id])addNode(stage,id,COL.logic+20,TOP+150+i*ROW,{nested:true})});
+ const ioRow={};
+ (p.io_calls||[]).forEach((id,i)=>{ioRow[id]=i;if(byId[id])addNode(stage,id,COL.io,TOP+i*ROW)});
+ const taken=new Set();
+ (p.models||[]).forEach(id=>{
+   if(!byId[id]||taken.has(id))return;
+   taken.add(id);
+   let row=-1;
+   for(const ioId of (p.io_calls||[])){
+     const io=byId[ioId];if(!io||!io.details||!io.details.table)continue;
+     if(G.edges.some(e=>e.kind==="table"&&e.from_node===ioId&&e.to_node===id)){row=ioRow[ioId];break;}
+   }
+   if(row<0)row=0;
+   while(taken.has(row))row++;
+   taken.add(row);
+   addNode(stage,id,COL.model,TOP+row*ROW);
+ });
+}
+function layoutShelf(stage){
+ const p=G.scenario_paths[selScenario];if(!p)return;
+ const helpers=(p.helpers||[]).filter(id=>byId[id]);
+ if(!helpers.length)return;
+ let maxY=TOP;
+ document.querySelectorAll("#stage .node").forEach(el=>{maxY=Math.max(maxY,(parseFloat(el.style.top)||0)+el.offsetHeight)});
+ const shelfY=maxY+110;
+ colhead(stage,40,"helpers",helpers.length,shelfY-30);
+ helpers.forEach((id,i)=>{
+   const col=i%6,row=Math.floor(i/6);
+   addNode(stage,id,40+col*(NODE_W+18),shelfY+row*96);
+ });
+}
+function layoutOverview(stage){
+ const list=scenList;
+ colhead(stage,40,"все сценарии",list.length);
+ if(!list.length){
+   const e=document.createElement("div");e.className="empty";
+   e.textContent="Пусто. Запусти studio scan в корне проекта.";stage.appendChild(e);return;
+ }
+ const cols=Math.max(1,Math.min(6,Math.ceil(Math.sqrt(list.length))));
+ list.forEach((id,i)=>addNode(stage,id,40+(i%cols)*270,TOP+Math.floor(i/cols)*ROW));
+}
+function layoutBadges(stage){
+ const shared=sharedModels();
+ if(!shared.length)return;
+ let maxRight=0;
+ document.querySelectorAll("#stage .node").forEach(el=>{maxRight=Math.max(maxRight,(parseFloat(el.style.left)||0)+el.offsetWidth)});
+ const x=maxRight+90;
+ colhead(stage,x,"shared model",shared.length);
+ shared.forEach((mid,i)=>{
+   const n=byId[mid];
+   const el=document.createElement("div");
+   el.className="badge";el.dataset.id="shared:"+mid;
+   el.style.left=x+"px";el.style.top=(TOP+i*96)+"px";
+   el.textContent="shared: "+(n?n.label:mid);
+   stage.appendChild(el);
+ });
+}
+function sharedModels(){
+ const count={};
+ scenList.forEach(id=>{
+   const p=G.scenario_paths[id];if(!p)return;
+   [...new Set(p.models||[])].forEach(m=>count[m]=(count[m]||0)+1);
+ });
+ return Object.keys(count).filter(m=>count[m]>=2&&byId[m]).sort((a,b)=>byId[a].label.localeCompare(byId[b].label));
+}
+function sizeStage(){
+ let w=1200,h=700;
+ Object.values(boxes).forEach(b=>{w=Math.max(w,b.x+b.w+140);h=Math.max(h,b.y+b.h+120)});
+ const stage=$("stage"),svg=$("edges");
+ stage.style.width=w+"px";stage.style.height=h+"px";
+ svg.setAttribute("width",w);svg.setAttribute("height",h);
+}
+function anchor(a,b){
+ const ax=a.x+a.w/2,ay=a.y+a.h/2,bx=b.x+b.w/2,by=b.y+b.h/2;
+ const dx=bx-ax,dy=by-ay;
+ if(Math.abs(dx)>=Math.abs(dy)){
+   return dx>=0?{x1:a.x+a.w,y1:ay,x2:b.x-6,y2:by,h:true}:{x1:a.x,y1:ay,x2:b.x+b.w+6,y2:by,h:true};
+ }
+ return dy>=0?{x1:ax,y1:a.y+a.h,x2:bx,y2:b.y-6,h:false}:{x1:ax,y1:a.y,x2:bx,y2:b.y+b.h+6,h:false};
+}
+function drawEdges(){
+ const svg=$("edges");
+ let defs="<defs>"+MARKERS.map(([id,c])=>
+  `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="${c}"/></marker>`).join("")+"</defs>";
+ const list=edgeList();
+ const body=list.map(e=>{
+   const a=boxes[e.from_node],b=boxes[e.to_node];
+   if(!a||!b)return "";
+   const st=EDGE_STYLE[e.kind]||EDGE_STYLE.uses;
+   const s=anchor(a,b);
+   const d=s.h
+     ?`M${s.x1},${s.y1} C${(s.x1+s.x2)/2},${s.y1} ${(s.x1+s.x2)/2},${s.y2} ${s.x2},${s.y2}`
+     :`M${s.x1},${s.y1} C${s.x1},${(s.y1+s.y2)/2} ${s.x2},${(s.y1+s.y2)/2} ${s.x2},${s.y2}`;
+   const mx=(s.x1+s.x2)/2,my=(s.y1+s.y2)/2-5;
+   const label=e.label?`<text class="elab" x="${mx}" y="${my}" text-anchor="middle">${esc(e.label)}</text>`:"";
+   return `<path d="${d}" fill="none" stroke="${st.c}" stroke-width="1.7"${st.dash?` stroke-dasharray="${st.dash}"`:""} marker-end="url(#${st.m})"/>${label}`;
+ }).join("");
+ svg.innerHTML=defs+body;
+}
+function edgeList(){
+ const out=[];
+ if(!G)return out;
+ const visible=id=>!!boxes[id];
+ G.edges.forEach(e=>{
+   if(!visible(e.from_node)||!visible(e.to_node))return;
+   if(mode==="overview"){if(e.kind==="scenario_call")out.push(e);return;}
+   if(e.kind==="scenario_call")out.push(e);
+   else if(["dispatch","port_call","table","uses","depends"].includes(e.kind))out.push(e);
+ });
+ if(mode==="overview"){
+   sharedModels().forEach(mid=>{
+     scenList.forEach(sid=>{
+       const p=G.scenario_paths[sid];if(!p)return;
+       if((p.models||[]).includes(mid))out.push({from_node:sid,to_node:"shared:"+mid,kind:"shared",label:""});
+     });
+   });
+ }
+ return out;
+}
+// ---------- панорама и зум ----------
+function applyView(){
+ const v=$("view");if(v)v.style.transform=`translate(${view.x}px,${view.y}px) scale(${view.k})`;
+ const z=$("zoomLabel");if(z)z.textContent=Math.round(view.k*100)+"%";
+}
+function toWorld(cx,cy){
+ const r=$("canvas").getBoundingClientRect();
+ return[(cx-r.left-view.x)/view.k,(cy-r.top-view.y)/view.k];
+}
+function zoomAt(cx,cy,f){
+ const r=$("canvas").getBoundingClientRect();
+ const px=cx-r.left,py=cy-r.top;
+ const k2=Math.min(2.5,Math.max(.25,view.k*f)),s=k2/view.k;
+ view.x=px-(px-view.x)*s;view.y=py-(py-view.y)*s;view.k=k2;applyView();
+}
 function zoomCenter(f){const r=$("canvas").getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,f)}
-function fitView(){const vis=G.nodes.filter(visible);if(!vis.length)return;let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;vis.forEach(n=>{x0=Math.min(x0,n.ui.x);y0=Math.min(y0,n.ui.y);x1=Math.max(x1,n.ui.x+230);y1=Math.max(y1,n.ui.y+120)});const c=$("canvas");const k=Math.min(2,Math.max(.3,Math.min((c.clientWidth-80)/Math.max(1,x1-x0),(c.clientHeight-80)/Math.max(1,y1-y0))));view.k=k;view.x=(c.clientWidth-(x1-x0)*k)/2-x0*k;view.y=(c.clientHeight-(y1-y0)*k)/2-y0*k;applyView()}
-let panDrag=null;
-function renderAll(){renderPalette();renderOutliner();renderCanvas();renderInspector();const vv=VIOL.length;$("fViol").textContent="нарушений: "+vv;const dirty=G.nodes.some(n=>n.status==="added"||n.status==="modified"||n.status==="deleted")||G.links.some(l=>l.status!=="tracked");$("stats").textContent=`узлов ${G.nodes.length} · связей ${G.links.length}${dirty?" · ● не сохранено":""}`}
-function renderCanvas(){const st=$("stage");st.querySelectorAll(".node,.colhead").forEach(e=>e.remove());const svg=$("edges");svg.innerHTML="";const vis=G.nodes.filter(visible);const byId={};G.nodes.forEach(n=>byId[n.id]=n);const keep=keepSet();
-if(mode!=="viol"){const cols=mode==="global"?[...new Set(vis.map(n=>n.domain))].sort((a,b)=>colIndex(a)-colIndex(b)): [...new Set(vis.map(n=>n.business||"общее"))].sort((a,b)=>(a==="общее")-(b==="общее")||(a<b?-1:a>b?1:0));cols.forEach((c,ci)=>{const cnt=vis.filter(n=>(mode==="global"?n.domain:(n.business||"общее"))===c).length;if(!cnt)return;const h=document.createElement("div");h.className="colhead";h.style.left=(ci*CELL_X+8)+"px";h.style.top="10px";const dc=mode==="global"?(DOMAIN_COLORS[c]||"#888"):"#9a9aa2";h.style.borderLeft=`4px solid ${dc}`;h.textContent=c+" · "+cnt;st.appendChild(h)})}
-vis.forEach(n=>{const el=document.createElement("div");const dimmed=keep&&!keep.has(n.id);el.className="node"+(sel&&sel.id===n.id?" sel":"")+(VIOL.some(v=>v.from_node===n.id||v.to_node===n.id)?" viol":"")+(dimmed?" dim":"");el.style.left=n.ui.x+"px";el.style.top=n.ui.y+"px";el.dataset.id=n.id;const col=DOMAIN_COLORS[n.domain]||"#888";
-let inner=`<div class="hd" style="background:${col}33;border-bottom:2px solid ${col}"><span title="${esc(n.id)}">▤ ${esc(n.id.split("/").pop())}</span><span style="font-weight:400;font-size:10px">${esc(n.status||"")}</span></div><div class="chips"><span class="chip" style="border-color:${col};color:${col}">${esc(n.domain)}</span><span class="chip">${esc(n.layer)}</span><span class="chip">${esc(n.business||"общее")}</span></div><div class="bd">`;
-if(n.ui.state==="code"){const code=n.code!=null?n.code:(codeCache[n.id]??"(загрузка…)");inner+=`<textarea id="ta-${esc(n.id)}" spellcheck="false">${esc(code)}</textarea><div class="nbtns"><button data-a="savecode">в буфер</button><button data-a="collapse">свернуть</button></div>`}
-else if(n.ui.state==="expanded"){inner+=n.contracts.map(c=>`<div class="crow"><span class="dot ${c.kind==="abstraction"?"abs":""}" data-c="${esc(c.name)}" title="${esc(c.kind)}: ${esc(c.name)}"></span><span class="nm">${esc(c.name)}</span><small style="color:var(--dim)">${c.kind==="abstraction"?"abs":"impl"}</small></div>`).join("")||'<p style="color:var(--dim)">контрактов нет</p>';inner+=`<div class="nbtns"><button data-a="collapse">свернуть</button><button data-a="code">code view</button><button data-a="del" class="danger">✕</button></div>`}
-else{inner+=`<div style="color:var(--dim);font-size:11px;padding:0 0 4px">${n.contracts.length} контрактов · double-click развернуть</div><div class="nbtns"><button data-a="expand">развернуть</button><button data-a="code">code</button></div>`}
-inner+="</div>";el.innerHTML=inner;
-el.querySelector(".hd").onmousedown=e=>{if(e.target.tagName==="BUTTON")return;const sx=e.clientX,sy=e.clientY,ox=n.ui.x,oy=n.ui.y;const mv=ev=>{n.ui.x=ox+(ev.clientX-sx)/view.k;n.ui.y=oy+(ev.clientY-sy)/view.k;el.style.left=n.ui.x+"px";el.style.top=n.ui.y+"px";drawEdges()};const up=()=>{document.removeEventListener("mousemove",mv);document.removeEventListener("mouseup",up);resolveCollisions(n);el.style.left=n.ui.x+"px";el.style.top=n.ui.y+"px";drawEdges();persist()};document.addEventListener("mousemove",mv);document.addEventListener("mouseup",up)};
-el.onclick=e=>{const b=e.target.closest("button");if(b){nodeAction(n,b.dataset.a);e.stopPropagation();return}const d=e.target.closest(".dot");if(d){contractClick(n,d.dataset.c);e.stopPropagation();return}select({t:"node",id:n.id})};
-el.ondblclick=e=>{if(e.target.closest("button")||e.target.closest("textarea"))return;n.ui.state=n.ui.state==="expanded"?"collapsed":"expanded";persist().then(renderAll)};
-st.appendChild(el);
-if(n.ui.state==="code"&&n.code==null&&codeCache[n.id]===undefined){fetch("/api/file?path="+encodeURIComponent(n.id)).then(r=>r.json()).then(j=>{codeCache[n.id]=j.code||"";if(byId[n.id]&&byId[n.id].ui.state==="code")renderCanvas()}).catch(()=>{})}
-else if(n.code!=null){codeCache[n.id]=n.code}
-});
-drawEdges();applyView();st.style.width="3000px";st.style.height="2000px";svg.setAttribute("width","3000");svg.setAttribute("height","2000")}
-function nodeXY(id){const n=G.nodes.find(x=>x.id===id);return n?[n.ui.x+115,n.ui.y+30]:[0,0]}
-/* Сетка против наложений: снап к 10px, при сбросе узел не может лечь на другой. */
-function snap(v){return Math.round(v/10)*10}
-function nodeBox(id){const el=document.querySelector(`#stage .node[data-id="${CSS.escape(id)}"]`);return{w:230,h:el?el.offsetHeight:150}}
-function overlaps(a,ha,b,hb){return a.ui.x<b.ui.x+230&&b.ui.x<a.ui.x+230&&a.ui.y<b.ui.y+hb&&b.ui.y<a.ui.y+ha}
-function resolveCollisions(m){const cur=nodeBox(m.id);let guard=0,moved=true;while(moved&&guard++<60){moved=false;for(const o of G.nodes){if(o===m||o.status==="deleted"||!visible(o))continue;const oh=nodeBox(o.id).h;if(overlaps(m,cur.h,o,oh)){m.ui.y=o.ui.y+oh+16;moved=true}}}m.ui.x=snap(Math.max(0,m.ui.x));m.ui.y=snap(Math.max(HEAD_H,m.ui.y))}
-function drawEdges(){const svg=$("edges");svg.innerHTML="";const keep=keepSet();const vis=new Set(G.nodes.filter(visible).map(n=>n.id));G.links.forEach(l=>{if(l.status==="deleted")return;if(!vis.has(l.from_node)||!vis.has(l.to_node))return;if(keep&&!(keep.has(l.from_node)&&keep.has(l.to_node)))return;const [x1,y1]=nodeXY(l.from_node),[x2,y2]=nodeXY(l.to_node);const viol=VIOL.some(v=>v.link_id===l.id)||l.violation;const isSel=sel&&sel.t==="link"&&sel.id===l.id;const c=isSel?"#ffb35d":(viol?"#ff5d5d":(l.weak?"#8a8a93":"#5aa0ff"));const mx=(x1+x2)/2;svg.innerHTML+=`<g data-l="${esc(l.id)}" style="pointer-events:auto;cursor:pointer"><path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" stroke="${c}" stroke-width="${isSel?3.2:(viol?3:1.6)}" fill="none" ${l.weak?'stroke-dasharray="5,4"':""}/><circle cx="${x2}" cy="${y2}" r="4" fill="${c}"/><text x="${mx}" y="${(y1+y2)/2-4}" fill="${c}" font-size="10">${esc(l.contract)}</text></g>`});svg.querySelectorAll("g").forEach(g=>g.onclick=()=>select({t:"link",id:g.dataset.l}))}
-function nodeAction(n,a){if(a==="expand"){n.ui.state="expanded"}else if(a==="collapse"){n.ui.state="collapsed"}else if(a==="code"){n.ui.state="code"}else if(a==="del"){if(confirm("Удалить узел "+n.id+"? (файл удалится только по Save)")){n.status="deleted";sel=null}}else if(a==="savecode"){const ta=document.getElementById("ta-"+n.id);if(ta){n.code=ta.value;codeCache[n.id]=ta.value;if(n.status==="tracked")n.status="modified";toast("правки в буфере, файлы не тронуты — жми Save")}else{toast("не найден редактор — открой code view заново")}}persist().then(renderAll)}
-function contractClick(n,cname){if(!linkSrc){linkSrc={node:n.id,contract:cname};toast("источник: "+n.id+" :: "+cname+" — кликни точку приёмника")}else{if(linkSrc.node===n.id){linkSrc=null;toast("отмена связи");return}const a=G.nodes.find(x=>x.id===linkSrc.node),b=n;if(!allowed(a.layer,b.layer)){toast(`⛔ запрещено: ${a.layer} → ${b.layer}`);linkSrc=null;return}const id=`${a.id}::${cname}>>${b.id}`;if(!G.links.some(l=>l.id===id)){G.links.push({id,contract:cname,from_node:a.id,to_node:b.id,weak:false,violation:false,status:"added"});toast("связь в буфере: "+cname)}linkSrc=null;persist().then(loadAll)}}
+function fitView(){
+ const els=[...document.querySelectorAll("#stage .node,#stage .badge,#stage .colhead")];
+ if(!els.length)return;
+ let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+ els.forEach(el=>{
+   const x=parseFloat(el.style.left)||0,y=parseFloat(el.style.top)||0;
+   x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x+el.offsetWidth);y1=Math.max(y1,y+el.offsetHeight);
+ });
+ const c=$("canvas");
+ const k=Math.min(2,Math.max(.25,Math.min((c.clientWidth-70)/Math.max(1,x1-x0),(c.clientHeight-70)/Math.max(1,y1-y0))));
+ view.k=k;view.x=(c.clientWidth-(x1-x0)*k)/2-x0*k;view.y=(c.clientHeight-(y1-y0)*k)/2-y0*k;
+ applyView();
+}
 // ---------- инспектор ----------
-function captureCodeEdits(){let changed=false;document.querySelectorAll('#stage textarea[id^="ta-"]').forEach(ta=>{const id=ta.id.slice(3);const n=G.nodes.find(x=>x.id===id);if(n&&ta.value!==(n.code??codeCache[id]??"")){n.code=ta.value;codeCache[id]=ta.value;if(n.status==="tracked")n.status="modified";changed=true}});if(changed)persist().catch(()=>{})}
-function select(s){captureCodeEdits();sel=s;renderCanvas();renderOutliner();renderInspector()}
-async function persist(){await api("PUT","/api/graph",G)}
-function renderInspector(){const d=$("insp");if(!sel){d.innerHTML='<p style="color:var(--dim)">Выбери узел или связь.</p>';return}
-if(sel.t==="node"){const n=G.nodes.find(x=>x.id===sel.id);if(!n){d.innerHTML="удалён";return}const doms=(CFG.studio.domains||[]).map(x=>x.name),lays=(CFG.studio.layers||[]).map(x=>x.name);
-d.innerHTML=`<label>файл (id)</label><input id="iId" value="${esc(n.id)}" disabled><label>домен</label>${doms.length?`<select id="iDom">${doms.map(x=>`<option ${x===n.domain?"selected":""}>${esc(x)}</option>`).join("")}</select>`:`<input id="iDom" value="${esc(n.domain)}" disabled title="домены не заданы — используется default_domain">`}<label>слой</label><select id="iLay">${lays.map(x=>`<option ${x===n.layer?"selected":""}>${esc(x)}</option>`).join("")}</select><label>бизнес-домен</label><input value="${esc(n.business||"общее")}" disabled title="папка после scenarios/routes/schemas или [[studio.business]]"><label>имя</label><input id="iName" value="${esc((n.properties&&n.properties.name)||"")}"><label>описание</label><input id="iDesc" value="${esc((n.properties&&n.properties.description)||"")}"><label>контракты (имя — abs|impl, по строке)</label><textarea id="iC" rows="7" spellcheck="false">${esc(n.contracts.map(c=>c.name+" — "+(c.kind==="abstraction"?"abs":"impl")).join("\n"))}</textarea><div class="kv"><button id="iApply" class="primary">Применить</button><button id="iCode">code view</button></div><div class="kv"><button id="iDel" class="danger">удалить узел</button></div>${VIOL.filter(v=>v.from_node===n.id||v.to_node===n.id).map(v=>`<p style="color:var(--red)">⚠ ${esc(v.reason)}</p>`).join("")}`;
-$("iApply").onclick=async()=>{try{if(doms.length)n.domain=$("iDom").value;n.layer=$("iLay").value;n.properties={name:$("iName").value,description:$("iDesc").value,metadata:(n.properties&&n.properties.metadata)||{}};n.contracts=$("iC").value.split("\n").map(s=>s.trim()).filter(Boolean).map(s=>{const parts=s.split("—").map(x=>x.trim());const name=parts[0],kind=(parts[1]||"").toLowerCase();return{name,kind:(kind==="abs"||kind==="abstraction")?"abstraction":"implementation",owner:null,line:null}}).filter(c=>c.name);if(n.status==="tracked")n.status="modified";await persist();await loadAll()}catch(e){toast("ошибка: "+e.message)}};$("iCode").onclick=async()=>{n.ui.state="code";await persist();renderAll()};$("iDel").onclick=async()=>{if(confirm("Удалить?")){n.status="deleted";sel=null;await persist();await loadAll()}}}
-else{const l=G.links.find(x=>x.id===sel.id);if(!l){d.innerHTML="связь удалена";return}d.innerHTML=`<label>контракт</label><input value="${esc(l.contract)}" disabled><label>из (реализация)</label><input value="${esc(l.from_node)}" disabled><label>в (абстракция)</label><input value="${esc(l.to_node)}" disabled><p>${l.weak?"weak-связь (обе стороны concrete)":"impl → abs"}${l.status==="added"?" · <b>новая (в буфере)</b>":""}</p>${VIOL.some(v=>v.link_id===l.id)?'<p style="color:var(--red)">⚠ нарушает чистую архитектуру</p>':""}<button id="iLDel" class="danger">удалить связь</button>`;$("iLDel").onclick=async()=>{try{if(l.status==="added"){G.links=G.links.filter(x=>x.id!==l.id)}else{l.status="deleted"}sel=null;await persist();await loadAll()}catch(e){toast("ошибка: "+e.message)}}}}
-// ---------- конфиг ----------
-function renderCfg(){const c=CFG.studio;let h=`<h4>Проект</h4><div class="kv"><b style="width:130px">default_domain</b><input id="cfgDD" value="${esc(c.default_domain||"app")}" title="домен для файлов вне всех доменов"></div><h4>Домены — пакеты (имя → пути через запятую)</h4>`;c.domains.forEach((d,i)=>{h+=`<div class="kv"><input data-d="${i}" data-k="name" value="${esc(d.name)}" style="max-width:110px"><input data-d="${i}" data-k="paths" value="${esc(((d.paths)||(d.path?[d.path]:[])).join(", "))}" title="папка или файл, через запятую"><button data-dd="${i}">✕</button></div>`});h+=`<button id="addD">+ домен</button><h4>Бизнес-домены (имя → пути; пусто = правило папки)</h4>`;(c.business||[]).forEach((b,i)=>{h+=`<div class="kv"><input data-b="${i}" data-k="name" value="${esc(b.name)}" style="max-width:110px"><input data-b="${i}" data-k="paths" value="${esc(((b.paths)||[]).join(", "))}" title="папка или файл, через запятую"><button data-db="${i}">✕</button></div>`});h+=`<button id="addB">+ бизнес-домен</button><h4>Слои (имя → пути через запятую, порядок)</h4>`;c.layers.forEach((l,i)=>{h+=`<div class="kv"><input data-l="${i}" data-k="name" value="${esc(l.name)}" style="max-width:110px" title="имя слоя"><input data-l="${i}" data-k="paths" value="${esc(((l.paths)||[]).join(", "))}" title="папка или файл, через запятую"><input data-l="${i}" data-k="order" value="${esc(l.order)}" style="max-width:60px" title="порядок"><button data-dl="${i}">✕</button></div>`});h+=`<button id="addL">+ слой</button><h4>Правила именования (regex)</h4>`;Object.keys(c.naming||{}).forEach(k=>{h+=`<div class="kv"><b style="width:130px">${esc(k)}</b><input data-n="${esc(k)}" data-k="abstraction" value="${esc(c.naming[k].abstraction)}" title="абстракция"><input data-n="${esc(k)}" data-k="implementation" value="${esc(c.naming[k].implementation)}" title="реализация"></div>`});h+=`<h4>Маркеры слоя (decorator · base_class · module_attr)</h4>`;c.layers.forEach(l=>{const m=(c.markers||{})[l.name]||{};h+=`<div class="kv"><b style="width:130px">${esc(l.name)}</b><input data-m="${esc(l.name)}" data-k="decorator" value="${esc(m.decorator||"")}" title="decorator"><input data-m="${esc(l.name)}" data-k="base_class" value="${esc(m.base_class||"")}" title="base_class"><input data-m="${esc(l.name)}" data-k="module_attr" value="${esc(m.module_attr||"")}" title="module_attr"></div>`});h+=`<h4>Правила связей (разрешено ✓)</h4><table class="grid"><tr><th>from \\ to</th>${c.layers.map(l=>`<th>${esc(l.name)}</th>`).join("")}</tr>`;c.layers.forEach(a=>{h+=`<tr><td><b>${esc(a.name)}</b></td>`;c.layers.forEach(b=>{const on=(c.rules.allowed||[]).some(p=>p[0]===a.name&&p[1]===b.name);h+=`<td><input type="checkbox" data-r="${esc(a.name)}→${esc(b.name)}" ${on?"checked":""} ${a.name===b.name?"disabled":""}></td>`});h+=`</tr>`});h+=`</table><h4>Save</h4><div class="kv"><label><input type="checkbox" id="cShow" ${c.save.show_diff?"checked":""}> show_diff</label><select id="cMode"><option ${c.save.diff_mode==="always"?"selected":""}>always</option><option ${c.save.diff_mode==="on_danger"?"selected":""}>on_danger</option><option ${c.save.diff_mode==="manual"?"selected":""}>manual</option></select></div>`;$("cfgBody").innerHTML=h;
-$("cfgBody").querySelectorAll("[data-dd]").forEach(b=>b.onclick=()=>{c.domains.splice(+b.dataset.dd,1);renderCfg()});$("addD").onclick=()=>{c.domains.push({name:"new",paths:["new"]});renderCfg()};$("cfgBody").querySelectorAll("[data-dl]").forEach(b=>b.onclick=()=>{c.layers.splice(+b.dataset.dl,1);renderCfg()});$("addL").onclick=()=>{c.layers.push({name:"new",paths:["new"],order:c.layers.length});renderCfg()};
-$("cfgBody").querySelectorAll("[data-d]").forEach(i=>i.oninput=()=>{const k=i.dataset.k;if(k==="paths"){c.domains[+i.dataset.d].paths=i.value.split(",").map(s=>s.trim()).filter(Boolean)}else{c.domains[+i.dataset.d][k]=i.value}});
-$("cfgBody").querySelectorAll("[data-db]").forEach(b=>b.onclick=()=>{c.business.splice(+b.dataset.db,1);renderCfg()});
-$("addB").onclick=()=>{c.business=c.business||[];c.business.push({name:"new",paths:["new"]});renderCfg()};
-$("cfgBody").querySelectorAll("[data-b]").forEach(i=>i.oninput=()=>{const k=i.dataset.k;if(k==="paths"){c.business[+i.dataset.b].paths=i.value.split(",").map(s=>s.trim()).filter(Boolean)}else{c.business[+i.dataset.b][k]=i.value}});$("cfgBody").querySelectorAll("[data-l]").forEach(i=>i.oninput=()=>{const k=i.dataset.k;if(k==="paths"){c.layers[+i.dataset.l].paths=i.value.split(",").map(s=>s.trim()).filter(Boolean)}else if(k==="order"){c.layers[+i.dataset.l].order=+i.value}else{c.layers[+i.dataset.l][k]=i.value}});$("cfgBody").querySelectorAll("[data-m]").forEach(i=>i.oninput=()=>{const m=c.markers[i.dataset.m]=c.markers[i.dataset.m]||{};m[i.dataset.k]=i.value});$("cfgDD").oninput=e=>c.default_domain=e.target.value;$("cfgBody").querySelectorAll("[data-n]").forEach(i=>i.oninput=()=>{c.naming[i.dataset.n][i.dataset.k]=i.value});$("cfgBody").querySelectorAll("[data-r]").forEach(ch=>ch.onchange=()=>{const[a,b]=ch.dataset.r.split("→");c.rules.allowed=c.rules.allowed.filter(p=>!(p[0]===a&&p[1]===b));if(ch.checked)c.rules.allowed.push([a,b])});$("cShow").onchange=e=>c.save.show_diff=e.target.checked;$("cMode").onchange=e=>c.save.diff_mode=e.target.value}
+function rows(pairs){
+ return pairs.filter(p=>p&&p[1]!==undefined&&p[1]!==null&&p[1]!=="")
+   .map(([k,v])=>`<div class="kv"><span>${esc(k)}</span><b>${esc(Array.isArray(v)?v.join(", "):v)}</b></div>`).join("");
+}
+function renderInspector(){
+ const d=$("insp");
+ if(!G){d.innerHTML='<p class="dim">Загрузка…</p>';return;}
+ if(!selId||!byId[selId]){
+   d.innerHTML='<p class="dim">Выбери узел на канвасе или сценарий слева.</p>';return;
+ }
+ const n=byId[selId];const det=n.details||{};
+ let extra="";
+ if(n.kind==="endpoint")extra=rows([["method",det.http_method],["path",det.path],["tags",det.tags],["function",det.function_name],["router",det.router_module]]);
+ if(n.kind==="scenario")extra=rows([["name",det.name],["class",det.class_name],["dto",det.dto],["response",det.response],["module",det.module]]);
+ if(n.kind==="io")extra=rows([["method",det.method],["table",det.table],["via",det.via_attr],["сценарий",det.called_from]]);
+ if(n.kind==="model")extra=rows([["tablename",det.tablename],["class",det.class_name],["file",det.source_file]]);
+ if(n.kind==="helper")extra=rows([["role",det.role],["module",det.module]]);
+ const btn=n.kind==="endpoint"||n.kind==="scenario"?"code view":"открыть файл";
+ let code="";
+ if(codeState){
+   code=`<div class="codewrap"><div class="codehd"><span>${esc(codeState.path)}${codeState.line?": "+codeState.line:""}</span><button id="bCloseCode">закрыть</button></div><pre id="codePre">${esc(codeState.code)}</pre></div>`;
+ }
+ d.innerHTML=rows([["kind",n.kind],["label",n.label],["file",n.file_path],["line",n.line]])+extra+
+   `<button id="bCode">${btn}</button>`+code;
+ $("bCode").onclick=()=>openCode(n);
+ if($("bCloseCode"))$("bCloseCode").onclick=()=>{codeState=null;renderInspector()};
+ if(codeState){
+   const pre=$("codePre");
+   if(pre&&codeState.line)pre.scrollTop=Math.max(0,(codeState.line-5)*15);
+ }
+}
+async function openCode(n){
+ try{
+   const r=await fetch("/api/file?path="+encodeURIComponent(n.file_path));
+   const j=await r.json();
+   codeState={path:n.file_path,line:n.line,code:j.code||"(файл не найден)"};
+ }catch(e){codeState={path:n.file_path,line:n.line,code:"ошибка: "+e.message}}
+ renderInspector();
+}
 // ---------- события ----------
-document.querySelectorAll("#toolbar .modes button").forEach(b=>b.onclick=async()=>{document.querySelectorAll("#toolbar .modes button").forEach(x=>x.classList.remove("on"));b.classList.add("on");mode=b.dataset.m;try{if(mode!=="viol"){layoutGraph(mode);await persist()}renderCanvas();fitView()}catch(e){toast("ошибка: "+e.message)}});
-document.addEventListener("keydown",e=>{if(e.key==="Escape"){if(linkSrc){linkSrc=null;toast("выбор связи отменён")}document.querySelectorAll(".modal").forEach(m=>m.style.display="none")}});
-$("zIn").onclick=()=>zoomCenter(1.2);$("zOut").onclick=()=>zoomCenter(1/1.2);$("zFit").onclick=()=>fitView();$("zReset").onclick=()=>{view.k=1;applyView()};
-$("canvas").addEventListener("mousedown",e=>{if(e.button!==0||e.target.closest(".node"))return;panDrag={sx:e.clientX,sy:e.clientY,ox:view.x,oy:view.y};$("canvas").style.cursor="grabbing";e.preventDefault()});
-document.addEventListener("mousemove",e=>{if(!panDrag)return;view.x=panDrag.ox+e.clientX-panDrag.sx;view.y=panDrag.oy+e.clientY-panDrag.sy;applyView()});
-document.addEventListener("mouseup",()=>{if(panDrag){panDrag=null;const c=$("canvas");if(c)c.style.cursor="grab"}});
-$("canvas").addEventListener("wheel",e=>{if(e.target.closest("textarea,.bd"))return;e.preventDefault();zoomAt(e.clientX,e.clientY,e.deltaY<0?1.12:1/1.12)},{passive:false});
-$("bFile").onclick=e=>{e.stopPropagation();const dd=$("fileDrop");dd.style.display=dd.style.display==="none"?"block":"none"};
-document.addEventListener("click",()=>{$("fileDrop").style.display="none"});
-$("fExport").onclick=()=>{const blob=new Blob([JSON.stringify(G,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="graph.json";a.click();URL.revokeObjectURL(a.href)};
-$("fReset").onclick=async()=>{if(confirm("Сбросить буфер и пересобрать граф по коду?")){try{await api("POST","/api/scan");codeCache={};await loadAll();toast("scan готов")}catch(e){toast("ошибка: "+e.message)}}};
-$("fAbout").onclick=()=>toast("studio: код → граф → код · офлайн · проект не запускается");
-$("bScan").onclick=async()=>{try{if(!confirm("scan пересоберёт граф по коду (буфер правок затрется). Продолжить?"))return;await api("POST","/api/scan");codeCache={};await loadAll();toast("scan готов")}catch(e){toast("ошибка: "+e.message)}};
-$("bValidate").onclick=async()=>{try{await loadAll();toast(VIOL.length?`нарушений: ${VIOL.length}`:"нарушений нет")}catch(e){toast("ошибка: "+e.message)}};
-$("bDiff").onclick=async()=>{try{const d=await api("GET","/api/diff");$("diffPre").textContent=d.diff||"(пусто)";$("mDiff").style.display="flex"}catch(e){toast("ошибка: "+e.message)}};
-$("mDiffClose").onclick=()=>$("mDiff").style.display="none";
-$("bSave").onclick=async()=>{try{const r=await api("POST","/api/save",{confirm:false});if(r.need_confirm){$("diffPre").textContent=r.diff;if(confirm("Есть изменения/нарушения. Записать в код?")){const r2=await api("POST","/api/save",{confirm:true});toast("save: "+r2.ops.length+" операций");codeCache={};await loadAll()}else{$("mDiff").style.display="flex"}}else{toast("save: "+r.ops.length+" операций");codeCache={};await loadAll()}}catch(e){toast("save отклонён: "+e.message)}};
-$("bConfig").onclick=()=>{renderCfg();$("mConfig").style.display="flex"};
-$("cfgClose").onclick=()=>$("mConfig").style.display="none";
-$("cfgSave").onclick=async()=>{try{await api("PUT","/api/config",CFG);await loadAll();$("mConfig").style.display="none";toast("config.toml сохранён. Сменились имена/правила — сделай Scan")}catch(e){toast("ошибка: "+e.message)}};
-$("canvas").ondragover=e=>e.preventDefault();
-$("canvas").ondrop=async e=>{e.preventDefault();try{let d;try{d=JSON.parse(e.dataTransfer.getData("text/plain"))}catch{return}const[wx,wy]=toWorld(e.clientX,e.clientY);const x=Math.max(0,wx),y=Math.max(0,wy);const base0=newNodeBase(d.domain,d.layer);let id=base0+".py",i=2;while(G.nodes.some(n=>n.id===id&&n.status!=="deleted")){id=`${base0}${i}.py`;i++}G.nodes.push({id,path:id,domain:d.domain,layer:d.layer,business:d.business||"общее",contracts:[],properties:{name:id.split("/").pop().replace(".py",""),description:"",metadata:{}},ui:{x,y,state:"expanded"},status:"added",code:null});await persist();await loadAll();select({t:"node",id});const nn=G.nodes.find(n=>n.id===id);if(nn){resolveCollisions(nn);await persist();renderCanvas()}}catch(err){toast("ошибка: "+err.message)}};
-loadAll().catch(e=>{document.body.innerHTML="<pre>studio server недоступен: "+e.message+"</pre>"});
+document.querySelectorAll("#modes button").forEach(b=>b.onclick=()=>{
+ mode=b.dataset.m;
+ if(mode==="scenario"&&!selScenario)selScenario=scenList[0]||null;
+ setModeButtons();renderCanvas();renderInspector();fitView();
+});
+$("zIn").onclick=()=>zoomCenter(1.2);
+$("zOut").onclick=()=>zoomCenter(1/1.2);
+$("zFit").onclick=fitView;
+$("zReset").onclick=()=>{view.k=1;applyView()};
+let panDrag=null;
+$("canvas").addEventListener("mousedown",e=>{
+ if(e.button!==0||e.target.closest(".node,.badge"))return;
+ panDrag={sx:e.clientX,sy:e.clientY,ox:view.x,oy:view.y};
+ $("canvas").classList.add("grabbing");e.preventDefault();
+});
+document.addEventListener("mousemove",e=>{
+ if(!panDrag)return;
+ view.x=panDrag.ox+e.clientX-panDrag.sx;view.y=panDrag.oy+e.clientY-panDrag.sy;applyView();
+});
+document.addEventListener("mouseup",()=>{if(panDrag){panDrag=null;$("canvas").classList.remove("grabbing")}});
+$("canvas").addEventListener("wheel",e=>{e.preventDefault();zoomAt(e.clientX,e.clientY,e.deltaY<0?1.12:1/1.12)},{passive:false});
+$("canvas").addEventListener("click",e=>{
+ const el=e.target.closest(".node[data-id]");
+ if(!el)return;
+ const n=byId[el.dataset.id];if(!n)return;
+ if(mode==="overview"){
+   if(n.kind==="scenario"){selectScenario(n.id);return;}
+   selId=n.id;codeState=null;renderCanvas();renderInspector();return;
+ }
+ if(n.kind==="scenario"&&n.id!==selScenario){selectScenario(n.id);return;}
+ selId=n.id;codeState=null;renderCanvas();renderInspector();
+});
+document.addEventListener("keydown",e=>{
+ if(e.key==="Escape"){
+   if(codeState){codeState=null;renderInspector();return;}
+   selId=null;renderCanvas();renderInspector();
+ }
+});
+load().catch(e=>{
+ document.body.innerHTML='<pre style="padding:20px;color:#ff5d5d">studio server недоступен: '+esc(e.message)+'</pre>';
+});
 </script>
 </body>
 </html>
