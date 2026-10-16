@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pacage-studio"
-version = "0.2.0"
+version = "0.3.0"
 description = "Studio — офлайн dev-инструмент: код → граф → код (три пакета: infra / logic / presentation)"
 readme = "README.md"
 requires-python = ">=3.11"

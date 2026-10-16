@@ -1,9 +1,9 @@
 """AST-сканер: код → узлы, контракты, связи. Только чтение, код не трогает.
 
 Адресация под стек event-infra / core-package / fastbase:
-- слой: сначала маркеры содержимого (decorator/base_class/module_attr),
-  затем пути из конфига (длиннейший матч), иначе "unknown";
-- домен: сегмент пути из конфига, иначе default_domain.
+- домены = три пакета (infra / core / presentation), остальное → default_domain;
+- слой: маркеры содержимого, затем пути из конфига, иначе "unknown";
+- сканируется только пользовательский код (каркас пакетов пропускается).
 """
 
 from __future__ import annotations
@@ -138,7 +138,7 @@ def parse_contracts(source: str, layer: str, naming: dict) -> list[Contract]:
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
             abstract_cls = _is_abstract_class(node)
-            if layer == "infrastructure" and _has_base(node, "SQLModel"):
+            if layer == "models" and _has_base(node, "SQLModel"):
                 # SQLModel-модель: реализация, имя таблицы — в owner
                 out.append(Contract(name=node.name, kind="implementation", owner=_tablename(node), line=node.lineno))
                 continue
@@ -148,7 +148,7 @@ def parse_contracts(source: str, layer: str, naming: dict) -> list[Contract]:
             pat = abs_pat if kind == "abstraction" else impl_pat
             if matches(pat, node.name):
                 out.append(Contract(name=node.name, kind=kind, owner=None, line=node.lineno))
-            scenario_cls = layer == "logic" and _has_base(node, "BaseScenario")
+            scenario_cls = layer == "scenarios" and _has_base(node, "BaseScenario")
             for item in node.body:
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     if item.name.startswith("_"):
@@ -166,8 +166,8 @@ def parse_contracts(source: str, layer: str, naming: dict) -> list[Contract]:
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if node.name.startswith("_"):
                 continue
-            # публичные функции representation — реализации по определению слоя
-            if layer == "representation" or matches(impl_pat, node.name):
+            # публичные функции routes — реализации по определению слоя
+            if layer == "routes" or matches(impl_pat, node.name):
                 out.append(Contract(name=node.name, kind="implementation", owner=None, line=node.lineno))
     # дедупликация по (name, kind, owner)
     seen, uniq = set(), []
@@ -179,23 +179,31 @@ def parse_contracts(source: str, layer: str, naming: dict) -> list[Contract]:
     return uniq
 
 
+def _domain_by_path(posix: str, parts: tuple, domains: list[dict]) -> str | None:
+    """Домен по путям: точное совпадение, префикс с '/' или сегмент пути."""
+    for d in domains:
+        if not isinstance(d, dict) or not d.get("name"):
+            continue
+        paths = d.get("paths", [d.get("path", "")] if d.get("path") else [])
+        for p in [str(x) for x in paths if x]:
+            if posix == p or posix.startswith(p + "/") or p in parts:
+                return d["name"]
+    return None
+
+
 def infer_domain_layer(rel: Path, cfg: dict, source: str | None = None) -> tuple[str, str]:
     """Адрес узла (домен, слой).
 
-    Домен: первый совпавший path из domains как сегмент пути, иначе default_domain.
+    Домен: первый совпавший путь из domains, иначе default_domain.
     Слой: маркеры содержимого (нужен source) → пути из конфига (длиннейший матч) → "unknown".
     """
     st = cfg.get("studio", cfg) if isinstance(cfg, dict) else {}
     domains = st.get("domains", []) if isinstance(st, dict) else []
     layers = st.get("layers", []) if isinstance(st, dict) else []
     markers = st.get("markers", {}) if isinstance(st, dict) else {}
-    default_domain = (st.get("default_domain") or "app") if isinstance(st, dict) else "app"
-    domain = default_domain
-    for d in domains:
-        if isinstance(d, dict) and d.get("path") and d["path"] in rel.parts:
-            domain = d["name"]
-            break
+    default_domain = (st.get("default_domain") or "shared") if isinstance(st, dict) else "shared"
     posix = rel.as_posix()
+    domain = _domain_by_path(posix, rel.parts, domains) or default_domain
     layer = None
     if source is not None:
         try:
@@ -209,14 +217,22 @@ def infer_domain_layer(rel: Path, cfg: dict, source: str | None = None) -> tuple
     return domain, layer or UNKNOWN_LAYER
 
 
+# Каркас пакетов: не код клиента, в граф не попадает.
+SKIP_DIRS = ("alembic", "app/core")
+SKIP_FILES = ("run_infrastructure.py", "app/main.py")
+
+
 def iter_project_files(root: Path) -> list[Path]:
     files = []
     for p in root.rglob("*.py"):
         parts = p.parts
         if ".studio" in parts or "__pycache__" in parts or ".venv" in parts or "venv" in parts or ".git" in parts:
             continue
-        if "alembic" in parts and "versions" in parts:
-            continue  # автогенерации миграций в графе не место
+        rel = p.relative_to(root).as_posix()
+        if any(rel == d or rel.startswith(d + "/") for d in SKIP_DIRS):
+            continue
+        if rel in SKIP_FILES:
+            continue
         files.append(p)
     return sorted(files)
 

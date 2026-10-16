@@ -1,8 +1,9 @@
 """Что проверяется: команды целиком на проекте под стек.
 
-Описание словами: init создаёт .studio с пятью слоями, scan строит граф
-и считает узлы, validate ловит нарушение, save пишет правки в код,
-а удаление .studio и повторный scan восстанавливают граф.
+Описание словами: init создаёт .studio с конфигом стека, scan строит граф
+только из пользовательского кода (каркас пакетов пропускается),
+validate ловит нарушение, save пишет правки, а удаление .studio
+и повторный scan восстанавливают граф.
 """
 
 import shutil
@@ -13,18 +14,14 @@ from studio.cli import cmd_init, cmd_save, cmd_scan, cmd_validate
 
 
 def _demo(root):
-    """Мини-проект в раскладке стека: модели, сценарий, роут, схема, конфиг, alembic."""
+    """Мини-проект в раскладке стека: модели, сценарий, роут, схемы."""
     (root / "app" / "scenarios").mkdir(parents=True)
     (root / "app" / "api" / "v1" / "routes").mkdir(parents=True)
     (root / "app" / "schemas").mkdir(parents=True)
-    (root / "app" / "core").mkdir(parents=True)
-    (root / "alembic" / "versions").mkdir(parents=True)
     (root / "models.py").write_text(
         "from sqlmodel import SQLModel\nclass User(SQLModel, table=True):\n"
         "    __tablename__ = 'users'\n", encoding="utf-8")
     (root / "run_infrastructure.py").write_text("def main():\n    return 1\n", encoding="utf-8")
-    (root / "alembic" / "env.py").write_text("x = 1\n", encoding="utf-8")
-    (root / "alembic" / "versions" / "v1.py").write_text("y = 2\n", encoding="utf-8")
     (root / "app" / "scenarios" / "create_user.py").write_text(
         "from core import BaseScenario, register_scenario\n@register_scenario('create_user')\n"
         "class CreateUser(BaseScenario):\n    async def execute(self, dto):\n        return {}\n",
@@ -37,7 +34,6 @@ def _demo(root):
     (root / "app" / "schemas" / "contracts.py").write_text(
         "from abc import ABC, abstractmethod\nclass ApiContract(ABC):\n"
         "    @abstractmethod\n    def create_user(self, dto): ...\n", encoding="utf-8")
-    (root / "app" / "core" / "config.py").write_text("class Settings:\n    x = 1\n", encoding="utf-8")
 
 
 def _args(project, **kw):
@@ -48,14 +44,15 @@ def _args(project, **kw):
 
 
 def test_init_даёт_конфиг_стека(tmp_path):
-    """init на пустой папке: config с пятью слоями, пустыми доменами, default_domain=app."""
+    """init на пустой папке: 6 слоёв, 3 домена-пакета, default_domain=shared."""
     assert cmd_init(_args(tmp_path, force=True)) == 0
     text = (tmp_path / ".studio" / "config.toml").read_text(encoding="utf-8")
-    assert "default_domain" in text and "[[studio.domains]]" not in text
+    assert "presentation" in text
     cfg = store.read_config(tmp_path)["studio"]
     assert [layer["name"] for layer in cfg["layers"]] == [
-        "infrastructure", "logic", "representation", "schema", "config"]
-    assert cfg["domains"] == [] and cfg["default_domain"] == "app"
+        "models", "scenarios", "interfaces", "utils", "routes", "schemas"]
+    assert [d["name"] for d in cfg["domains"]] == ["infra", "core", "presentation"]
+    assert cfg["default_domain"] == "shared"
 
 
 def test_scan_пустого_проекта(tmp_path):
@@ -65,17 +62,17 @@ def test_scan_пустого_проекта(tmp_path):
 
 
 def test_полный_цикл_init_scan_validate(tmp_path, capsys):
-    """init -> scan -> validate: 8 узлов (versions пропущен), 1 связь rep->schema, нарушений ноль."""
+    """init -> scan -> validate: 5 узлов (каркас пропущен), 1 связь routes->schemas, нарушений ноль."""
     _demo(tmp_path)
     assert cmd_init(_args(tmp_path, force=True)) == 0
     assert cmd_scan(_args(tmp_path)) == 0
     assert cmd_validate(_args(tmp_path)) == 0
     out = capsys.readouterr().out
-    assert "nodes 8" in out and "links 1" in out and "ok" in out
+    assert "nodes 5" in out and "links 1" in out and "ok" in out
 
 
 def test_validate_ловит_нарушение_и_выходит_с_единицей(tmp_path):
-    """Роут реализует контракт инфраструктуры: validate печатает нарушение, код возврата 1."""
+    """Роут реализует контракт моделей: validate печатает нарушение, код возврата 1."""
     (tmp_path / "app" / "api" / "v1" / "routes").mkdir(parents=True)
     (tmp_path / "models.py").write_text(
         "from abc import ABC, abstractmethod\nclass Store(ABC):\n"

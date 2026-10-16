@@ -1,9 +1,9 @@
 """Чтение/запись .studio/config.toml + схема конфига по умолчанию.
 
 Схема под стек event-infra / core-package / fastbase:
-- слой = список путей (папка или файл) + маркеры содержимого;
-- домены опциональны, несовпавшие файлы уходят в default_domain;
-- несовпавшие ни с чем файлы получают слой "unknown".
+- домены = три пакета (infra / core / presentation), остальное → default_domain;
+- слой = маркеры содержимого, затем пути из конфига, иначе "unknown";
+- сканируется только пользовательский код (каркас пакетов пропускается).
 """
 
 from __future__ import annotations
@@ -14,46 +14,54 @@ from pathlib import Path
 
 UNKNOWN_LAYER = "unknown"
 
-DEFAULT_DOMAIN = "app"
+DEFAULT_DOMAIN = "shared"
 
-DEFAULT_DOMAINS: list[dict] = []
+DEFAULT_DOMAINS = [
+    {"name": "infra",        "paths": ["models.py"]},
+    {"name": "core",         "paths": ["scenarios", "interfaces", "utils"]},
+    {"name": "presentation", "paths": ["routes", "schemas"]},
+]
 
 DEFAULT_LAYERS = [
-    {"name": "infrastructure", "paths": ["infrastructure", "models.py", "run_infrastructure.py", "alembic"], "order": 0},
-    {"name": "logic",          "paths": ["scenarios", "interfaces", "utils"],                                "order": 1},
-    {"name": "representation", "paths": ["app/api/v1/routes", "app/api/handlers.py"],                       "order": 2},
-    {"name": "schema",         "paths": ["app/schemas"],                                                    "order": 3},
-    {"name": "config",         "paths": ["app/core"],                                                       "order": 4},
+    {"name": "models",     "paths": ["models.py"],  "order": 0},
+    {"name": "scenarios",  "paths": ["scenarios"],  "order": 1},
+    {"name": "interfaces", "paths": ["interfaces"], "order": 2},
+    {"name": "utils",      "paths": ["utils"],      "order": 3},
+    {"name": "routes",     "paths": ["routes"],     "order": 4},
+    {"name": "schemas",    "paths": ["schemas"],    "order": 5},
 ]
 
 # Правила именования по слою: паттерн абстракции / паттерн реализации (regex, search).
 DEFAULT_NAMING = {
-    "infrastructure": {"abstraction": r"^Abstract.*$", "implementation": r".+"},
-    "logic":          {"abstraction": r"^Abstract.*$", "implementation": r".+"},
-    "representation": {"abstraction": r"^Abstract.*$", "implementation": r".+"},
-    "schema":         {"abstraction": r"^Abstract.*$", "implementation": r".+"},
-    "config":         {"abstraction": r"^Abstract.*$", "implementation": r".+"},
+    "models":     {"abstraction": r"^Abstract.*$", "implementation": r".+"},
+    "scenarios":  {"abstraction": r"^Abstract.*$", "implementation": r".+"},
+    "interfaces": {"abstraction": r"^Abstract.*$", "implementation": r".+"},
+    "utils":      {"abstraction": r"^Abstract.*$", "implementation": r".+"},
+    "routes":     {"abstraction": r"^Abstract.*$", "implementation": r".+"},
+    "schemas":    {"abstraction": r"^Abstract.*$", "implementation": r".+"},
 }
 
 # Маркеры слоя по содержимому файла. Виды: decorator, base_class, module_attr.
 DEFAULT_MARKERS = {
-    "infrastructure": {"base_class": "SQLModel"},
-    "logic":          {"decorator": "register_scenario", "base_class": "BaseScenario"},
-    "representation": {"module_attr": "router",          "decorator": "scenario_route"},
-    "schema":         {"base_class": "BaseModel"},
-    "config":         {"base_class": "BaseAppSettings"},
+    "models":    {"base_class": "SQLModel"},
+    "scenarios": {"decorator": "register_scenario", "base_class": "BaseScenario"},
+    "routes":    {"module_attr": "router",           "decorator": "scenario_route"},
+    "schemas":   {"base_class": "BaseModel"},
 }
 
 MARKER_KINDS = ("decorator", "base_class", "module_attr")
 
 # Разрешённые направления (from_layer → to_layer). Всё остальное — нарушение.
+# Представление идёт только через сценарии, сценарии — через контракты к моделям.
 DEFAULT_ALLOWED = [
-    ["representation", "logic"],
-    ["representation", "schema"],
-    ["logic",          "infrastructure"],
-    ["logic",          "schema"],
-    ["infrastructure", "schema"],
-    ["schema",         "schema"],
+    ["routes",    "scenarios"],
+    ["routes",    "schemas"],
+    ["scenarios", "models"],
+    ["scenarios", "schemas"],
+    ["scenarios", "interfaces"],
+    ["scenarios", "utils"],
+    ["interfaces", "schemas"],
+    ["utils",     "schemas"],
 ]
 
 
@@ -65,7 +73,7 @@ def default_config() -> dict:
         "studio": {
             "project_root": ".",
             "default_domain": DEFAULT_DOMAIN,
-            "domains": [dict(d) for d in DEFAULT_DOMAINS],
+            "domains": [dict(d, paths=list(d["paths"])) for d in DEFAULT_DOMAINS],
             "layers": [{"name": layer["name"], "paths": list(layer["paths"]), "order": layer["order"]} for layer in DEFAULT_LAYERS],
             "naming": naming,
             "markers": markers,
@@ -89,12 +97,12 @@ def dumps(cfg: dict) -> str:
     out = ["[studio]",
            f'project_root = {_toml_str(str(st.get("project_root", ".")))}',
            f'default_domain = {_toml_str(str(st.get("default_domain", DEFAULT_DOMAIN)))}', ""]
-    domains = st.get("domains", [])
-    if domains:
-        for d in domains:
-            out += ["[[studio.domains]]", f'name = {_toml_str(d["name"])}', f'path = {_toml_str(d.get("path", d["name"]))}', ""]
+    for d in st.get("domains", []):
+        # обратно совместимо: domains пишут paths массивом, читают и path, и paths
+        paths = d.get("paths", [d["path"]] if d.get("path") else [])
+        out += ["[[studio.domains]]", f'name = {_toml_str(d["name"])}',
+                f'paths = {_toml_arr([p for p in paths if p])}', ""]
     for layer in st.get("layers", []):
-        # обратно совместимо: paths всегда массивом; одиночный path мигрирует в paths при чтении
         paths = layer.get("paths", [layer.get("path", layer.get("name", ""))])
         out += ["[[studio.layers]]", f'name = {_toml_str(layer["name"])}',
                 f'paths = {_toml_arr([p for p in paths if p])}', f'order = {int(layer.get("order", 0))}', ""]
@@ -123,6 +131,17 @@ def load(path: Path) -> dict:
     return _normalize(raw)
 
 
+def _norm_paths(raw: dict, i: int) -> list[str]:
+    """paths массивом; миграция старых форматов: path строкой или именем."""
+    if isinstance(raw.get("paths"), list):
+        paths = [str(p) for p in raw["paths"] if p]
+        if paths:
+            return paths
+    if raw.get("path"):
+        return [str(raw["path"])]
+    return [str(raw.get("name", f"item{i}"))]
+
+
 def _normalize(raw: dict) -> dict:
     st = raw.get("studio", raw) if isinstance(raw, dict) else {}
     cfg = default_config()["studio"]
@@ -133,20 +152,15 @@ def _normalize(raw: dict) -> dict:
     if isinstance(st.get("default_domain"), str) and st["default_domain"]:
         cfg["default_domain"] = st["default_domain"]
     if isinstance(st.get("domains"), list):
-        cfg["domains"] = [{"name": str(d.get("name")), "path": str(d.get("path", d.get("name")))} for d in st["domains"] if isinstance(d, dict) and d.get("name")]
+        cfg["domains"] = [{"name": str(d.get("name")), "paths": _norm_paths(d, i)}
+                          for i, d in enumerate(st["domains"]) if isinstance(d, dict) and d.get("name")]
     if isinstance(st.get("layers"), list) and st["layers"]:
         norm_layers = []
         for i, layer in enumerate(st["layers"]):
             if not isinstance(layer, dict) or not layer.get("name"):
                 continue
-            # миграция старого формата: одиночный path -> paths=[path]
-            if isinstance(layer.get("paths"), list):
-                paths = [str(p) for p in layer["paths"] if p]
-            elif layer.get("path"):
-                paths = [str(layer["path"])]
-            else:
-                paths = [str(layer["name"])]
-            norm_layers.append({"name": str(layer["name"]), "paths": paths, "order": int(layer.get("order", i))})
+            norm_layers.append({"name": str(layer["name"]), "paths": _norm_paths(layer, i),
+                                "order": int(layer.get("order", i))})
         if norm_layers:
             cfg["layers"] = norm_layers
     if isinstance(st.get("naming"), dict):
