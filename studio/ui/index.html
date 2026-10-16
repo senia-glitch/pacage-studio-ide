@@ -26,8 +26,9 @@ main{flex:1;display:grid;grid-template-columns:250px 1fr 290px;min-height:0}
 #center{display:flex;flex-direction:column;min-width:0}
 #toolbar{display:flex;gap:6px;align-items:center;padding:6px 10px;background:var(--panel);border-bottom:1px solid #000;flex-wrap:wrap}
 #toolbar .modes button.on{background:var(--acc);color:#141310;border-color:var(--acc);font-weight:700}
-#canvas{flex:1;position:relative;overflow:auto;background:radial-gradient(circle at 1px 1px,#34353b 1px,transparent 1px);background-size:22px 22px;min-height:0}
-#stage{position:relative;min-width:100%;min-height:100%}
+#canvas{flex:1;position:relative;overflow:hidden;cursor:grab;background:#232428;min-height:0}
+#view{transform-origin:0 0;position:absolute;left:0;top:0}
+#stage{position:relative;min-width:100%;min-height:100%;background:radial-gradient(circle at 1px 1px,#34353b 1px,transparent 1px);background-size:22px 22px}
 #edges{position:absolute;inset:0;pointer-events:none}
 .node{position:absolute;width:230px;background:#313236;border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 14px #0008;user-select:none}
 .node.sel{outline:2px solid var(--acc)}
@@ -91,10 +92,11 @@ footer{background:var(--hdr);border-top:1px solid #000;padding:3px 10px;font-siz
 </span>
 <select id="fDomain" title="фильтр домена"><option value="">домен: все</option></select>
 <select id="fLayer" title="фильтр слоя"><option value="">слой: все</option></select>
+<span class="modes"><button id="zOut" title="отдалить">−</button><span id="zoomLabel" style="min-width:44px;text-align:center;font-size:11px;color:var(--dim)">100%</span><button id="zIn" title="приблизить">+</button><button id="zFit" title="вписать граф">вписать</button><button id="zReset" title="масштаб 100%">1:1</button></span>
 <span style="flex:1"></span>
-<span style="font-size:11px;color:var(--dim)">тяни узел за шапку · клик по точке = связь · double-click = code view</span>
+<span style="font-size:11px;color:var(--dim)">фон — панорама · колесо — зум · точка = связь · Esc — отмена</span>
 </div>
-<div id="canvas"><div id="stage"><svg id="edges"></svg></div></div>
+<div id="canvas"><div id="view"><div id="stage"><svg id="edges"></svg></div></div></div>
 </div>
 <div id="right"><h3>Инспектор</h3><div id="insp"><p style="color:var(--dim)">Выбери узел или связь.</p></div></div>
 </main>
@@ -126,8 +128,16 @@ const fd=$("fDomain"),fl=$("fLayer"),cd=fd.value,cl=fl.value;fd.innerHTML='<opti
 function renderOutliner(){const o=$("outliner");o.innerHTML="";const byD={};G.nodes.forEach(n=>{(byD[n.domain]=byD[n.domain]||{});(byD[n.domain][n.layer]=byD[n.domain][n.layer]||[]).push(n)});Object.keys(byD).sort().forEach(d=>{const det=document.createElement("details");det.open=true;const sm=document.createElement("summary");sm.textContent=d;det.appendChild(sm);Object.keys(byD[d]).sort().forEach(l=>{const d2=document.createElement("details");d2.open=true;const s2=document.createElement("summary");s2.textContent="↳ "+l;d2.appendChild(s2);byD[d][l].sort((a,b)=>a.id.localeCompare(b.id)).forEach(n=>{const e=document.createElement("div");e.className="onode"+(sel&&sel.id===n.id?" sel":"");e.textContent="▤ "+n.id;e.onclick=()=>{select({t:"node",id:n.id});centerOn(n)};d2.appendChild(e)});det.appendChild(d2)});o.appendChild(det)})}
 // ---------- канвас ----------
 function visible(n){const vs=new Set(VIOL.flatMap(v=>[v.from_node,v.to_node]));if(mode==="viol"&&!vs.has(n.id))return false;if(mode==="domain"&&$("fDomain").value&&n.domain!==$("fDomain").value)return false;if(mode==="layer"&&$("fLayer").value&&n.layer!==$("fLayer").value)return false;return true}
-function centerOn(n){const c=$("canvas");c.scrollTo({left:Math.max(0,n.ui.x-300),top:Math.max(0,n.ui.y-200),behavior:"smooth"})}
-function renderAll(){renderPalette();renderOutliner();renderCanvas();renderInspector();const vv=VIOL.length;$("fViol").textContent="нарушений: "+vv;$("stats").textContent=`узлов ${G.nodes.length} · связей ${G.links.length}`}
+function centerOn(n){const c=$("canvas");view.x=c.clientWidth/2-(n.ui.x+115)*view.k;view.y=c.clientHeight/2-(n.ui.y+60)*view.k;applyView()}
+/* ---------- панорама и зум канваса (экраные px <-> мировые координаты) ---------- */
+const view={x:40,y:40,k:1};
+function applyView(){const v=$("view");if(v)v.style.transform=`translate(${view.x}px,${view.y}px) scale(${view.k})`;const z=$("zoomLabel");if(z)z.textContent=Math.round(view.k*100)+"%"}
+function toWorld(cx,cy){const r=$("canvas").getBoundingClientRect();return[(cx-r.left-view.x)/view.k,(cy-r.top-view.y)/view.k]}
+function zoomAt(cx,cy,f){const r=$("canvas").getBoundingClientRect();const px=cx-r.left,py=cy-r.top;const k2=Math.min(2.5,Math.max(.3,view.k*f));const s=k2/view.k;view.x=px-(px-view.x)*s;view.y=py-(py-view.y)*s;view.k=k2;applyView()}
+function zoomCenter(f){const r=$("canvas").getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,f)}
+function fitView(){const vis=G.nodes.filter(visible);if(!vis.length)return;let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;vis.forEach(n=>{x0=Math.min(x0,n.ui.x);y0=Math.min(y0,n.ui.y);x1=Math.max(x1,n.ui.x+230);y1=Math.max(y1,n.ui.y+120)});const c=$("canvas");const k=Math.min(2,Math.max(.3,Math.min((c.clientWidth-80)/Math.max(1,x1-x0),(c.clientHeight-80)/Math.max(1,y1-y0))));view.k=k;view.x=(c.clientWidth-(x1-x0)*k)/2-x0*k;view.y=(c.clientHeight-(y1-y0)*k)/2-y0*k;applyView()}
+let panDrag=null;
+function renderAll(){renderPalette();renderOutliner();renderCanvas();renderInspector();const vv=VIOL.length;$("fViol").textContent="нарушений: "+vv;const dirty=G.nodes.some(n=>n.status==="added"||n.status==="modified"||n.status==="deleted")||G.links.some(l=>l.status!=="tracked");$("stats").textContent=`узлов ${G.nodes.length} · связей ${G.links.length}${dirty?" · ● не сохранено":""}`}
 function renderCanvas(){const st=$("stage");st.querySelectorAll(".node").forEach(e=>e.remove());const svg=$("edges");svg.innerHTML="";const vis=G.nodes.filter(visible);const byId={};G.nodes.forEach(n=>byId[n.id]=n);
 vis.forEach(n=>{const el=document.createElement("div");el.className="node"+(sel&&sel.id===n.id?" sel":"")+(VIOL.some(v=>v.from_node===n.id||v.to_node===n.id)?" viol":"");el.style.left=n.ui.x+"px";el.style.top=n.ui.y+"px";el.dataset.id=n.id;const col=LAYER_COLORS[n.layer]||"#888";
 let inner=`<div class="hd" style="background:${col}33;border-bottom:2px solid ${col}"><span title="${esc(n.id)}">▤ ${esc(n.id.split("/").pop())}</span><span style="font-weight:400;font-size:10px">${esc(n.status||"")}</span></div><div class="chips"><span class="chip">${esc(n.domain)}</span><span class="chip" style="border-color:${col};color:${col}">${esc(n.layer)}</span></div><div class="bd">`;
@@ -135,20 +145,21 @@ if(n.ui.state==="code"){const code=n.code!=null?n.code:(codeCache[n.id]??"(за�
 else if(n.ui.state==="expanded"){inner+=n.contracts.map(c=>`<div class="crow"><span class="dot ${c.kind==="abstraction"?"abs":""}" data-c="${esc(c.name)}" title="${esc(c.kind)}: ${esc(c.name)}"></span><span class="nm">${esc(c.name)}</span><small style="color:var(--dim)">${c.kind==="abstraction"?"abs":"impl"}</small></div>`).join("")||'<p style="color:var(--dim)">контрактов нет</p>';inner+=`<div class="nbtns"><button data-a="collapse">свернуть</button><button data-a="code">code view</button><button data-a="del" class="danger">✕</button></div>`}
 else{inner+=`<div style="color:var(--dim);font-size:11px;padding:0 0 4px">${n.contracts.length} контрактов · double-click развернуть</div><div class="nbtns"><button data-a="expand">развернуть</button><button data-a="code">code</button></div>`}
 inner+="</div>";el.innerHTML=inner;
-el.querySelector(".hd").onmousedown=e=>{if(e.target.tagName==="BUTTON")return;const sx=e.clientX,sy=e.clientY,ox=n.ui.x,oy=n.ui.y;const mv=ev=>{n.ui.x=ox+ev.clientX-sx;n.ui.y=oy+ev.clientY-sy;el.style.left=n.ui.x+"px";el.style.top=n.ui.y+"px";drawEdges()};const up=()=>{document.removeEventListener("mousemove",mv);document.removeEventListener("mouseup",up);persist()};document.addEventListener("mousemove",mv);document.addEventListener("mouseup",up)};
+el.querySelector(".hd").onmousedown=e=>{if(e.target.tagName==="BUTTON")return;const sx=e.clientX,sy=e.clientY,ox=n.ui.x,oy=n.ui.y;const mv=ev=>{n.ui.x=ox+(ev.clientX-sx)/view.k;n.ui.y=oy+(ev.clientY-sy)/view.k;el.style.left=n.ui.x+"px";el.style.top=n.ui.y+"px";drawEdges()};const up=()=>{document.removeEventListener("mousemove",mv);document.removeEventListener("mouseup",up);persist()};document.addEventListener("mousemove",mv);document.addEventListener("mouseup",up)};
 el.onclick=e=>{const b=e.target.closest("button");if(b){nodeAction(n,b.dataset.a);e.stopPropagation();return}const d=e.target.closest(".dot");if(d){contractClick(n,d.dataset.c);e.stopPropagation();return}select({t:"node",id:n.id})};
 el.ondblclick=e=>{if(e.target.closest("button")||e.target.closest("textarea"))return;n.ui.state=n.ui.state==="expanded"?"collapsed":"expanded";persist().then(renderAll)};
 st.appendChild(el);
 if(n.ui.state==="code"&&n.code==null&&codeCache[n.id]===undefined){fetch("/api/file?path="+encodeURIComponent(n.id)).then(r=>r.json()).then(j=>{codeCache[n.id]=j.code||"";if(byId[n.id]&&byId[n.id].ui.state==="code")renderCanvas()}).catch(()=>{})}
 else if(n.code!=null){codeCache[n.id]=n.code}
 });
-drawEdges();st.style.width="3000px";st.style.height="2000px";svg.setAttribute("width","3000");svg.setAttribute("height","2000")}
+drawEdges();applyView();st.style.width="3000px";st.style.height="2000px";svg.setAttribute("width","3000");svg.setAttribute("height","2000")}
 function nodeXY(id){const n=G.nodes.find(x=>x.id===id);return n?[n.ui.x+115,n.ui.y+30]:[0,0]}
 function drawEdges(){const svg=$("edges");svg.innerHTML="";const vis=new Set(G.nodes.filter(visible).map(n=>n.id));G.links.forEach(l=>{if(l.status==="deleted")return;if(!vis.has(l.from_node)||!vis.has(l.to_node))return;const [x1,y1]=nodeXY(l.from_node),[x2,y2]=nodeXY(l.to_node);const viol=VIOL.some(v=>v.link_id===l.id)||l.violation;const isSel=sel&&sel.t==="link"&&sel.id===l.id;const c=isSel?"#ffb35d":(viol?"#ff5d5d":(l.weak?"#8a8a93":"#5aa0ff"));const mx=(x1+x2)/2;svg.innerHTML+=`<g data-l="${esc(l.id)}" style="pointer-events:auto;cursor:pointer"><path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" stroke="${c}" stroke-width="${isSel?3.2:(viol?3:1.6)}" fill="none" ${l.weak?'stroke-dasharray="5,4"':""}/><circle cx="${x2}" cy="${y2}" r="4" fill="${c}"/><text x="${mx}" y="${(y1+y2)/2-4}" fill="${c}" font-size="10">${esc(l.contract)}</text></g>`});svg.querySelectorAll("g").forEach(g=>g.onclick=()=>select({t:"link",id:g.dataset.l}))}
 function nodeAction(n,a){if(a==="expand"){n.ui.state="expanded"}else if(a==="collapse"){n.ui.state="collapsed"}else if(a==="code"){n.ui.state="code"}else if(a==="del"){if(confirm("Удалить узел "+n.id+"? (файл удалится только по Save)")){n.status="deleted";sel=null}}else if(a==="savecode"){const ta=document.getElementById("ta-"+n.id);if(ta){n.code=ta.value;codeCache[n.id]=ta.value;if(n.status==="tracked")n.status="modified";toast("правки в буфере, файлы не тронуты — жми Save")}else{toast("не найден редактор — открой code view заново")}}persist().then(renderAll)}
 function contractClick(n,cname){if(!linkSrc){linkSrc={node:n.id,contract:cname};toast("источник: "+n.id+" :: "+cname+" — кликни точку приёмника")}else{if(linkSrc.node===n.id){linkSrc=null;toast("отмена связи");return}const a=G.nodes.find(x=>x.id===linkSrc.node),b=n;if(!allowed(a.layer,b.layer)){toast(`⛔ запрещено: ${a.layer} → ${b.layer}`);linkSrc=null;return}const id=`${a.id}::${cname}>>${b.id}`;if(!G.links.some(l=>l.id===id)){G.links.push({id,contract:cname,from_node:a.id,to_node:b.id,weak:false,violation:false,status:"added"});toast("связь в буфере: "+cname)}linkSrc=null;persist().then(loadAll)}}
 // ---------- инспектор ----------
-function select(s){sel=s;renderCanvas();renderOutliner();renderInspector()}
+function captureCodeEdits(){let changed=false;document.querySelectorAll('#stage textarea[id^="ta-"]').forEach(ta=>{const id=ta.id.slice(3);const n=G.nodes.find(x=>x.id===id);if(n&&ta.value!==(n.code??codeCache[id]??"")){n.code=ta.value;codeCache[id]=ta.value;if(n.status==="tracked")n.status="modified";changed=true}});if(changed)persist().catch(()=>{})}
+function select(s){captureCodeEdits();sel=s;renderCanvas();renderOutliner();renderInspector()}
 async function persist(){await api("PUT","/api/graph",G)}
 function renderInspector(){const d=$("insp");if(!sel){d.innerHTML='<p style="color:var(--dim)">Выбери узел или связь.</p>';return}
 if(sel.t==="node"){const n=G.nodes.find(x=>x.id===sel.id);if(!n){d.innerHTML="удалён";return}const doms=(CFG.studio.domains||[]).map(x=>x.name),lays=(CFG.studio.layers||[]).map(x=>x.name);
@@ -160,7 +171,13 @@ function renderCfg(){const c=CFG.studio;let h=`<h4>Домены (имя → па
 $("cfgBody").querySelectorAll("[data-dd]").forEach(b=>b.onclick=()=>{c.domains.splice(+b.dataset.dd,1);renderCfg()});$("addD").onclick=()=>{c.domains.push({name:"new",path:"new"});renderCfg()};$("cfgBody").querySelectorAll("[data-dl]").forEach(b=>b.onclick=()=>{c.layers.splice(+b.dataset.dl,1);renderCfg()});$("addL").onclick=()=>{c.layers.push({name:"new",path:"new",order:c.layers.length});renderCfg()};
 $("cfgBody").querySelectorAll("[data-d]").forEach(i=>i.oninput=()=>{c.domains[+i.dataset.d][i.dataset.k]=i.value});$("cfgBody").querySelectorAll("[data-l]").forEach(i=>i.oninput=()=>{const v=i.dataset.k==="order"?+i.value:i.value;c.layers[+i.dataset.l][i.dataset.k]=v});$("cfgBody").querySelectorAll("[data-n]").forEach(i=>i.oninput=()=>{c.naming[i.dataset.n][i.dataset.k]=i.value});$("cfgBody").querySelectorAll("[data-r]").forEach(ch=>ch.onchange=()=>{const[a,b]=ch.dataset.r.split("→");c.rules.allowed=c.rules.allowed.filter(p=>!(p[0]===a&&p[1]===b));if(ch.checked)c.rules.allowed.push([a,b])});$("cShow").onchange=e=>c.save.show_diff=e.target.checked;$("cMode").onchange=e=>c.save.diff_mode=e.target.value}
 // ---------- события ----------
-document.querySelectorAll("#toolbar .modes button").forEach(b=>b.onclick=async()=>{document.querySelectorAll("#toolbar .modes button").forEach(x=>x.classList.remove("on"));b.classList.add("on");mode=b.dataset.m;try{if(mode!=="viol"){layoutGraph(mode);await persist()}renderCanvas()}catch(e){toast("ошибка: "+e.message)}});
+document.querySelectorAll("#toolbar .modes button").forEach(b=>b.onclick=async()=>{document.querySelectorAll("#toolbar .modes button").forEach(x=>x.classList.remove("on"));b.classList.add("on");mode=b.dataset.m;try{if(mode!=="viol"){layoutGraph(mode);await persist()}renderCanvas();fitView()}catch(e){toast("ошибка: "+e.message)}});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"){if(linkSrc){linkSrc=null;toast("выбор связи отменён")}document.querySelectorAll(".modal").forEach(m=>m.style.display="none")}});
+$("zIn").onclick=()=>zoomCenter(1.2);$("zOut").onclick=()=>zoomCenter(1/1.2);$("zFit").onclick=()=>fitView();$("zReset").onclick=()=>{view.k=1;applyView()};
+$("canvas").addEventListener("mousedown",e=>{if(e.button!==0||e.target.closest(".node"))return;panDrag={sx:e.clientX,sy:e.clientY,ox:view.x,oy:view.y};$("canvas").style.cursor="grabbing";e.preventDefault()});
+document.addEventListener("mousemove",e=>{if(!panDrag)return;view.x=panDrag.ox+e.clientX-panDrag.sx;view.y=panDrag.oy+e.clientY-panDrag.sy;applyView()});
+document.addEventListener("mouseup",()=>{if(panDrag){panDrag=null;const c=$("canvas");if(c)c.style.cursor="grab"}});
+$("canvas").addEventListener("wheel",e=>{if(e.target.closest("textarea,.bd"))return;e.preventDefault();zoomAt(e.clientX,e.clientY,e.deltaY<0?1.12:1/1.12)},{passive:false});
 $("fDomain").onchange=renderCanvas;$("fLayer").onchange=renderCanvas;
 $("bFile").onclick=e=>{e.stopPropagation();const dd=$("fileDrop");dd.style.display=dd.style.display==="none"?"block":"none"};
 document.addEventListener("click",()=>{$("fileDrop").style.display="none"});
@@ -176,7 +193,7 @@ $("bConfig").onclick=()=>{renderCfg();$("mConfig").style.display="flex"};
 $("cfgClose").onclick=()=>$("mConfig").style.display="none";
 $("cfgSave").onclick=async()=>{try{await api("PUT","/api/config",CFG);await loadAll();$("mConfig").style.display="none";toast("config.toml сохранён. Сменились имена/правила — сделай Scan")}catch(e){toast("ошибка: "+e.message)}};
 $("canvas").ondragover=e=>e.preventDefault();
-$("canvas").ondrop=async e=>{e.preventDefault();try{let d;try{d=JSON.parse(e.dataTransfer.getData("text/plain"))}catch{return}const r=$("canvas").getBoundingClientRect();const x=e.clientX-r.left+$("canvas").scrollLeft,y=e.clientY-r.top+$("canvas").scrollTop;const base=`${d.domain}/${d.layer}/new_node.py`;let id=base,i=2;while(G.nodes.some(n=>n.id===id&&n.status!=="deleted")){id=`${d.domain}/${d.layer}/new_node${i}.py`;i++}G.nodes.push({id,path:id,domain:d.domain,layer:d.layer,contracts:[],properties:{name:id.split("/").pop().replace(".py",""),description:"",metadata:{}},ui:{x,y,state:"expanded"},status:"added",code:null});await persist();await loadAll();select({t:"node",id})}catch(err){toast("ошибка: "+err.message)}};
+$("canvas").ondrop=async e=>{e.preventDefault();try{let d;try{d=JSON.parse(e.dataTransfer.getData("text/plain"))}catch{return}const[wx,wy]=toWorld(e.clientX,e.clientY);const x=Math.max(0,wx),y=Math.max(0,wy);const base=`${d.domain}/${d.layer}/new_node.py`;let id=base,i=2;while(G.nodes.some(n=>n.id===id&&n.status!=="deleted")){id=`${d.domain}/${d.layer}/new_node${i}.py`;i++}G.nodes.push({id,path:id,domain:d.domain,layer:d.layer,contracts:[],properties:{name:id.split("/").pop().replace(".py",""),description:"",metadata:{}},ui:{x,y,state:"expanded"},status:"added",code:null});await persist();await loadAll();select({t:"node",id})}catch(err){toast("ошибка: "+err.message)}};
 loadAll().catch(e=>{document.body.innerHTML="<pre>studio server недоступен: "+e.message+"</pre>"});
 </script>
 </body>

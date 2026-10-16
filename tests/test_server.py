@@ -89,6 +89,19 @@ def test_сервер_отдаёт_всё_нужное(tmp_path):
         srv.shutdown()
 
 
+def test_канвас_умеет_панораму_и_зум(tmp_path):
+    """Страница содержит управление видом: панорама фоном, зум колесом и кнопками, вписать."""
+    _demo(tmp_path)
+    store.ensure_layout(tmp_path)
+    srv, base = _serve(tmp_path)
+    try:
+        _, body = _get(base, "/")
+        for marker in ("zoomLabel", "zIn", "zOut", "zFit", "zReset", "toWorld", "fitView"):
+            assert marker in body, f"в странице нет {marker}"
+    finally:
+        srv.shutdown()
+
+
 def _free_port():
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
