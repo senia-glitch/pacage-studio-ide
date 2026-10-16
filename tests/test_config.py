@@ -1,36 +1,57 @@
-"""Что проверяется: чтение и запись config.toml — домены, слои, правила.
+"""Что проверяется: чтение и запись config.toml под стек.
 
-Описание словами: конфиг по умолчанию содержит нужные домены и слои,
-его можно сохранить в текст и прочитать обратно без потерь,
-а кривой конфиг не роняет пакет, а чинится дефолтами.
+Описание словами: дефолт — пять слоёв стека, доменов нет, несовпавшие файлы
+уходят в домен app; конфиг пишется в TOML и читается обратно без потерь;
+старый формат (path вместо paths) мигрирует, мусор чинится дефолтами.
 """
 
 from studio import config as config_mod
 
 
-def test_дефолт_содержит_домены_слои_и_правила():
-    """Свежий конфиг: 3 домена, 5 слоёв, разрешённые направления, save выключен."""
+def test_дефолт_это_пять_слоёв_стека():
+    """Слои infrastructure/logic/representation/schema/config с ожидаемыми путями."""
     cfg = config_mod.default_config()["studio"]
-    assert [d["name"] for d in cfg["domains"]] == ["client", "order", "shared"]
-    assert [layer["name"] for layer in cfg["layers"]] == ["domain", "logic", "io", "representation", "validation"]
+    assert [layer["name"] for layer in cfg["layers"]] == [
+        "infrastructure", "logic", "representation", "schema", "config"]
+    by = {layer["name"]: layer for layer in cfg["layers"]}
+    assert "models.py" in by["infrastructure"]["paths"]
+    assert "scenarios" in by["logic"]["paths"]
+    assert "app/api/v1/routes" in by["representation"]["paths"]
+    assert by["schema"]["paths"] == ["app/schemas"]
+    assert cfg["domains"] == []
+    assert cfg["default_domain"] == "app"
+    assert cfg["markers"]["logic"]["decorator"] == "register_scenario"
+    assert cfg["markers"]["representation"]["module_attr"] == "router"
     assert ["representation", "logic"] in cfg["rules"]["allowed"]
-    assert ["logic", "domain"] in cfg["rules"]["allowed"]
-    assert cfg["save"] == {"show_diff": False, "diff_mode": "on_danger"}
+    assert ["logic", "infrastructure"] in cfg["rules"]["allowed"]
 
 
 def test_сохранить_и_прочитать_без_потерь(tmp_path):
-    """Записал конфиг в файл и прочитал — домены, слои и правила на месте."""
+    """Записал конфиг и прочитал: слои с paths, маркеры и правила на месте."""
     cfg = config_mod.default_config()
-    cfg["studio"]["domains"].append({"name": "billing", "path": "billing"})
     p = tmp_path / "config.toml"
     p.write_text(config_mod.dumps(cfg), encoding="utf-8")
+    text = p.read_text(encoding="utf-8")
+    assert "[[studio.domains]]" not in text, "пустые domains не пишем"
+    assert "[studio.markers.logic]" in text
     back = config_mod.load(p)
-    assert "billing" in [d["name"] for d in back["studio"]["domains"]]
+    assert back["studio"]["markers"]["representation"]["module_attr"] == "router"
+    assert back["studio"]["layers"][0]["paths"] == ["infrastructure", "models.py", "run_infrastructure.py", "alembic"]
     assert back["studio"]["save"]["diff_mode"] == "on_danger"
+
+
+def test_старый_формат_path_мигрирует_в_paths():
+    """Конфиг от прошлой версии (path вместо paths): читается, path становится paths."""
+    cfg = config_mod.loads('[[studio.layers]]\nname = "logic"\npath = "logic"\norder = 1\n')
+    logic = next(layer for layer in cfg["studio"]["layers"] if layer["name"] == "logic")
+    assert logic["paths"] == ["logic"]
+    assert cfg["studio"]["default_domain"] == "app"
+    assert cfg["studio"]["markers"]["logic"]["decorator"] == "register_scenario"
 
 
 def test_битый_конфиг_чинится_дефолтами():
     """Мусор в TOML: пакет не падает, недостающее добирается из дефолта."""
     cfg = config_mod.loads("[studio]\nproject_root = \".\"\n")
-    assert cfg["studio"]["domains"], "домены должны подставиться из дефолта"
+    assert [layer["name"] for layer in cfg["studio"]["layers"]][0] == "infrastructure"
+    assert cfg["studio"]["domains"] == []
     assert cfg["studio"]["save"]["show_diff"] is False

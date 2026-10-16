@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 
+from studio.config import UNKNOWN_LAYER
 from studio.metamodel import Graph
 
 
@@ -36,6 +37,8 @@ def validate_graph(graph: Graph, cfg: dict) -> list[Violation]:
             continue
         if src.layer == dst.layer:
             continue
+        if UNKNOWN_LAYER in (src.layer, dst.layer):
+            continue  # слой не определён — данных для суда нет, не плодим ложные нарушения
         if (src.layer, dst.layer) not in allowed:
             out.append(Violation(link.id, link.contract, src.id, src.layer, dst.id, dst.layer,
                                  f"запрещено: {src.layer} → {dst.layer} (контракт '{link.contract}')"))

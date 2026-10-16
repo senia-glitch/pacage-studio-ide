@@ -1,8 +1,8 @@
-"""Что проверяется: валидатор чистой архитектуры.
+"""Что проверяется: валидатор чистой архитектуры под стек.
 
-Описание словами: связи внутри одного слоя и по разрешённым стрелкам —
-это ок, а стрелка domain -> representation (и любая другая запрещённая) —
-это нарушение, которое подсветит интерфейс.
+Описание словами: разрешённые стрелками пары — это ок,
+запрещённые (например representation -> infrastructure) — нарушение,
+а связи с неопределённым слоем unknown валидатор не судит.
 """
 
 from studio import config as config_mod
@@ -11,7 +11,7 @@ from studio.validator import check_syntax, validate_graph
 
 
 def _node(id_, layer):
-    return Node(id=id_, path=id_, domain="order", layer=layer,
+    return Node(id=id_, path=id_, domain="app", layer=layer,
                 contracts=[Contract(name="do", kind="implementation")],
                 properties=NodeProperties(name=id_), ui=NodeUI())
 
@@ -23,18 +23,31 @@ def _graph(pairs):
     return Graph(nodes=nodes, links=links)
 
 
-def test_разрешённые_стрелки_это_ок():
-    """representation -> logic -> domain: нарушений ноль."""
-    vs = validate_graph(_graph([("representation", "logic"), ("logic", "domain")]),
+def test_разрешённые_стрелки_стека_это_ок():
+    """representation -> logic и logic -> infrastructure: нарушений ноль."""
+    vs = validate_graph(_graph([("representation", "logic"), ("logic", "infrastructure")]),
                         config_mod.default_config())
     assert vs == []
 
 
-def test_запрещённая_стрелка_это_нарушение():
-    """domain -> representation запрещена: одно нарушение с понятной причиной."""
-    vs = validate_graph(_graph([("domain", "representation")]), config_mod.default_config())
+def test_representation_в_infrastructure_это_нарушение():
+    """representation -> infrastructure запрещена: одно нарушение с понятной причиной."""
+    vs = validate_graph(_graph([("representation", "infrastructure")]), config_mod.default_config())
     assert len(vs) == 1
-    assert "domain" in vs[0].reason and "representation" in vs[0].reason
+    assert "representation" in vs[0].reason and "infrastructure" in vs[0].reason
+
+
+def test_infrastructure_в_logic_это_нарушение():
+    """infrastructure -> logic запрещена: стрелка может идти только вниз к schema."""
+    vs = validate_graph(_graph([("infrastructure", "logic")]), config_mod.default_config())
+    assert len(vs) == 1
+
+
+def test_unknown_не_судят():
+    """Связь с неопределённым слоем — не нарушение: данных для суда нет."""
+    vs = validate_graph(_graph([("representation", "unknown"), ("unknown", "logic")]),
+                        config_mod.default_config())
+    assert vs == []
 
 
 def test_битый_синтаксис_находится():

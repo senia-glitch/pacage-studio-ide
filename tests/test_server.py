@@ -43,13 +43,13 @@ def _put(base, path, data):
 
 
 def test_смена_правил_в_рантайме_без_перезапуска(tmp_path):
-    """Убрал representation->domain из allowed через API — validate тут же видит нарушение."""
-    (tmp_path / "order" / "domain").mkdir(parents=True)
-    (tmp_path / "order" / "representation").mkdir(parents=True)
-    (tmp_path / "order" / "domain" / "c.py").write_text(
+    """Убрал representation->schema из allowed через API — validate тут же видит нарушение."""
+    (tmp_path / "app" / "schemas").mkdir(parents=True)
+    (tmp_path / "app" / "api" / "v1" / "routes").mkdir(parents=True)
+    (tmp_path / "app" / "schemas" / "c.py").write_text(
         "from abc import ABC, abstractmethod\nclass C(ABC):\n"
         "    @abstractmethod\n    def do(self): ...\n", encoding="utf-8")
-    (tmp_path / "order" / "representation" / "v.py").write_text(
+    (tmp_path / "app" / "api" / "v1" / "routes" / "v.py").write_text(
         "def do():\n    return 1\n", encoding="utf-8")
     store.ensure_layout(tmp_path)
     srv, base = _serve(tmp_path)
@@ -60,7 +60,7 @@ def test_смена_правил_в_рантайме_без_перезапуск
         _, body = _get(base, "/api/config")
         cfg = json.loads(body)
         cfg["studio"]["rules"]["allowed"] = [
-            p for p in cfg["studio"]["rules"]["allowed"] if p != ["representation", "domain"]]
+            p for p in cfg["studio"]["rules"]["allowed"] if p != ["representation", "schema"]]
         _put(base, "/api/config", cfg)
         _, body = _get(base, "/api/validate")
         vs = json.loads(body)["violations"]

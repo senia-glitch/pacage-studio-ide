@@ -23,7 +23,7 @@ studio validate [--project .]         # проверить чистую архи
 
 ## Правила
 
-- Узел = файл. Домен = папка верхнего уровня, слой = папка второго уровня.
+- Узел = файл. Слой: сначала маркеры содержимого (`@register_scenario`, `SQLModel`, `router`, ...), потом пути из `config.toml`, иначе `unknown`. Домен: сегмент пути из конфига, иначе `app`.
 - Связь = совпадение имён контрактов (абстрактный класс/метод ↔ реализация).
-- Разрешённые направления из `config.toml` (`representation → logic → domain`, `io → logic → domain`, `validation → logic → domain`).
-- Связи только через контракты, импорты игнорируются, рантайма нет.
+- Разрешённые направления из `config.toml` (`representation → logic/schema`, `logic → infrastructure/schema`, `infrastructure → schema`).
+- Связи с `unknown` не судятся. Импорты игнорируются, рантайма нет.
