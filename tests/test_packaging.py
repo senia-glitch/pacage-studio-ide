@@ -25,3 +25,11 @@ def test_по_умолчанию_зависимостей_почти_нет():
     """Голый studio зависит только от pydantic — стек только по флагу."""
     deps = _pyproject()["project"]["dependencies"]
     assert deps == ["pydantic>=2"]
+
+
+def test_ui_html_упакован_в_дистрибутив():
+    """Без package-data wheel ставится без index.html и studio dev падает — ловим это метаданными."""
+    data = _pyproject()["tool"]["setuptools"].get("package-data", {})
+    assert any("*.html" in v for v in data.get("studio.ui", []))
+    root = Path(__file__).resolve().parent.parent
+    assert (root / "studio" / "ui" / "index.html").is_file()
