@@ -23,8 +23,8 @@ studio validate [--project .]         # проверить чистую архи
 
 ## Правила
 
-- Узел = файл. Домен = пакет (`infra` / `core` / `presentation`), остальное → `shared`. Слой = тип файла: сначала маркеры содержимого (`@register_scenario`, `SQLModel`, `router`, ...), потом пути из `config.toml`, иначе `unknown`.
-- Сканируется только пользовательский код: `alembic/`, `run_infrastructure.py`, `app/main.py`, `app/core/` пропускаются.
+- Узел = файл. Домен = пакет (`infra` / `core` / `presentation`, остальное → `shared`) — у каждого свой цвет. Слой = тип файла. Бизнес-домен = папка после `scenarios/` `routes/` `schemas/` (иначе «общее»).
+- Сканируется только пользовательский код: `alembic/*`, `run_infrastructure.py`, `app/main.py`, `app/core/*` пропускаются.
 - Связь = совпадение имён контрактов (абстрактный класс/метод ↔ реализация).
-- Разрешённые направления из `config.toml`: представление идёт только через сценарии (`routes → scenarios/schemas`, `scenarios → models/schemas/interfaces/utils`, `interfaces/utils → schemas`).
+- Канвас: «Вся система» (колонки пакетов), «Бизнес-домены» (сквозные срезы), «Нарушения». Узлы не накладываются друг на друга.
 - Связи с `unknown` не судятся. Импорты игнорируются, рантайма нет.

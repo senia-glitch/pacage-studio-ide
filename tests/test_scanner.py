@@ -8,7 +8,7 @@
 from pathlib import Path
 
 from studio import config as config_mod
-from studio.scanner import build_graph, infer_domain_layer, parse_contracts
+from studio.scanner import build_graph, infer_business, infer_domain_layer, parse_contracts
 
 NAMING = config_mod.default_config()["studio"]["naming"]
 
@@ -107,6 +107,43 @@ def test_каркас_пакетов_не_сканируется(tmp_path):
     (tmp_path / "models.py").write_text("x = 1\n", encoding="utf-8")
     g, _ = build_graph(tmp_path, _cfg())
     assert [n.id for n in g.nodes] == ["models.py"]
+
+
+def test_бизнес_из_папки_после_слоя():
+    """app/scenarios/order/x.py -> бизнес 'order' (папка сразу после scenarios)."""
+    cfg = _cfg()["studio"]
+    assert infer_business(Path("app/scenarios/order/x.py"), "scenarios",
+                          cfg["layers"], cfg["business"], "общее") == "order"
+
+
+def test_бизнес_файла_в_корне_слоя_это_общее():
+    """app/scenarios/s.py и models.py: некуда класть — 'общее'."""
+    cfg = _cfg()["studio"]
+    assert infer_business(Path("app/scenarios/s.py"), "scenarios",
+                          cfg["layers"], cfg["business"], "общее") == "общее"
+    assert infer_business(Path("models.py"), "models",
+                          cfg["layers"], cfg["business"], "общее") == "общее"
+
+
+def test_бизнес_переопределение_сильнее_папки():
+    """[[studio.business]] с путями перекрывает правило папки."""
+    cfg = _cfg()
+    cfg["studio"]["business"] = [{"name": "заказ", "paths": ["special"]}]
+    st = cfg["studio"]
+    assert infer_business(Path("app/special/x.py"), "utils",
+                          st["layers"], st["business"], "общее") == "заказ"
+
+
+def test_граф_несёт_бизнес_домен(tmp_path):
+    """Узлы графа содержат business: папка order видна насквозь."""
+    (tmp_path / "app" / "scenarios" / "order").mkdir(parents=True)
+    (tmp_path / "app" / "scenarios" / "order" / "s.py").write_text(
+        "from core import BaseScenario\nclass S(BaseScenario):\n    pass\n", encoding="utf-8")
+    (tmp_path / "app" / "scenarios" / "s2.py").write_text("def h(): ...\n", encoding="utf-8")
+    g, _ = build_graph(tmp_path, _cfg())
+    by = {n.id: n for n in g.nodes}
+    assert by["app/scenarios/order/s.py"].business == "order"
+    assert by["app/scenarios/s2.py"].business == "общее"
 
 
 def test_повторный_скан_бережёт_позиции_и_имена(tmp_path):

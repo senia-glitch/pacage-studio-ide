@@ -1,10 +1,15 @@
-"""Pydantic-схема графа. Файл = узел, контракт = имя, связь = совпадение имён."""
+"""Pydantic-схема графа. Файл = узел, контракт = имя, связь = совпадение имён.
+
+Измерения узла: домен (пакет), слой (тип файла), бизнес-домен (предметная область).
+"""
 
 from __future__ import annotations
 
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+from studio.config import DEFAULT_BIZ
 
 ContractKind = Literal["abstraction", "implementation"]
 NodeState = Literal["collapsed", "expanded", "code"]
@@ -32,10 +37,11 @@ class NodeProperties(BaseModel):
 
 
 class Node(BaseModel):
-    id: str  # относительный posix-путь файла, напр. "client/domain/user.py"
+    id: str  # относительный posix-путь файла, напр. "app/scenarios/order/create.py"
     path: str  # то же, что id (оставлено для читаемости writer'а)
-    domain: str = "shared"
-    layer: str = "domain"
+    domain: str = "shared"  # пакет: infra | core | presentation | shared
+    layer: str = "unknown"  # тип файла: models | scenarios | ...
+    business: str = DEFAULT_BIZ  # предметная область: папка после scenarios/routes/schemas, иначе общее
     contracts: list[Contract] = Field(default_factory=list)
     properties: NodeProperties = Field(default_factory=NodeProperties)
     ui: NodeUI = Field(default_factory=NodeUI)

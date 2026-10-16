@@ -12,7 +12,7 @@ import ast
 import hashlib
 from pathlib import Path
 
-from studio.config import UNKNOWN_LAYER, matches
+from studio.config import DEFAULT_BIZ, UNKNOWN_LAYER, matches
 from studio.metamodel import Contract, Graph, Link, Node, NodeProperties, NodeUI
 
 
@@ -222,6 +222,31 @@ SKIP_DIRS = ("alembic", "app/core")
 SKIP_FILES = ("run_infrastructure.py", "app/main.py")
 
 
+def infer_business(rel: Path, layer: str, layers: list[dict], business: list[dict], default_biz: str) -> str:
+    """Бизнес-домен узла.
+
+    Сначала явные переопределения [[studio.business]] (сегмент/префикс/файл),
+    затем папка сразу после директории слоя (app/scenarios/order/x.py -> order),
+    иначе default_biz ("общее").
+    """
+    posix = rel.as_posix()
+    for b in business:
+        if not isinstance(b, dict) or not b.get("name"):
+            continue
+        for p in [str(x) for x in b.get("paths", []) if x]:
+            if posix == p or posix.startswith(p + "/") or p in rel.parts:
+                return b["name"]
+    anchors = set()
+    for lyr in layers:
+        if isinstance(lyr, dict) and lyr.get("name") == layer:
+            anchors.update(str(p) for p in lyr.get("paths", []) if p and not str(p).endswith(".py"))
+    parts = rel.parts
+    for i, seg in enumerate(parts):
+        if seg in anchors and i + 1 < len(parts) - 1:
+            return parts[i + 1]
+    return default_biz or DEFAULT_BIZ
+
+
 def iter_project_files(root: Path) -> list[Path]:
     files = []
     for p in root.rglob("*.py"):
@@ -241,8 +266,13 @@ def build_graph(project_root: Path, cfg: dict, old: Graph | None = None) -> tupl
     """Строит граф по коду. Возвращает (graph, hashes). UI-координаты переносятся из старого графа."""
     st = cfg.get("studio", cfg)
     naming = st.get("naming", {})
+    layers = st.get("layers", [])
+    business_rules = st.get("business", [])
+    default_biz = st.get("default_biz", DEFAULT_BIZ) if isinstance(st, dict) else DEFAULT_BIZ
+    domains_order = [d["name"] for d in st.get("domains", [])] if isinstance(st, dict) else []
     old_pos = {n.id: n.ui for n in (old.nodes if old else [])}
     old_props = {n.id: n.properties for n in (old.nodes if old else []) if n.status != "deleted"}
+    col_count: dict[str, int] = {}
     nodes: list[Node] = []
     hashes: dict[str, str] = {}
     for f in iter_project_files(project_root):
@@ -253,12 +283,17 @@ def build_graph(project_root: Path, cfg: dict, old: Graph | None = None) -> tupl
             continue
         hashes[rel] = hashlib.sha256(src.encode("utf-8")).hexdigest()
         domain, layer = infer_domain_layer(f.relative_to(project_root), cfg, source=src)
+        biz = infer_business(f.relative_to(project_root), layer, layers, business_rules, default_biz)
         contracts = parse_contracts(src, layer, naming)
-        ui = old_pos.get(rel, NodeUI(x=float(len(nodes) % 6) * 260.0, y=float(len(nodes) % 6) * 200.0))
+        # Новые узлы сразу встают в колонку своего домена: эксклюзивность видна с первого скана.
+        di = domains_order.index(domain) if domain in domains_order else len(domains_order)
+        n_in_col = col_count.get(domain, 0)
+        col_count[domain] = n_in_col + 1
+        ui = old_pos.get(rel, NodeUI(x=float(di) * 300.0, y=56.0 + float(n_in_col) * 240.0))
         # Имя/описание из инспектора живут только в графе — переживают рескан.
         props = old_props.get(rel, NodeProperties(name=Path(rel).stem))
-        nodes.append(Node(id=rel, path=rel, domain=domain, layer=layer, contracts=contracts,
-                          properties=props, ui=ui))
+        nodes.append(Node(id=rel, path=rel, domain=domain, layer=layer, business=biz,
+                          contracts=contracts, properties=props, ui=ui))
     # Связи: совпадение имён контрактов между узлами. Реализация → абстракция.
     providers: dict[str, list[str]] = {}  # contract -> [node ids with abstraction]
     implementors: dict[str, list[str]] = {}

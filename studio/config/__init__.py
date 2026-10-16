@@ -16,6 +16,9 @@ UNKNOWN_LAYER = "unknown"
 
 DEFAULT_DOMAIN = "shared"
 
+# Бизнес-домен по умолчанию: файлы, не попавшие ни в одну папку и ни в одно переопределение.
+DEFAULT_BIZ = "общее"
+
 DEFAULT_DOMAINS = [
     {"name": "infra",        "paths": ["models.py"]},
     {"name": "core",         "paths": ["scenarios", "interfaces", "utils"]},
@@ -73,8 +76,10 @@ def default_config() -> dict:
         "studio": {
             "project_root": ".",
             "default_domain": DEFAULT_DOMAIN,
+            "default_biz": DEFAULT_BIZ,
             "domains": [dict(d, paths=list(d["paths"])) for d in DEFAULT_DOMAINS],
             "layers": [{"name": layer["name"], "paths": list(layer["paths"]), "order": layer["order"]} for layer in DEFAULT_LAYERS],
+            "business": [],
             "naming": naming,
             "markers": markers,
             "rules": {"allowed": [list(p) for p in DEFAULT_ALLOWED]},
@@ -96,7 +101,8 @@ def dumps(cfg: dict) -> str:
     st = cfg.get("studio", {})
     out = ["[studio]",
            f'project_root = {_toml_str(str(st.get("project_root", ".")))}',
-           f'default_domain = {_toml_str(str(st.get("default_domain", DEFAULT_DOMAIN)))}', ""]
+           f'default_domain = {_toml_str(str(st.get("default_domain", DEFAULT_DOMAIN)))}',
+           f'default_biz = {_toml_str(str(st.get("default_biz", DEFAULT_BIZ)))}', ""]
     for d in st.get("domains", []):
         # обратно совместимо: domains пишут paths массивом, читают и path, и paths
         paths = d.get("paths", [d["path"]] if d.get("path") else [])
@@ -111,6 +117,12 @@ def dumps(cfg: dict) -> str:
     for layer_name, kinds in st.get("markers", {}).items():
         if kinds:
             out += [f"[studio.markers.{layer_name}]"] + [f'{k} = {_toml_str(str(v))}' for k, v in kinds.items()] + [""]
+    for b in st.get("business", []):
+        # переопределения бизнес-доменов: имя + пути (папка или файл)
+        paths = b.get("paths", [b["path"]] if b.get("path") else []) if isinstance(b, dict) else []
+        if isinstance(b, dict) and b.get("name"):
+            out += ["[[studio.business]]", f'name = {_toml_str(b["name"])}',
+                    f'paths = {_toml_arr([p for p in paths if p])}', ""]
     out += ["[studio.rules]", "allowed = ["]
     for a, b in st.get("rules", {}).get("allowed", []):
         out += [f"  [{_toml_str(a)}, {_toml_str(b)}],"]
@@ -151,6 +163,8 @@ def _normalize(raw: dict) -> dict:
         cfg["project_root"] = st["project_root"]
     if isinstance(st.get("default_domain"), str) and st["default_domain"]:
         cfg["default_domain"] = st["default_domain"]
+    if isinstance(st.get("default_biz"), str) and st["default_biz"]:
+        cfg["default_biz"] = st["default_biz"]
     if isinstance(st.get("domains"), list):
         cfg["domains"] = [{"name": str(d.get("name")), "paths": _norm_paths(d, i)}
                           for i, d in enumerate(st["domains"]) if isinstance(d, dict) and d.get("name")]
@@ -171,6 +185,9 @@ def _normalize(raw: dict) -> dict:
         for k, v in st["markers"].items():
             if isinstance(v, dict):
                 cfg["markers"][k] = {kind: str(v[kind]) for kind in MARKER_KINDS if v.get(kind)}
+    if isinstance(st.get("business"), list):
+        cfg["business"] = [{"name": str(b.get("name")), "paths": _norm_paths(b, i)}
+                           for i, b in enumerate(st["business"]) if isinstance(b, dict) and b.get("name")]
     if isinstance(st.get("rules"), dict) and isinstance(st["rules"].get("allowed"), list):
         cfg["rules"]["allowed"] = [[str(a), str(b)] for p in st["rules"]["allowed"] if isinstance(p, (list, tuple)) and len(p) == 2 for a, b in [p]]
     if isinstance(st.get("save"), dict):

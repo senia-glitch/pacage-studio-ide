@@ -18,6 +18,8 @@ def test_дефолт_это_три_пакета_и_шесть_слоёв():
     assert [layer["name"] for layer in cfg["layers"]] == [
         "models", "scenarios", "interfaces", "utils", "routes", "schemas"]
     assert cfg["default_domain"] == "shared"
+    assert cfg["default_biz"] == "общее"
+    assert cfg["business"] == []
     assert cfg["markers"]["scenarios"]["decorator"] == "register_scenario"
     assert cfg["markers"]["routes"]["module_attr"] == "router"
     assert ["routes", "scenarios"] in cfg["rules"]["allowed"]
@@ -37,6 +39,18 @@ def test_сохранить_и_прочитать_без_потерь(tmp_path):
     assert back["studio"]["domains"][0] == {"name": "infra", "paths": ["models.py"]}
     assert back["studio"]["markers"]["scenarios"]["base_class"] == "BaseScenario"
     assert back["studio"]["save"]["diff_mode"] == "on_danger"
+
+
+def test_бизнес_домены_пишутся_и_читаются(tmp_path):
+    """Переопределения [[studio.business]] переживают dumps/load."""
+    cfg = config_mod.default_config()
+    cfg["studio"]["business"] = [{"name": "заказ", "paths": ["order", "orders"]}]
+    p = tmp_path / "config.toml"
+    p.write_text(config_mod.dumps(cfg), encoding="utf-8")
+    text = p.read_text(encoding="utf-8")
+    assert "[studio.business]" in text
+    back = config_mod.load(p)
+    assert back["studio"]["business"] == [{"name": "заказ", "paths": ["order", "orders"]}]
 
 
 def test_старый_формат_path_мигрирует_в_paths():
