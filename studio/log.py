@@ -34,6 +34,12 @@ def start_run(project_root: Path, cmd: str) -> Path:
     return p
 
 
+def is_active(project_root: Path) -> bool:
+    """Идёт ли уже запуск для этого проекта (тогда start_run не затирает лог)."""
+    with _lock:
+        return _current is not None and _current == _path(project_root)
+
+
 def step(msg: str) -> None:
     """Дописать один шаг. Вне активного запуска — молча ничего не делает."""
     with _lock:

@@ -81,8 +81,15 @@ def endpoint_node_id(entry: EndpointEntry) -> str:
 
 
 def iter_module_files(root: Path, dotted: str) -> list[Path]:
-    """Dotted-путь → файлы модуля: пакет обходится рекурсивно, минус `_`-файлы."""
+    """Dotted-путь → файлы модуля: пакет обходится рекурсивно, минус `_`-файлы.
+
+    База обязана лежать внутри корня проекта — иначе relative_to(root) ниже
+    упал бы ValueError (кикер: кривой FAT_ROUTES_PACKAGE в .env.fastbase).
+    """
+    root = Path(root)
     base = dotted_to_path(root, dotted)
+    if not _is_inside(root, base):
+        return []
     if base.is_dir():
         out: list[Path] = []
         try:
@@ -99,6 +106,16 @@ def iter_module_files(root: Path, dotted: str) -> list[Path]:
         return out
     single = base.with_suffix(".py")
     return [single] if single.is_file() else []
+
+
+def _is_inside(root: Path, base: Path) -> bool:
+    """base (после resolve) — тот же корень или его потомок."""
+    try:
+        root_resolved = root.resolve()
+        base_resolved = base.resolve()
+    except OSError:
+        return False
+    return base_resolved == root_resolved or root_resolved in base_resolved.parents
 
 
 def _class_table_name(node: ast.ClassDef) -> str | None:

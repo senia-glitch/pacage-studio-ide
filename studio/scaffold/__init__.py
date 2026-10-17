@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import ast
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -75,7 +75,12 @@ def _scenario_template(node: Node, graph: Graph) -> str:
     details = node.details
     slug = _slug(node.file_path)
     name = str(details.get("name") or "") or slug
-    class_name = str(details.get("class_name") or "") or _pascal_case(name)
+    # class_name — это имя будущего класса как оно есть в плане: id узла
+    # scenario:<file>:<class_name> должен совпасть с id после первого scan.
+    class_name = str(details.get("class_name") or "").strip() or (_pascal_case(name) + "Scenario")
+    base_name = _pascal_case(name)
+    dto_name = str(details.get("dto") or "").strip() or (base_name + "DTO")
+    response_name = str(details.get("response") or "").strip() or (base_name + "Response")
     io_lines: list[str] = []
     for other in graph.nodes:
         if other.kind == "io" and other.details.get("called_from") == node.id:
@@ -95,6 +100,23 @@ def _scenario_template(node: Node, graph: Graph) -> str:
     todo_block.append("        #")
     todo_block.append("        # Планируемые вызовы других сценариев:")
     todo_block.extend(called_lines)
+    # Классы DTO/Response описываем только если их имена мы же и придумали:
+    # имя из плана может указывать на уже существующий тип.
+    type_block: list[str] = []
+    if dto_name == base_name + "DTO":
+        type_block += [
+            f"class {dto_name}(BaseModel):",
+            f'    """Входные данные для сценария {name}."""',
+            "    pass",
+            "",
+        ]
+    if response_name == base_name + "Response":
+        type_block += [
+            f"class {response_name}(BaseModel):",
+            f'    """Результат сценария {name}."""',
+            "    pass",
+            "",
+        ]
     lines = [
         SCAFFOLD_MARKER,
         f'"""{node.description}"""',
@@ -102,19 +124,12 @@ def _scenario_template(node: Node, graph: Graph) -> str:
         "from pydantic import BaseModel",
         "from core import BaseScenario, register_scenario",
         "",
-        f"class {class_name}DTO(BaseModel):",
-        f'    """Входные данные для сценария {name}."""',
-        "    pass",
-        "",
-        f"class {class_name}Response(BaseModel):",
-        f'    """Результат сценария {name}."""',
-        "    pass",
-        "",
+        *type_block,
         *_acceptance_lines(node.acceptance),
         "",
-        f'@register_scenario("{name}", dto={class_name}DTO, response={class_name}Response)',
-        f"class {class_name}Scenario(BaseScenario):",
-        f"    async def execute(self, dto: {class_name}DTO) -> {class_name}Response:",
+        f'@register_scenario("{name}", dto={dto_name}, response={response_name})',
+        f"class {class_name}(BaseScenario):",
+        f"    async def execute(self, dto: {dto_name}) -> {response_name}:",
         *todo_block,
         "        raise NotImplementedError",
         "",
@@ -203,6 +218,14 @@ def plan_scaffold(graph: Graph, project_root: Path) -> list[ScaffoldOp]:
     for node in graph.nodes:
         if node.origin != "user":
             continue
+        if node.kind == "model":
+            # Модели не создаются файлами — только append-блок в models.py,
+            # поэтому create_file на них не влияет.
+            if not node.append_model:
+                ops.append(
+                    ScaffoldOp("skip_disabled", node.file_path, node.id, "append_model=false")
+                )
+            continue
         if node.create_file is False:
             ops.append(ScaffoldOp("skip_disabled", node.file_path, node.id, "create_file=false"))
             continue
@@ -212,10 +235,6 @@ def plan_scaffold(graph: Graph, project_root: Path) -> list[ScaffoldOp]:
                 ops.append(
                     ScaffoldOp("skip_io_no_scenario", node.file_path, node.id, "нет called_from")
                 )
-            continue
-        if node.kind == "model":
-            if node.append_model:
-                continue
             continue
         target = project_root / node.file_path
         if not target.exists():
@@ -237,8 +256,11 @@ def apply_scaffold(ops: list[ScaffoldOp], graph: Graph, project_root: Path) -> N
             continue
         target = project_root / op.path
         if op.action == "create":
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(_template_for(node, graph), encoding="utf-8")
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(_template_for(node, graph), encoding="utf-8")
+            except OSError:
+                continue
             created_files.add(op.path)
         elif op.action == "update_docstring":
             _update_docstring_file(target, node)
@@ -264,7 +286,11 @@ def _update_docstring_file(target: Path, node: Node) -> None:
         text = target.read_text(encoding="utf-8")
     except OSError:
         return
-    tree = ast.parse(text)
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        # Файл-скелет поправлен руками и сломан — не рискуем переписать его.
+        return
     lines = text.splitlines()
 
     doc_start: int | None = None
@@ -306,7 +332,10 @@ def _update_docstring_file(target: Path, node: Node) -> None:
     elif new_acc_lines:
         lines = lines + [""] + new_acc_lines
 
-    target.write_text("\n".join(lines), encoding="utf-8")
+    try:
+        target.write_text("\n".join(lines), encoding="utf-8")
+    except OSError:
+        return
 
 
 def _apply_model_appends(graph: Graph, project_root: Path, nodes_by_id: dict[str, Node]) -> None:
@@ -320,13 +349,15 @@ def _apply_model_appends(graph: Graph, project_root: Path, nodes_by_id: dict[str
         return
 
     models_path = project_root / "models.py"
-    if not models_path.exists():
-        models_path.write_text(
-            "from sqlmodel import SQLModel, Field\n\nmetadata = SQLModel.metadata\n",
-            encoding="utf-8",
-        )
-
-    text = models_path.read_text(encoding="utf-8")
+    try:
+        if not models_path.exists():
+            models_path.write_text(
+                "from sqlmodel import SQLModel, Field\n\nmetadata = SQLModel.metadata\n",
+                encoding="utf-8",
+            )
+        text = models_path.read_text(encoding="utf-8")
+    except OSError:
+        return
 
     for node in model_nodes:
         details = node.details
@@ -362,9 +393,12 @@ def _apply_model_appends(graph: Graph, project_root: Path, nodes_by_id: dict[str
                 text += "\n"
             text += "\n" + block_text + "\n"
 
+    try:
+        models_path.write_text(text, encoding="utf-8")
+    except OSError:
+        return
+    for node in model_nodes:
         node.scaffolded = True
-
-    models_path.write_text(text, encoding="utf-8")
 
 
 def _apply_io_todos(
@@ -375,8 +409,6 @@ def _apply_io_todos(
     ops: list[ScaffoldOp],
 ) -> None:
     """IO-узлы — TODO в execute сценария-родителя (§5.7)."""
-    scaffolded_files = {op.path for op in ops if op.action in ("create", "update_docstring")}
-
     io_nodes = [
         n for n in graph.nodes if n.kind == "io" and n.origin == "user" and n.create_file
     ]
@@ -392,8 +424,8 @@ def _apply_io_todos(
             continue
         scenario_file = project_root / scenario_node.file_path
         rel_path = scenario_node.file_path
-        if rel_path in created_files or rel_path in scaffolded_files:
-            continue
+        if rel_path in created_files:
+            continue  # только что созданный скелет уже содержит блок из шаблона
         if not scenario_file.exists():
             continue
         if not _has_marker(scenario_file):
@@ -456,7 +488,10 @@ def _update_io_todo(scenario_file: Path, graph: Graph, scenario_id: str, ios: li
             new_lines.extend(block_lines)
         lines = new_lines
 
-    scenario_file.write_text("\n".join(lines), encoding="utf-8")
+    try:
+        scenario_file.write_text("\n".join(lines), encoding="utf-8")
+    except OSError:
+        return
 
 
 def collect_model_appends(graph: Graph) -> list[tuple[str, str, str]]:

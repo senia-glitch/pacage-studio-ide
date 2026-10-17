@@ -1,13 +1,17 @@
 """Что проверяется: CLI scan / dev / list / help (только чтение кода).
 
-Описание словами: scan пишет исключительно .studio/graph.json (версия 2) и
+Описание словами: scan пишет исключительно .studio/graph.json (схема v4) и
 лог, код проекта не меняется ни на байт; list группирует сценариев по
 endpoint'ам; help описывает команды; --project работает и до, и после подкоманды.
 """
 
 import hashlib
+import io
 import json
+import sys
 from types import SimpleNamespace
+
+import pytest
 
 from studio import store
 from studio.cli import build_parser, cmd_help, cmd_list, cmd_scan, main
@@ -104,6 +108,17 @@ class TestHelp:
     def test_main_help(self, capsys):
         assert main(["help"]) == 0
         assert "studio" in capsys.readouterr().out
+
+    def test_help_не_падает_на_cp1251(self, monkeypatch):
+        """Пайп/редирект на Windows (cp1251): '→' в help не роняет CLI."""
+        buf = io.BytesIO()
+        stream = io.TextIOWrapper(buf, encoding="cp1251", errors="strict")
+        monkeypatch.setattr(sys, "stdout", stream)
+        with pytest.raises(SystemExit) as exc:
+            main(["--help"])
+        assert exc.value.code == 0
+        stream.flush()
+        assert buf.getvalue()
 
 
 class TestParser:

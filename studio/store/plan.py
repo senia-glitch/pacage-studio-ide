@@ -27,7 +27,8 @@ class PlanPatch(BaseModel):
     node: Node | None = None
     edge: Edge | None = None
     patch: dict | None = None
-    mark_removed: bool = False
+    # None = «не передано» (не трогать накопленное); явный false снимает метку удаления.
+    mark_removed: bool | None = None
 
 
 class Plan(BaseModel):
@@ -68,11 +69,28 @@ def write_plan(project_root: Path, plan: Plan) -> Path:
 
 
 def upsert_patch(plan: Plan, patch: PlanPatch) -> None:
-    """Заменить по target_id+is_edge или добавить."""
+    """Заменить по target_id+is_edge или добавить.
+
+    Частичный патч не затирает накопленное: node/edge сохраняются, если в новом
+    патче их нет, словари полей сливаются. mark_removed: None — не передано,
+    наследуется от старого патча; явный false снимает метку удаления.
+    """
     for i, existing in enumerate(plan.patches):
-        if existing.target_id == patch.target_id and existing.is_edge == patch.is_edge:
-            plan.patches[i] = patch
-            return
+        if existing.target_id != patch.target_id or existing.is_edge != patch.is_edge:
+            continue
+        merged_patch = dict(existing.patch or {})
+        merged_patch.update(patch.patch or {})
+        plan.patches[i] = PlanPatch(
+            target_id=patch.target_id,
+            is_edge=patch.is_edge,
+            node=patch.node if patch.node is not None else existing.node,
+            edge=patch.edge if patch.edge is not None else existing.edge,
+            patch=merged_patch or None,
+            mark_removed=(
+                patch.mark_removed if patch.mark_removed is not None else existing.mark_removed
+            ),
+        )
+        return
     plan.patches.append(patch)
 
 
@@ -90,37 +108,79 @@ def apply_plan(scanned: Graph, plan: Plan) -> Graph:
 
     for patch in plan.patches:
         if patch.node is not None:
-            if patch.node.id not in result.by_id():
+            target = nodes_by_id.get(patch.node.id)
+            if target is None:
                 new_node = copy.deepcopy(patch.node)
                 new_node.origin = "user"
                 result.nodes.append(new_node)
+                nodes_by_id[new_node.id] = new_node
+            elif target.origin in ("user", "stale") and patch.node.origin == "user":
+                # stale → user: патч с node снимает метку удаления (см. mark_removed=false).
+                target.origin = "user"
+                _sync_user_node(target, patch.node)
 
         if patch.edge is not None:
-            if patch.edge.id not in {e.id for e in result.edges}:
+            target_edge = edges_by_id.get(patch.edge.id)
+            if target_edge is None:
                 new_edge = copy.deepcopy(patch.edge)
                 new_edge.origin = "user"
                 result.edges.append(new_edge)
+                edges_by_id[new_edge.id] = new_edge
+            elif target_edge.origin in ("user", "stale") and patch.edge.origin == "user":
+                target_edge.origin = "user"
+                _sync_user_edge(target_edge, patch.edge)
 
         if patch.patch is not None:
             if patch.is_edge:
-                target = edges_by_id.get(patch.target_id)
-                if target is not None:
-                    _apply_patch_fields(target, patch.patch)
+                target_edge = edges_by_id.get(patch.target_id)
+                if target_edge is not None:
+                    _apply_patch_fields(target_edge, patch.patch)
             else:
-                target = nodes_by_id.get(patch.target_id)
-                if target is not None:
-                    _apply_patch_fields(target, patch.patch)
+                target_node = nodes_by_id.get(patch.target_id)
+                if target_node is not None:
+                    _apply_patch_fields(target_node, patch.patch)
 
         if patch.mark_removed:
-            target = nodes_by_id.get(patch.target_id)
-            if target is not None:
-                target.origin = "stale"
+            if patch.is_edge:
+                target_edge = edges_by_id.get(patch.target_id)
+                if target_edge is not None:
+                    target_edge.origin = "stale"
+            else:
+                target_node = nodes_by_id.get(patch.target_id)
+                if target_node is not None:
+                    target_node.origin = "stale"
 
     result.nodes.sort(key=lambda n: n.id)
     result.edges.sort(key=lambda e: e.id)
     result.endpoints = sorted(n.id for n in result.nodes if n.kind == "endpoint")
     result.scenarios = sorted(n.id for n in result.nodes if n.kind == "scenario")
     return result
+
+
+def _sync_user_node(target: Node, src: Node) -> None:
+    """Обновить пользовательский узел данными из патча (id и origin не трогаем)."""
+    target.kind = src.kind
+    target.layer = src.layer
+    target.label = src.label
+    target.file_path = src.file_path
+    target.line = src.line
+    target.details = copy.deepcopy(src.details)
+    target.description = src.description
+    target.acceptance = copy.deepcopy(src.acceptance)
+    target.notes = src.notes
+    target.scaffolded = src.scaffolded
+    target.create_file = src.create_file
+    target.append_model = src.append_model
+
+
+def _sync_user_edge(target: Edge, src: Edge) -> None:
+    """Обновить пользовательское ребро данными из патча (id и origin не трогаем)."""
+    target.from_node = src.from_node
+    target.to_node = src.to_node
+    target.kind = src.kind
+    target.label = src.label
+    target.line = src.line
+    target.description = src.description
 
 
 def _apply_patch_fields(target: BaseModel, patch: dict) -> None:

@@ -17,8 +17,8 @@ from studio.env import ProjectEnv, module_name
 from studio.metamodel import Edge, Graph, HelperDetails, Node
 from studio.scanner.ast_utils import (
     EXCLUDED_DIRS,
-    find_top_level_function,
     find_method,
+    find_top_level_function,
     has_base,
     parse_file,
 )

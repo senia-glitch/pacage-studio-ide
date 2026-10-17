@@ -177,7 +177,7 @@ const MARKERS=[
 ];
 const NODE_W=230,ROW=132,TOP=56,COL={rep:40,logic:400,nested:420,io:860,model:1150};
 const ZONE_ORDER=["representation","logic","io"];
-const ZONE_PRIO={representation:0,logic:1,io:2,helpers:3};
+const ZONE_PRIO={representation:0,logic:1,io:2,helpers:3,plan:4};
 const ZONE_GAP=30,ZONE_PAD=24,ZONE_MIN_W=280,ZONE_MIN_H=110;
 let G=null,byId={},mode="scenario",ovSub="grid",viewMode="view",selScenario=null,selId=null,codeState=null,scenList=[];
 const nodePos=new Map();
@@ -188,12 +188,19 @@ let edgeSrc=null,edgeDraftPath=null;
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 function toast(m){const t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",2600)}
+function applyGraph(g){
+  G=g||{};
+  byId={};(G.nodes||[]).forEach(x=>byId[x.id]=x);
+  scenList=(G.scenarios||[]).filter(id=>byId[id]);
+  if(selScenario&&!G.scenario_paths[selScenario]){
+    selScenario=scenList.find(id=>G.scenario_paths[id]&&G.scenario_paths[id].endpoint)||scenList[0]||null;
+    selId=selScenario;
+  }
+}
 async function load(){
   const r=await fetch("/api/graph");
   if(!r.ok)throw new Error("HTTP "+r.status);
-  G=await r.json();
-  byId={};(G.nodes||[]).forEach(n=>byId[n.id]=n);
-  scenList=(G.scenarios||[]).filter(id=>byId[id]);
+  applyGraph(await r.json());
   if(!selScenario||!G.scenario_paths[selScenario]){
     selScenario=scenList.find(id=>G.scenario_paths[id]&&G.scenario_paths[id].endpoint)||scenList[0]||null;
     mode=selScenario?"scenario":"overview";
@@ -295,17 +302,67 @@ function renderPalette(){
     p.appendChild(b);
   }
 }
+function nodeIdFor(n){
+  // Канонический id по схеме сканера: endpoint:<file>:<func>, scenario:<file>:<class>,
+  // model:<file>:<class>, test:<file>:<test>, helper:<module>, io:<scen>:<method>:<table|_>:<line>
+  const d=n.details||{};
+  if(n.kind==="endpoint")return`endpoint:${n.file_path}:${d.function_name||""}`;
+  if(n.kind==="scenario")return`scenario:${n.file_path}:${d.class_name||""}`;
+  if(n.kind==="model")return`model:${n.file_path}:${d.class_name||""}`;
+  if(n.kind==="test")return`test:${n.file_path}:${d.test_name||""}`;
+  if(n.kind==="helper")return`helper:${String(d.module||"").replace(/\//g,".")}`;
+  if(n.kind==="io")return`io:${d.called_from||""}:${d.method||"custom"}:${d.table||"_"}:${n.line||1}`;
+  return n.id;
+}
+function freeNodeId(id,except){
+  if(id===except||!byId[id])return id;
+  const m=id.match(/^(.*):(\d+)$/);
+  let base=m?m[1]:id,i=m?parseInt(m[2],10)+1:2;
+  while(byId[base+":"+i]&&base+":"+i!==except)i++;
+  return base+":"+i;
+}
+function remapNodeId(oldId,newId){
+  if(oldId===newId)return;
+  const n=byId[oldId];if(!n)return;
+  delete byId[oldId];n.id=newId;byId[newId]=n;
+  if(selId===oldId)selId=newId;
+  if(selScenario===oldId)selScenario=newId;
+  if(nodePos.has(oldId)){nodePos.set(newId,nodePos.get(oldId));nodePos.delete(oldId);}
+  (G.edges||[]).forEach(e=>{
+    let touched=false;
+    if(e.from_node===oldId){e.from_node=newId;touched=true;}
+    if(e.to_node===oldId){e.to_node=newId;touched=true;}
+    if(touched&&e.origin==="user"){
+      const kind=e.kind||"uses";
+      e.id=`${e.from_node}::${kind}::${e.to_node}`;
+    }
+  });
+}
 function createNodeFromPalette(kind){
   const d=PALETTE_DEFAULTS[kind];
-  const id=kind+":"+Date.now().toString(36);
-  const node={id,kind,layer:kind==="endpoint"?"representation":kind==="scenario"?"logic":kind==="io"?"io":"",label:d.label,file_path:d.file_path,line:1,details:JSON.parse(JSON.stringify(d.details)),origin:"user",description:"",acceptance:[],notes:"",scaffolded:false,create_file:true,append_model:false};
-  G.nodes.push(node);byId[id]=node;
-  if(kind==="io"&&!node.details.called_from){
-    toast("IO-узел: выберите сценарий-родитель (called_from)");
+  const details=JSON.parse(JSON.stringify(d.details));
+  let filePath=d.file_path;
+  if(kind==="io"){
+    details.called_from=selScenario||prompt("id сценария-родителя (called_from):")||"";
+    filePath="";
   }
-  selId=id;codeState=null;
-  renderCanvas();renderInspector();renderEditLists();
-  toast(kind+" создан");
+  const layer=kind==="endpoint"||kind==="model"?"representation":kind==="scenario"?"logic":kind==="io"?"io":"";
+  const node={id:"",kind,layer,label:d.label,file_path:filePath,line:1,details,origin:"user",description:"",acceptance:[],notes:"",scaffolded:false,create_file:true,append_model:kind==="model"};
+  node.id=freeNodeId(nodeIdFor(node));
+  saveNewNode(node);
+}
+async function saveNewNode(node){
+  try{
+    const r=await fetch("/api/plan/patch",{method:"PUT",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({target_id:node.id,is_edge:false,node})});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    applyGraph(await r.json());
+    selId=node.id;codeState=null;
+    renderAll();
+    if(node.kind==="io"&&!(node.details&&node.details.called_from))
+      toast("IO-узел: выберите сценарий-родитель (called_from)");
+    else toast(node.kind+" создан");
+  }catch(e){toast("ошибка создания: "+e.message)}
 }
 function renderEditLists(){
   renderPalette();
@@ -386,6 +443,7 @@ function renderCanvas(){
   if(single)layoutScenario(stage);else if(detail)layoutOverviewDetail(stage);else layoutOverview(stage);
   measure();
   if(single)layoutShelf(stage);else if(detail)layoutShelfDetail(stage);
+  layoutPlanOrphans(stage);
   measure();
   if(single||detail)fitZones();
   measure();
@@ -394,6 +452,20 @@ function renderCanvas(){
   drawEdges();
   sizeStage();
   applyView();
+}
+function layoutPlanOrphans(stage){
+  // Узлы плана/stale, не попавшие ни в один layout (сценарий/обзор), — зона «план».
+  const drawn=new Set();
+  document.querySelectorAll("#stage .node[data-id]").forEach(el=>drawn.add(el.dataset.id));
+  const orphans=(G.nodes||[]).filter(n=>(n.origin==="user"||n.origin==="stale")&&!drawn.has(n.id));
+  if(!orphans.length)return;
+  let maxY=TOP;
+  document.querySelectorAll("#stage .node").forEach(el=>{maxY=Math.max(maxY,(parseFloat(el.style.top)||0)+el.offsetHeight)});
+  const y0=maxY+110;
+  orphans.forEach((n,i)=>{
+    const col=i%5,row=Math.floor(i/5);
+    addNode(stage,n.id,40+col*(NODE_W+18),y0+row*ROW,{zone:"plan"});
+  });
 }
 function layoutScenario(stage){
   const p=G.scenario_paths[selScenario];
@@ -545,14 +617,20 @@ function fitZones(){
         moved=true;
       }
     }
-    const hz=zones.helpers;
-    if(hz){
+    for(const low of ["helpers","plan"]){
+      const hz=zones[low];
+      if(!hz)continue;
       for(const name of ZONE_ORDER){
         const c=zones[name];if(!c||!overlap(c,hz))continue;
         const dy=(c.y+c.h+ZONE_GAP)-hz.y;
-        translateZone(zones,"helpers",0,dy);
+        translateZone(zones,low,0,dy);
         moved=true;
       }
+    }
+    if(zones.helpers&&zones.plan&&overlap(zones.helpers,zones.plan)){
+      const dy=(zones.helpers.y+zones.helpers.h+ZONE_GAP)-zones.plan.y;
+      translateZone(zones,"plan",0,dy);
+      moved=true;
     }
     if(!moved)break;
   }
@@ -564,8 +642,8 @@ function renderZoneDivs(){
   if(!on)return;
   const stage=$("stage"),svg=$("edges");
   const zones=zoneBBoxes();
-  const labels={representation:"representation",logic:"logic",io:"io",helpers:"helpers"};
-  for(const z of ZONE_ORDER.concat(["helpers"])){
+  const labels={representation:"representation",logic:"logic",io:"io",helpers:"helpers",plan:"план"};
+  for(const z of ZONE_ORDER.concat(["helpers","plan"])){
     const b=zones[z];if(!b||!b.n)continue;
     const el=document.createElement("div");
     el.className="zone";
@@ -744,9 +822,11 @@ function renderInspector(){
       if(n.kind==="endpoint"){
         form+=`<label>http_method</label><select id="fMethod">${["get","post","put","delete","patch"].map(m=>`<option ${det.http_method===m?"selected":""}>${m}</option>`).join("")}</select>`;
         form+=`<label>path</label><input id="fPath2" value="${esc(det.path||"")}">`;
+        form+=`<label>function_name (часть id)</label><input id="fFuncName" value="${esc(det.function_name||"")}">`;
       }
       if(n.kind==="scenario"){
         form+=`<label>name</label><input id="fName" value="${esc(det.name||"")}">`;
+        form+=`<label>class_name (часть id)</label><input id="fScenClass" value="${esc(det.class_name||"")}">`;
         form+=`<label>dto</label><input id="fDto" value="${esc(det.dto||"")}">`;
         form+=`<label>response</label><input id="fResp" value="${esc(det.response||"")}">`;
       }
@@ -761,15 +841,21 @@ function renderInspector(){
       if(n.kind==="test"){
         const scenOptions=Object.values(byId).filter(x=>x.kind==="scenario").map(x=>`<option value="${esc(x.id)}" ${det.test_for_scenario===x.id?"selected":""}>${esc(x.label)}</option>`).join("");
         form+=`<label>test_for_scenario</label><select id="fTestScen"><option value="">—</option>${scenOptions}</select>`;
+        form+=`<label>test_name (часть id)</label><input id="fTestName" value="${esc(det.test_name||"")}">`;
       }
       if(n.kind==="helper"){
         form+=`<label>role</label><select id="fRole">${["schema","dependency","exception","settings","utils","other"].map(r=>`<option ${det.role===r?"selected":""}>${r}</option>`).join("")}</select>`;
+        form+=`<label>module (часть id)</label><input id="fModule" value="${esc(det.module||"")}">`;
+      }
+      if(n.kind==="io"){
+        form+=`<label>called_from (id сценария, часть id)</label><input id="fCalledFrom" value="${esc(det.called_from||"")}">`;
       }
     }
     form+=`</div>`;
     let btnHtml="";
     if(n.origin==="user")btnHtml+=`<button id="bDelNode">Удалить узел</button>`;
     else if(n.origin==="code")btnHtml+=`<button id="bMarkStale">Удалить узел</button>`;
+    else if(n.origin==="stale")btnHtml+=`<button id="bRestore">Восстановить узел</button>`;
     btnHtml+=`<button id="bCode">code view</button>`;
     d.innerHTML=rows([["kind",n.kind],["origin",n.origin],["file",n.file_path],["line",n.line]])+extra+doc+form+btnHtml+code;
     $("bCode").onclick=()=>openCode(n);
@@ -786,6 +872,7 @@ function renderInspector(){
     d.insertBefore(saveBtn,d.querySelector("#bCode"));
     if($("bDelNode"))$("bDelNode").onclick=()=>deleteNode(n);
     if($("bMarkStale"))$("bMarkStale").onclick=()=>markStale(n);
+    if($("bRestore"))$("bRestore").onclick=()=>restoreNode(n);
   }
   if($("bCloseCode"))$("bCloseCode").onclick=()=>{codeState=null;renderInspector()};
   if(codeState){
@@ -802,32 +889,50 @@ async function openCode(n){
   renderInspector();
 }
 async function saveNodePatch(n){
-  const patch={target_id:n.id,is_edge:false,patch:{
+  const oldId=n.id;
+  const fields={
     label:$("fLabel")?.value??n.label,
     description:$("fDesc")?.value??n.description,
-    acceptance:n.acceptance||[],
+    acceptance:(n.acceptance||[]).filter(a=>String(a).trim()!==""),
     notes:$("fNotes")?.value??n.notes,
   };
+  const body={target_id:oldId,is_edge:false,patch:fields};
   if(n.origin==="user"){
-    if($("fPath"))patch.patch.file_path=$("fPath").value;
-    if($("fCreateFile"))patch.patch.create_file=$("fCreateFile").checked;
-    if($("fAppendModel"))patch.patch.append_model=$("fAppendModel").checked;
+    if($("fPath"))n.file_path=$("fPath").value;
+    if($("fCreateFile"))n.create_file=$("fCreateFile").checked;
+    if($("fAppendModel"))n.append_model=$("fAppendModel").checked;
     if($("fMethod"))n.details.http_method=$("fMethod").value;
     if($("fPath2"))n.details.path=$("fPath2").value;
+    if($("fFuncName"))n.details.function_name=$("fFuncName").value;
     if($("fName"))n.details.name=$("fName").value;
+    if($("fScenClass"))n.details.class_name=$("fScenClass").value;
     if($("fDto"))n.details.dto=$("fDto").value||null;
     if($("fResp"))n.details.response=$("fResp").value||null;
     if($("fIoMethod"))n.details.method=$("fIoMethod").value;
     if($("fTable"))n.details.table=$("fTable").value||null;
+    if($("fCalledFrom"))n.details.called_from=$("fCalledFrom").value;
     if($("fTablename"))n.details.tablename=$("fTablename").value;
     if($("fClassName"))n.details.class_name=$("fClassName").value;
     if($("fRole"))n.details.role=$("fRole").value;
+    if($("fTestName"))n.details.test_name=$("fTestName").value;
+    if($("fModule"))n.details.module=$("fModule").value;
     if($("fTestScen"))n.details.test_for_scenario=$("fTestScen").value||null;
+    n.label=fields.label;n.description=fields.description;n.acceptance=fields.acceptance;n.notes=fields.notes;
+    // id зависит от file_path/идентичности — пересобираем и переименовываем патч.
+    const newId=freeNodeId(nodeIdFor(n),oldId);
+    if(newId!==oldId)remapNodeId(oldId,newId);
+    body.target_id=newId;
+    body.node=n;
+    body.patch=Object.assign({file_path:n.file_path,create_file:n.create_file,append_model:n.append_model},fields);
   }
   try{
-    const r=await fetch("/api/plan/patch",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)});
+    const r=await fetch("/api/plan/patch",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     if(!r.ok)throw new Error("HTTP "+r.status);
-    G=await r.json();byId={};(G.nodes||[]).forEach(x=>byId[x.id]=x);
+    applyGraph(await r.json());
+    if(body.target_id!==oldId){
+      const r2=await fetch("/api/plan/patch?target_id="+encodeURIComponent(oldId)+"&is_edge=0",{method:"DELETE"});
+      if(r2.ok)applyGraph(await r2.json());
+    }
     renderAll();toast("сохранено");
   }catch(e){toast("ошибка: "+e.message)}
 }
@@ -836,7 +941,7 @@ async function deleteNode(n){
   try{
     const r=await fetch("/api/plan/patch?target_id="+encodeURIComponent(n.id)+"&is_edge=0",{method:"DELETE"});
     if(!r.ok)throw new Error("HTTP "+r.status);
-    G=await r.json();byId={};(G.nodes||[]).forEach(x=>byId[x.id]=x);
+    applyGraph(await r.json());
     selId=null;renderAll();toast("узел удалён");
   }catch(e){toast("ошибка: "+e.message)}
 }
@@ -846,12 +951,21 @@ async function markStale(n){
     const patch={target_id:n.id,is_edge:false,mark_removed:true};
     const r=await fetch("/api/plan/patch",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)});
     if(!r.ok)throw new Error("HTTP "+r.status);
-    G=await r.json();byId={};(G.nodes||[]).forEach(x=>byId[x.id]=x);
+    applyGraph(await r.json());
     renderAll();toast("помечен на удаление");
   }catch(e){toast("ошибка: "+e.message)}
 }
+async function restoreNode(n){
+  try{
+    const patch={target_id:n.id,is_edge:false,mark_removed:false};
+    const r=await fetch("/api/plan/patch",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    applyGraph(await r.json());
+    renderAll();toast("восстановлен");
+  }catch(e){toast("ошибка: "+e.message)}
+}
 // ---------- рисование связей ----------
-function onPortClick(nodeId,pos){
+async function onPortClick(nodeId,pos){
   if(!edgeSrc){
     edgeSrc={id:nodeId,pos};
     document.querySelectorAll("#stage .node").forEach(el=>{if(el.dataset.id===nodeId)el.classList.add("edge-src")});
@@ -872,25 +986,24 @@ function onPortClick(nodeId,pos){
   else if(kind==="tests")label="tests";
   else label="";
   const edge={id:`${edgeSrc.id}::${kind}::${nodeId}`,from_node:edgeSrc.id,to_node:nodeId,kind,label,line:1,origin:"user",description:""};
-  G.edges.push(edge);
-  saveGraph();
   clearEdgeSrc();
-  renderCanvas();toast("связь создана");
+  try{
+    const r=await fetch("/api/plan/patch",{method:"PUT",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({target_id:edge.id,is_edge:true,edge})});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    applyGraph(await r.json());
+    renderAll();toast("связь создана");
+  }catch(e){toast("ошибка связи: "+e.message)}
 }
 function clearEdgeSrc(){
   edgeSrc=null;edgeDraftPath=null;
   document.querySelectorAll("#stage .node").forEach(el=>el.classList.remove("edge-src"));
 }
-async function saveGraph(){
-  try{
-    const r=await fetch("/api/rescan",{method:"POST"});
-    if(r.ok){G=await r.json();byId={};(G.nodes||[]).forEach(x=>byId[x.id]=x)}
-  }catch(e){toast("ошибка сохранения: "+e.message)}
-}
 // ---------- Save / Scaffold ----------
 async function onSave(){
   try{
-    const r=await fetch("/api/scaffold/preview");
+    const r=await fetch("/api/scaffold/preview",{method:"POST"});
+    if(!r.ok)throw new Error("HTTP "+r.status);
     const data=await r.json();
     const ops=data.ops||[];const models=data.models||[];
     const created=ops.filter(o=>o.action==="create");
@@ -912,7 +1025,7 @@ async function onSave(){
       const r2=await fetch("/api/scaffold/apply",{method:"POST"});
       if(r2.ok){
         const res=await r2.json();
-        G=await(await fetch("/api/graph")).json();byId={};(G.nodes||[]).forEach(x=>byId[x.id]=x);
+        applyGraph(await(await fetch("/api/graph")).json());
         renderAll();
         toast(`scaffold: ${res.created} создано, ${res.updated} обновлено, ${res.skipped} пропущено`);
       }

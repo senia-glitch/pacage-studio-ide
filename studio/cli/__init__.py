@@ -1,7 +1,7 @@
-"""CLI студии v4: scan / dev / list / scaffold / export / reset / help.
+"""CLI студии: scan / dev / list / scaffold / export / reset / help.
 
-Только просмотр и создание скелетов: скан пишет `.studio/graph.json`,
-scaffold создаёт файлы-скелеты с маркером. Никакой записи в существующий код.
+Скан пишет `.studio/graph.json` (схема v4), scaffold создаёт файлы-скелеты
+с маркером. Существующий код проекта не изменяется.
 """
 
 from __future__ import annotations
@@ -13,10 +13,9 @@ from pathlib import Path
 from studio import log as slog
 from studio import store
 from studio.exporter import to_json, to_markdown
-from studio.scaffold import ScaffoldOp, apply_scaffold, collect_model_appends, plan_scaffold
+from studio.scaffold import apply_scaffold, collect_model_appends, plan_scaffold
 from studio.scanner import build_scenario_paths, scan
 from studio.server import serve
-from studio.store.plan import read_plan
 
 
 def _root(args) -> Path:
@@ -28,11 +27,22 @@ def _count(graph, kind: str) -> int:
 
 
 def _origin_tag(node) -> str:
+    if node is None:
+        return ""
     if node.origin == "user":
         return " [план]"
     if node.origin == "stale":
         return " [stale]"
     return ""
+
+
+def _confirm(question: str) -> bool:
+    """y/да → True; неинтерактивный ввод (EOF) → False без исключения."""
+    try:
+        answer = input(question).strip().lower()
+    except EOFError:
+        return False
+    return answer in ("y", "yes", "д", "да")
 
 
 def cmd_scan(args) -> int:
@@ -159,11 +169,9 @@ def cmd_scaffold(args) -> int:
         if op.action.startswith("skip"):
             print(f"  {op.path} — {op.reason}")
 
-    if not args.yes:
-        answer = input("Создать файлы? [y/N] ").strip().lower()
-        if answer not in ("y", "yes", "д", "да"):
-            print("отмена")
-            return 1
+    if not args.yes and not _confirm("Создать файлы? [y/N] "):
+        print("отмена")
+        return 1
 
     apply_scaffold(ops, graph, root)
     build_scenario_paths(graph)
@@ -200,11 +208,9 @@ def cmd_reset(args) -> int:
     if not plan_path.is_file():
         print("reset: plan.json отсутствует")
         return 0
-    if not args.yes:
-        answer = input("Удалить .studio/plan.json? [y/N] ").strip().lower()
-        if answer not in ("y", "yes", "д", "да"):
-            print("отмена")
-            return 1
+    if not args.yes and not _confirm("Удалить .studio/plan.json? [y/N] "):
+        print("отмена")
+        return 1
     plan_path.unlink()
     print("reset: plan.json удалён")
     return 0
@@ -212,9 +218,12 @@ def cmd_reset(args) -> int:
 
 def cmd_dev(args) -> int:
     root = _root(args)
+    slog.start_run(root, f"dev {args.host}:{args.port}")
+    slog.step(f"проект: {root}")
     if store.read_graph(root) is None:
         graph = scan(root)
         store.write_graph(root, graph)
+        slog.step(f"граф построен: узлов={len(graph.nodes)} связей={len(graph.edges)}")
         print(f"scan: endpoints {len(graph.endpoints)}, scenarios {len(graph.scenarios)}")
     serve(root, host=args.host, port=args.port)
     return 0
@@ -222,10 +231,10 @@ def cmd_dev(args) -> int:
 
 def cmd_help(args) -> int:
     print("studio — карта проекта для AI-разработки")
-    print("")
+    print()
     print("Путь одного запроса:")
     print("  HTTP → endpoint (fastbase) → scenario (core) → _db.<method> (io) → model (event-infra)")
-    print("")
+    print()
     print("Команды:")
     print("  scan      [--project .]                            код → .studio/graph.json")
     print("  dev       [--project .] [--host 127.0.0.1] [--port 8777]")
@@ -235,7 +244,7 @@ def cmd_help(args) -> int:
     print("  export    [--project .] [--format md|json] [--out P] экспорт графа")
     print("  reset     [--project .] [--yes]                     удалить .studio/plan.json")
     print("  help                                     этот экран")
-    print("")
+    print()
     print("Подробности: studio <команда> --help")
     return 0
 
@@ -247,7 +256,7 @@ def _add_project(sub) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="studio",
-        description="studio v4 — карта проекта для AI-разработки",
+        description="pacage-studio — карта проекта для AI-разработки (схема графа v4)",
     )
     parser.add_argument("--project", default=".", help="корень проекта (по умолчанию cwd)")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -289,7 +298,22 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _safe_stdio() -> None:
+    """cp1251-консоль Windows (пайп/редирект) не умеет '→' — help падал
+    с UnicodeEncodeError. Кодировку не трогаем (кириллица остаётся верной),
+    только непредставимые символы заменяем на '?', чтобы CLI не рвался."""
+    for stream in (sys.stdout, sys.stderr):
+        reconf = getattr(stream, "reconfigure", None)
+        if reconf is None:
+            continue
+        try:
+            reconf(errors="replace")
+        except (OSError, ValueError):
+            pass  # поток не поддерживает reconfigure (например, замена в тестах)
+
+
 def main(argv=None) -> int:
+    _safe_stdio()
     args = build_parser().parse_args(argv)
     return args.f(args)
 

@@ -1,15 +1,29 @@
-# studio v2 — визуализатор пути одного запроса
+# pacage-studio 2.x — визуализатор пути одного запроса
 
-Read-only инструмент для проектов на `fastbase` / `core-package` / `event-infra`.
+Инструмент для проектов на `fastbase` / `core-package` / `event-infra`.
 Сканирует код (AST, без запуска) и показывает путь одного HTTP-запроса:
 
 ```
 HTTP → endpoint (fastbase) → scenario (core) → _db.<method> (io) → model (event-infra)
 ```
 
-Студия **ничего не пишет** в проект — кроме служебных `.studio/graph.json`
-(граф сканирования) и `.studio/studio.log` (лог запуска). Никакого UI-редактирования,
-никаких POST/PUT/DELETE на сервере — только GET.
+Помимо просмотра студия умеет **план**: добавлять узлы и связи поверх скана,
+сохранять описания/acceptance, отмечать узлы на удаление и **scaffold** —
+создавать файлы-скелеты из плана (маркер в первых строках, свободная правка).
+
+Что студия пишет:
+
+| Путь | Что это |
+|---|---|
+| `.studio/graph.json` | граф (схема v4), переживает правку кода через план |
+| `.studio/plan.json` | патчи плана (origin=user/stale) — единственный источник пользовательских данных |
+| `.studio/studio.log` | лог последнего запуска |
+| `.studio/.gitignore` | чтобы `.studio/` не коммитился |
+| файлы-скелеты с маркером `# studio: scaffold ...` | только по команде `scaffold apply` / кнопке Save в UI |
+| append-блоки в `models.py`, `# TODO` в сценариях | scaffold для моделей/IO |
+
+Существующий код проекта студия **не изменяет**: scaffold пишет только новые
+файлы с маркером, дописывает закомментированные блоки моделей и TODO-комментарии.
 
 ## Установка
 
@@ -38,19 +52,24 @@ pip install -e ".[dev]"     # + pytest для разработки самой с
 ## Команды
 
 ```bash
-studio scan  [--project .]                          # код → .studio/graph.json
-studio dev   [--project .] [--host 127.0.0.1] [--port 8777]
-studio list  [--project .]                          # сценарии в терминале
+studio scan     [--project .]                          # код → .studio/graph.json
+studio dev      [--project .] [--host 127.0.0.1] [--port 8777]
+studio list     [--project .]                          # сценарии в терминале
+studio scaffold [--project .] [--yes]                  # показать/создать скелеты из плана
+studio export   [--project .] [--format md|json] [--out FILE]
+studio reset    [--project .] [--yes]                  # удалить .studio/plan.json
 studio help
 ```
 
-`dev` сам сканирует проект, если графа нет или его версия ≠ 2.
+`dev` сам сканирует проект, если графа нет или его версия ≠ 4.
 Проект запускать не нужно — студия работает с текстом кода.
 
 ## Как сканируется проект
 
 1. **Окружение** — `.env.fastbase` в корне (опционально):
    `FAT_ROUTES_PACKAGE`, `FAT_CORE_DISCOVER`, `FAT_API_PREFIX`.
+   Значения — dotted-пути из идентификаторов; кривое значение игнорируется
+   с предупреждением в лог (иначе скан увёл бы чтение за корень проекта).
    Модели — строго `models.py` в корне. Без файла работают дефолты.
 2. **Индексация** — endpoint'ы (`@router.<method>("<path>")` в пакете роутов),
    сценарии (`@register_scenario("<name>")` в пакете сценариев),
@@ -63,50 +82,65 @@ studio help
    не глубже 2 уровней. Внешние пакеты, stdlib, `tests/`, `alembic/`, `docs/`
    в граф не попадают. Роль helper'а: `dependency` (Depends), `schema`,
    `exception`, `settings`, `utils`, `other`.
+5. **Тесты** — `tests/`: тест-узлы и рёбра `tests` к сценариям/endpoint'ам.
+6. **План** — поверх скана накладываются патчи из `.studio/plan.json`.
 
 Форматы id — `endpoint:<file>:<func>`, `scenario:<file>:<class>`,
 `io:<scenario_id>:<method>:<table|_>:<line>`, `model:<file>:<class>`,
-`helper:<dotted>`. Ребро — `"<from>::<kind>::<to>"`.
+`test:<file>:<test_name>`, `helper:<dotted>`. Ребро — `"<from>::<kind>::<to>"`.
+Узлы плана обязаны использовать те же id — иначе после scaffold + scan
+появится дубль.
 
 ## Интерфейс
 
-Два режима (кнопки в шапке):
+Два режима работы с графом (кнопки в шапке): **View** (только чтение) и **Edit** (план).
+
+Режимы просмотра (кнопки в шапке):
 
 - **Сценарий** — путь одного запроса: колонки `representation → logic → io → model`,
-  полка helpers под representation/logic, вложенный сценарий — полупрозрачный узел
-  в нижней части logic-колонки (клик — перейти в его путь).
-  Слои оформлены зонами (пунктирный прямоугольник с подписью и счётчиком узлов);
-  зоны не пересекаются — сталкивающиеся зоны автоматически раздвигаются.
-- **Обзор** — два подрежима в шапке:
-  - **Сетка** — все сценарии плиткой + правая колонка shared-моделей с бледными
-    линиями от сценариев, которые их трогают.
-  - **Подробно** — вся система на одном холсте: дорожки «endpoint → scenario → io → model»
-    для каждого сценария, общие endpoint'ы/модели/helpers — одним узлом,
-    все типы связей и те же зоны слоёв, что и в одиночном просмотре.
+  полка helpers, вложенный сценарий — полупрозрачный узел в нижней части logic-колонки
+  (клик — перейти в его путь). Слои оформлены зонами; зоны не пересекаются.
+- **Обзор** — **Сетка** (все сценарии плиткой + shared-модели) и
+  **Подробно** (вся система дорожками «endpoint → scenario → io → model»).
 
-Клик по сценарию в левой панели или по узлу в обзоре открывает его путь;
-инспектор справа показывает свойства узла, кнопка `code view` — исходник файла.
-Узлы с docstring-описанием в коде показывают первую строку под заголовком;
-полное описание — в инспекторе.
-Глубокая ссылка: `#s=<scenario_id>` и `#overview`.
+Режим **Edit**:
+
+- палитра слева: `+ endpoint / scenario / io / model / test / helper` — узлы
+  создаются сразу с каноническим id и сохраняются на сервер (PUT plan patch);
+- связи: клик по порту узла, затем по порту целевого узла (допустимые типы —
+  `dispatch`, `scenario_call`, `port_call`, `table`, `tests`, `uses`);
+- инспектор: редактируются label, описание, acceptance, notes, file_path,
+  create_file/append_model и поля details (включая class_name/function_name —
+  при их смене id узла пересобирается); «Сохранить описание» шлёт узел целиком;
+- удаление: для узлов плана — `Удалить узел` (патч удаляется, скан пересобирается),
+  для узлов кода — пометка на удаление (origin=stale), для stale — восстановление;
+- кнопка **Save** — preview scaffold в модальном окне и создание файлов;
+- узлы плана/стale, не попавшие в текущий layout, рисуются зоной «план».
+
+Экспорт: **Export ▾** → Markdown (инструкция для AI-агента) / JSON (полный граф) /
+копировать в буфер.
+
+Глубокие ссылки: `#s=<scenario_id>`, `#overview`, `#overview-detail`.
 Навигация: тяни фон — панорама, колесо — зум, `+`/`−`/`вписать`/`1:1` — масштаб,
-тяни узел — перетаскить (зоны следуют), `Esc` — снять выделение.
+`Esc` — снять выделение.
 
 ## Разработка студии
 
 ```bash
-pytest tests/          # 93 теста: env, indexer, resolver, helpers, paths, CLI, server
+pytest tests/          # env, indexer, resolver, helpers, paths, CLI, server, export, plan API, scaffold
 ```
 
 Структура пакета:
 
 ```
 studio/
-  metamodel/   pydantic-схемы Node/Edge/Graph/ScenarioPath (версия 2)
-  env/         .env.fastbase, пути к слоям
-  scanner/     ast_utils → indexer → resolver → helpers → scenario_paths
-  store/       .studio/graph.json (только версия 2) и .studio/.gitignore
-  server/      stdlib http.server, только GET
-  cli/         scan / dev / list / help
+  metamodel/   pydantic-схемы Node/Edge/Graph/ScenarioPath (схема графа v4)
+  env/         .env.fastbase, пути к слоям, валидация dotted-путей
+  scanner/     ast_utils → indexer → resolver → helpers → tests_index → scenario_paths
+  store/       .studio/graph.json, .studio/plan.json, .studio/.gitignore
+  scaffold/    шаблоны скелетов, plan/apply scaffold, append моделей, IO-TODO
+  exporter/    markdown и JSON
+  server/      stdlib http.server: GET (просмотр) + PUT/DELETE (план) + POST (rescan, scaffold)
+  cli/         scan / dev / list / scaffold / export / reset / help
   ui/          index.html (vanilla JS, без CDN)
 ```

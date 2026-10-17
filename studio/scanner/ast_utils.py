@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import ast
 import re
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 # Директории, которые сканер не трогает (§5.5).
 EXCLUDED_DIRS = frozenset(

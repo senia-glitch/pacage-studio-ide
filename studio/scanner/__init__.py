@@ -2,7 +2,7 @@
 
     HTTP → endpoint (fastbase) → scenario (core) → _db.<method> (io) → model (event-infra)
 
-Четыре прохода: индексация (indexer) → связи (resolver) → helpers → tests → scenario_paths.
+Пять проходов: индексация (indexer) → связи (resolver) → helpers → tests → scenario_paths.
 Только чтение: ни один файл проекта не изменяется.
 """
 
@@ -16,14 +16,13 @@ from studio.metamodel import (
     Edge,
     EndpointDetails,
     Graph,
-    IODetails,
     ModelDetails,
     Node,
     ScenarioDetails,
     ScenarioPath,
     TestDetails,
 )
-from studio.scanner.ast_utils import EXCLUDED_DIRS  # noqa: F401  (реэкспорт §5.5)
+from studio.scanner.ast_utils import EXCLUDED_DIRS
 from studio.scanner.helpers import attach_helpers
 from studio.scanner.indexer import Index, build_index, scenario_node_id
 from studio.scanner.resolver import (

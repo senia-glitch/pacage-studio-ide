@@ -1,9 +1,9 @@
-"""Что проверяется: сервер интерфейса (только чтение).
+"""Что проверяется: сервер интерфейса (просмотр + служебные эндпоинты).
 
 Описание словами: сервер отдаёт страницу, граф, список сценариев и код файла;
-граф автоматически сканируется при отсутствии или старой версии; любые
-изменяющие методы и неизвестные пути — 404; лог перезаписывается при старте,
-запросы дописываются.
+граф автоматически сканируется при отсутствии или старой версии; неизвестные
+пути — 404; лог перезаписывается при старте, запросы дописываются.
+Изменяющие эндпоинты (план/scaffold/export) — в test_server_mutations.py.
 """
 
 import json
@@ -62,10 +62,12 @@ class TestPage:
         finally:
             srv.shutdown()
 
-    def test_кнопок_записи_нет(self, demo):
+    def test_редактирование_включается_кнопкой(self, demo):
         srv, base = _serve(demo)
         try:
             _, body = _request(base, "/")
+            for marker in ("btnSave", "vView", "vEdit", "palette", "applyGraph", "nodeIdFor", "layoutPlanOrphans"):
+                assert marker in body, f"в странице нет {marker}"
             for marker in ("bValidate", "bDiff", "bConfig", "bScan"):
                 assert marker not in body, f"кнопка {marker} не должна существовать"
         finally:

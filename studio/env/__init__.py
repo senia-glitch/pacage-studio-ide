@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from studio import log as slog
+
 DEFAULT_ROUTES_PACKAGE = "app.api.v1.routes"
 DEFAULT_CORE_DISCOVER = "app.scenarios"
 DEFAULT_API_PREFIX = "/api/v1"
@@ -24,6 +26,22 @@ class ProjectEnv:
     api_prefix: str
     models_path: Path
     has_models: bool
+
+
+def _dotted_package(value: str | None, fallback: str, key: str) -> str:
+    """Dotted-путь пакета: только идентификаторы, иначе дефолт.
+
+    Значение с `..`, слэшами или абсолютным путём увело бы сканер за корень
+    проекта (ValueError в relative_to) или уронило бы scan.
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return fallback
+    parts = raw.split(".")
+    if all(part.isidentifier() for part in parts):
+        return raw
+    slog.step(f"{key}={raw!r} некорректен (нужен dotted-путь из идентификаторов) — использую {fallback!r}")
+    return fallback
 
 
 def parse_env_text(text: str) -> dict[str, str]:
@@ -55,8 +73,8 @@ def read_env_file(path: Path) -> dict[str, str]:
 def read_env(project_root: Path) -> ProjectEnv:
     root = Path(project_root).resolve()
     raw = read_env_file(root / ENV_FILENAME)
-    routes = raw.get("FAT_ROUTES_PACKAGE") or DEFAULT_ROUTES_PACKAGE
-    core = raw.get("FAT_CORE_DISCOVER") or DEFAULT_CORE_DISCOVER
+    routes = _dotted_package(raw.get("FAT_ROUTES_PACKAGE"), DEFAULT_ROUTES_PACKAGE, "FAT_ROUTES_PACKAGE")
+    core = _dotted_package(raw.get("FAT_CORE_DISCOVER"), DEFAULT_CORE_DISCOVER, "FAT_CORE_DISCOVER")
     prefix = raw.get("FAT_API_PREFIX") or DEFAULT_API_PREFIX
     models_path = root / "models.py"
     return ProjectEnv(

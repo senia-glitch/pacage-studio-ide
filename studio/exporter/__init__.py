@@ -9,7 +9,6 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
-from pathlib import Path
 
 from studio.metamodel import Graph, Node
 
@@ -60,8 +59,12 @@ def _acceptance_block(node: Node, indent: str = "", checklist: bool = False) -> 
     return lines
 
 
-def _node_label(node: Node, nodes_by_id: dict[str, Node]) -> str:
-    return nodes_by_id[node.id].label if node.id in nodes_by_id else node.id
+def _label_of(node_id: str | None, nodes_by_id: dict[str, Node]) -> str | None:
+    """Метка узла по id; неизвестный id → None, отсутствие id → None."""
+    if not node_id:
+        return None
+    target = nodes_by_id.get(node_id)
+    return target.label if target is not None else node_id
 
 
 def _endpoint_section(node: Node, graph: Graph, nodes_by_id: dict[str, Node]) -> list[str]:
@@ -78,10 +81,7 @@ def _endpoint_section(node: Node, graph: Graph, nodes_by_id: dict[str, Node]) ->
         ),
         None,
     )
-    scenario_label = _node_label(
-        next((n for n in graph.nodes if n.id == scenario), Node(id="", kind="", label=scenario or "", file_path="", line=1)),
-        nodes_by_id,
-    ) if scenario else "—"
+    scenario_label = _label_of(scenario, nodes_by_id) or "—"
     lines = [
         f"#### `{method} {path}` — {function_name}",
         f"Файл: {node.file_path}:{node.line}",
@@ -122,7 +122,7 @@ def _scenario_section(node: Node, graph: Graph, nodes_by_id: dict[str, Node]) ->
         if e.kind == "scenario_call" and e.from_node == node.id
     ]
     if called:
-        labels = [_node_label(next((n for n in graph.nodes if n.id == c), Node(id="", kind="", label=c, file_path="", line=1)), nodes_by_id) for c in called]
+        labels = [_label_of(c, nodes_by_id) or c for c in called]
         lines.append(f"Вызывает сценарии: {', '.join(labels)}")
         lines.append("")
     lines.append("---")
@@ -139,10 +139,7 @@ def _io_section(node: Node, graph: Graph, nodes_by_id: dict[str, Node]) -> list[
     if details.get("table"):
         lines.append(f"Таблица: {details['table']}")
     called_from = details.get("called_from", "")
-    called_label = _node_label(
-        next((n for n in graph.nodes if n.id == called_from), Node(id="", kind="", label=called_from, file_path="", line=1)),
-        nodes_by_id,
-    ) if called_from else "—"
+    called_label = _label_of(called_from, nodes_by_id) or "—"
     lines.append(f"Вызывается из: {called_label}")
     lines.extend(_desc_block(node))
     lines.extend(_acceptance_block(node))

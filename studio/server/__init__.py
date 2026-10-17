@@ -16,9 +16,21 @@ from studio import log as slog
 from studio import store
 from studio.exporter import to_json, to_markdown
 from studio.metamodel import Graph
-from studio.scaffold import ScaffoldOp, apply_scaffold, collect_model_appends, plan_scaffold
+from studio.scaffold import (
+    ScaffoldOp,
+    apply_scaffold,
+    collect_model_appends,
+    plan_scaffold,
+)
 from studio.scanner import build_scenario_paths, scan
-from studio.store.plan import PlanPatch, apply_plan, read_plan, remove_patch, upsert_patch, write_plan
+from studio.store.plan import (
+    PlanPatch,
+    apply_plan,
+    read_plan,
+    remove_patch,
+    upsert_patch,
+    write_plan,
+)
 from studio.ui import INDEX
 
 
@@ -153,9 +165,9 @@ def _remove_patch(project_root: Path, target_id: str, is_edge: bool) -> Graph:
     remove_patch(plan, target_id, is_edge)
     plan.meta.last_edit = _dt.datetime.now().isoformat(timespec="seconds")
     write_plan(project_root, plan)
-    graph = reload_graph(project_root)
-    graph = apply_plan(graph, plan)
-    build_scenario_paths(graph)
+    # Пересборка из кода + остатшегося плана: apply_plan только добавляет,
+    # поэтому без нового скана удалённый узел/ребро остались бы в graph.json.
+    graph = scan(project_root)
     save_graph(project_root, graph)
     return graph
 
@@ -187,7 +199,33 @@ def make_handler(ctx: Ctx):
         def log_message(self, fmt, *args) -> None:
             slog.step("HTTP " + fmt % args)
 
+        def _guard(self, action) -> None:
+            """Исключение в обработчике → ответ 500, а не обрыв соединения."""
+            try:
+                action()
+            except Exception as exc:  # noqa: BLE001 — граница HTTP-запроса
+                slog.step(f"HTTP 500: {type(exc).__name__}: {exc}")
+                try:
+                    _send_text(self, f"internal error: {type(exc).__name__}: {exc}", code=500)
+                except OSError:
+                    pass  # клиент уже отключился, ответить некому
+
         def do_GET(self) -> None:
+            self._guard(self._get)
+
+        def do_PUT(self) -> None:
+            self._guard(self._put)
+
+        def do_DELETE(self) -> None:
+            self._guard(self._delete)
+
+        def do_POST(self) -> None:
+            self._guard(self._post)
+
+        def do_PATCH(self) -> None:
+            self._not_found()
+
+        def _get(self) -> None:
             root = ctx.root
             url = urllib.parse.urlsplit(self.path)
             query = urllib.parse.parse_qs(url.query)
@@ -212,7 +250,7 @@ def make_handler(ctx: Ctx):
                 return _send_text(self, to_markdown(graph), "text/markdown; charset=utf-8")
             return _send_text(self, "not found", code=404)
 
-        def do_PUT(self) -> None:
+        def _put(self) -> None:
             root = ctx.root
             url = urllib.parse.urlsplit(self.path)
             if url.path == "/api/plan/patch":
@@ -225,7 +263,7 @@ def make_handler(ctx: Ctx):
                 return _send_json(self, graph.model_dump())
             self._not_found()
 
-        def do_DELETE(self) -> None:
+        def _delete(self) -> None:
             root = ctx.root
             url = urllib.parse.urlsplit(self.path)
             query = urllib.parse.parse_qs(url.query)
@@ -238,7 +276,7 @@ def make_handler(ctx: Ctx):
                 return _send_json(self, graph.model_dump())
             self._not_found()
 
-        def do_POST(self) -> None:
+        def _post(self) -> None:
             root = ctx.root
             url = urllib.parse.urlsplit(self.path)
             if url.path == "/api/rescan":
@@ -257,15 +295,14 @@ def make_handler(ctx: Ctx):
         def _not_found(self) -> None:
             _send_text(self, "not found", code=404)
 
-        def do_PATCH(self) -> None:
-            self._not_found()
-
     return H
 
 
 def serve(project_root: Path, host: str = "127.0.0.1", port: int = 8777) -> None:
     store.ensure_layout(project_root)
-    slog.start_run(project_root, f"dev {host}:{port}")
+    if not slog.is_active(project_root):
+        # cmd_dev уже открыл лог — не затираем его шаги (авто-scan, проект).
+        slog.start_run(project_root, f"dev {host}:{port}")
     slog.step(f"сервер слушает http://{host}:{port}")
     server = ThreadingHTTPServer((host, port), make_handler(Ctx(project_root)))
     print(f"studio dev -> http://{host}:{port}  (project: {project_root})")

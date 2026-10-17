@@ -1,7 +1,8 @@
 """Чтение/запись `.studio/`: graph.json и studio.log. Больше ничего.
 
 Граф — артефакт сканирования: его можно удалить, studio пересоберёт его сам.
-Версия схемы 1 (прототип) не читается — возвращается None, файл перезапишется.
+Версия схемы, отличная от GRAPH_VERSION (4), не читается — возвращается None,
+файл перезапишется при следующем scan.
 """
 
 from __future__ import annotations
@@ -26,17 +27,23 @@ def graph_path(project_root: Path) -> Path:
 
 
 def ensure_layout(project_root: Path) -> Path:
-    """Создать .studio/ с .gitignore внутри."""
+    """Создать .studio/ с .gitignore внутри (graph/plan/log не коммитятся)."""
     sd = studio_dir(project_root)
     sd.mkdir(parents=True, exist_ok=True)
     gitignore = sd / ".gitignore"
-    if not gitignore.exists():
-        gitignore.write_text("graph.json\nstudio.log\n", encoding="utf-8")
+    lines = ["graph.json", "plan.json", "studio.log"]
+    try:
+        existing = [ln for ln in gitignore.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    except OSError:
+        existing = []
+    missing = [ln for ln in lines if ln not in existing]
+    if missing:
+        gitignore.write_text("\n".join(existing + missing) + "\n", encoding="utf-8")
     return sd
 
 
 def read_graph(project_root: Path) -> Graph | None:
-    """Прочитать graph.json. Нет файла, версия != 2 или он битый — None."""
+    """Прочитать graph.json. Нет файла, версия != GRAPH_VERSION или он битый — None."""
     path = graph_path(project_root)
     if not path.is_file():
         return None

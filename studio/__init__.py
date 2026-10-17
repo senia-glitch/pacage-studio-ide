@@ -1,6 +1,6 @@
-"""Studio v4 — карта проекта для AI-разработки (fastbase / core-package / event-infra).
+"""pacage-studio 2.x — карта проекта для AI-разработки (fastbase / core-package / event-infra).
 
-Строит граф одного запроса:
+Строит граф одного запроса (схема графа v4):
 
     HTTP → endpoint (fastbase) → scenario (core) → _db.<method> (io) → model (event-infra)
 
@@ -8,5 +8,5 @@
 только `.studio/*` и файлы-скелеты с маркером.
 """
 
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 __all__ = ["__version__"]
