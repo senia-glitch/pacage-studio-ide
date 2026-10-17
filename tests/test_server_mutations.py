@@ -185,6 +185,27 @@ class TestScaffoldApi:
         finally:
             srv.shutdown()
 
+    def test_scaffold_apply_не_пишет_за_корень(self, demo):
+        srv, base = _serve(demo)
+        try:
+            node = Node(
+                id="scenario:../../evil.py:Evil",
+                kind="scenario",
+                layer="logic",
+                label="evil",
+                file_path="../../evil.py",
+                origin="user",
+                description="d",
+                details={"name": "evil", "class_name": "Evil", "module": "evil"},
+            )
+            _request(base, "/api/plan/patch", "PUT", {"target_id": node.id, "is_edge": False, "node": node.model_dump()})
+            status, body = _request(base, "/api/scaffold/apply", "POST")
+            assert status == 200
+            outside = (demo / "../../evil.py").resolve()
+            assert not outside.exists()
+        finally:
+            srv.shutdown()
+
 
 class TestExportApi:
     def test_md_и_json(self, demo):

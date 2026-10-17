@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from studio import log as slog
 from studio.metamodel import Graph, Node
 
 SCAFFOLD_MARKER = "# studio: scaffold — этот файл создан автоматически, можно свободно редактировать"
@@ -27,6 +28,7 @@ class ScaffoldOp:
         "skip_no_marker",
         "skip_io_no_scenario",
         "skip_disabled",
+        "skip_outside_root",
     ]
     path: str
     node_id: str
@@ -212,6 +214,18 @@ def _has_marker(path: Path) -> bool:
     return SCAFFOLD_MARKER in _read_first_lines(path)
 
 
+def _safe_target(root: Path, rel: str) -> Path | None:
+    """Разрешённый целевой путь внутри проекта; None — выход за корень."""
+    try:
+        target = (root / rel).resolve()
+        root_res = root.resolve()
+    except (OSError, ValueError):
+        return None
+    if target == root_res or root_res in target.parents:
+        return target
+    return None
+
+
 def plan_scaffold(graph: Graph, project_root: Path) -> list[ScaffoldOp]:
     """Список ScaffoldOp для всех origin=user узлов."""
     ops: list[ScaffoldOp] = []
@@ -236,7 +250,10 @@ def plan_scaffold(graph: Graph, project_root: Path) -> list[ScaffoldOp]:
                     ScaffoldOp("skip_io_no_scenario", node.file_path, node.id, "нет called_from")
                 )
             continue
-        target = project_root / node.file_path
+        target = _safe_target(project_root, node.file_path)
+        if target is None:
+            ops.append(ScaffoldOp("skip_outside_root", node.file_path, node.id, "путь вне проекта"))
+            continue
         if not target.exists():
             ops.append(ScaffoldOp("create", node.file_path, node.id))
         elif _has_marker(target):
@@ -254,7 +271,16 @@ def apply_scaffold(ops: list[ScaffoldOp], graph: Graph, project_root: Path) -> N
         node = nodes_by_id.get(op.node_id)
         if node is None:
             continue
-        target = project_root / op.path
+        if op.action in ("skip_exists", "skip_no_marker", "skip_disabled", "skip_io_no_scenario", "skip_outside_root"):
+            if op.action == "skip_outside_root":
+                slog.step(f"scaffold skip: путь вне проекта: {op.path}")
+                node.scaffolded = False
+            continue
+        target = _safe_target(project_root, op.path)
+        if target is None:
+            slog.step(f"scaffold skip: путь вне проекта: {op.path}")
+            node.scaffolded = False
+            continue
         if op.action == "create":
             try:
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -264,8 +290,6 @@ def apply_scaffold(ops: list[ScaffoldOp], graph: Graph, project_root: Path) -> N
             created_files.add(op.path)
         elif op.action == "update_docstring":
             _update_docstring_file(target, node)
-        elif op.action in ("skip_exists", "skip_no_marker", "skip_disabled", "skip_io_no_scenario"):
-            continue
         if op.action in ("create", "update_docstring"):
             node.scaffolded = _has_marker(target)
 
@@ -275,8 +299,8 @@ def apply_scaffold(ops: list[ScaffoldOp], graph: Graph, project_root: Path) -> N
     for node in graph.nodes:
         if node.origin == "user" and node.kind != "io" and not node.append_model:
             if node.create_file:
-                target = project_root / node.file_path
-                if target.exists() and _has_marker(target):
+                target = _safe_target(project_root, node.file_path)
+                if target is not None and target.exists() and _has_marker(target):
                     node.scaffolded = True
 
 
@@ -348,7 +372,10 @@ def _apply_model_appends(graph: Graph, project_root: Path, nodes_by_id: dict[str
     if not model_nodes:
         return
 
-    models_path = project_root / "models.py"
+    models_path = _safe_target(project_root, "models.py")
+    if models_path is None:
+        slog.step("scaffold skip: models.py вне проекта")
+        return
     try:
         if not models_path.exists():
             models_path.write_text(
@@ -422,7 +449,10 @@ def _apply_io_todos(
         scenario_node = nodes_by_id.get(scenario_id)
         if scenario_node is None or scenario_node.origin != "user":
             continue
-        scenario_file = project_root / scenario_node.file_path
+        scenario_file = _safe_target(project_root, scenario_node.file_path)
+        if scenario_file is None:
+            slog.step(f"scaffold skip: путь вне проекта: {scenario_node.file_path}")
+            continue
         rel_path = scenario_node.file_path
         if rel_path in created_files:
             continue  # только что созданный скелет уже содержит блок из шаблона

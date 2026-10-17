@@ -133,3 +133,72 @@ class TestApplyScaffold:
         text = target.read_text(encoding="utf-8")
         assert 'await self._db.create("invoices", ...)' in text
         assert "# Планируемые IO-вызовы:" in text
+
+
+def _evil_scenario(file_path: str, class_name: str = "Evil") -> Node:
+    return Node(
+        id=f"scenario:{file_path}:{class_name}",
+        kind="scenario",
+        layer="logic",
+        label="evil",
+        file_path=file_path,
+        origin="user",
+        description="d",
+        details={"name": "evil", "class_name": class_name, "module": "evil"},
+    )
+
+
+class TestPathTraversal:
+    def test_path_traversal_в_scaffold_пропускается(self, demo):
+        node = _evil_scenario("../../evil.py")
+        graph = apply_plan(scan(demo), Plan(patches=[PlanPatch(target_id=node.id, node=node)]))
+        ops = plan_scaffold(graph, demo)
+        assert any(o.action == "skip_outside_root" and "путь вне проекта" in o.reason for o in ops)
+        apply_scaffold(ops, graph, demo)
+        outside = (demo / "../../evil.py").resolve()
+        assert not outside.exists()
+
+    def test_path_traversal_в_update_docstring(self, demo):
+        outside = (demo / ".." / "outside_scen.py").resolve()
+        outside.write_text(SCAFFOLD_MARKER + "\nclass Outside:\n    pass\n", encoding="utf-8")
+        before = outside.read_text(encoding="utf-8")
+        node = _evil_scenario("../outside_scen.py")
+        graph = apply_plan(scan(demo), Plan(patches=[PlanPatch(target_id=node.id, node=node)]))
+        ops = plan_scaffold(graph, demo)
+        assert all(o.action != "update_docstring" for o in ops)
+        apply_scaffold(ops, graph, demo)
+        assert outside.read_text(encoding="utf-8") == before
+
+    def test_path_traversal_в_io_todo(self, demo):
+        scen = _evil_scenario("../scen.py", class_name="Scen")
+        graph = apply_plan(scan(demo), Plan(patches=[PlanPatch(target_id=scen.id, node=scen)]))
+        io = Node(
+            id="io:x:create:orders:1",
+            kind="io",
+            layer="io",
+            label="db.create",
+            file_path=scen.file_path,
+            origin="user",
+            details={"method": "create", "table": "orders", "called_from": scen.id},
+        )
+        graph = apply_plan(graph, Plan(patches=[PlanPatch(target_id=io.id, node=io)]))
+        outside = (demo / ".." / "scen.py").resolve()
+        outside.write_text(SCAFFOLD_MARKER + "\nclass Scen:\n    async def execute(self):\n        pass\n", encoding="utf-8")
+        before = outside.read_text(encoding="utf-8")
+        apply_scaffold(plan_scaffold(graph, demo), graph, demo)
+        assert outside.read_text(encoding="utf-8") == before
+
+    def test_абсолютный_путь_пропускается(self, demo):
+        node = _evil_scenario("/etc/evil.py")
+        graph = apply_plan(scan(demo), Plan(patches=[PlanPatch(target_id=node.id, node=node)]))
+        ops = plan_scaffold(graph, demo)
+        assert any(o.action == "skip_outside_root" for o in ops)
+        apply_scaffold(ops, graph, demo)
+
+    def test_нормальный_путь_работает(self, demo):
+        node = _plan_scenario(demo, name="ok_scen", class_name="OkScen")
+        graph = apply_plan(scan(demo), Plan(patches=[PlanPatch(target_id=node.id, node=node)]))
+        ops = plan_scaffold(graph, demo)
+        assert any(o.action == "create" and o.path == "app/scenarios/ok_scen.py" for o in ops)
+        apply_scaffold(ops, graph, demo)
+        assert (demo / "app" / "scenarios" / "ok_scen.py").is_file()
