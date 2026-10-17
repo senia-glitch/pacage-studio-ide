@@ -104,6 +104,20 @@ class TestPlanPatch:
         finally:
             srv.shutdown()
 
+    def test_mark_stale_restore_через_api(self, demo):
+        srv, base = _serve(demo)
+        try:
+            code_id = next(n.id for n in scan(demo).nodes if n.kind == "scenario" and n.origin == "code")
+            _request(base, "/api/plan/patch", "PUT", {"target_id": code_id, "is_edge": False, "mark_removed": True})
+            _, body = _request(base, "/api/plan/patch", "PUT", {"target_id": code_id, "is_edge": False, "mark_removed": False})
+            nodes = {n["id"]: n for n in json.loads(body)["nodes"]}
+            assert nodes[code_id]["origin"] == "code"
+            _, body = _request(base, "/api/graph")
+            nodes = {n["id"]: n for n in json.loads(body)["nodes"]}
+            assert nodes[code_id]["origin"] == "code"
+        finally:
+            srv.shutdown()
+
     def test_delete_удаляет_узел(self, demo):
         srv, base = _serve(demo)
         try:

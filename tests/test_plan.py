@@ -106,6 +106,45 @@ class TestApplyPlan:
         found = next(e for e in out.edges if e.id == edge.id)
         assert found.origin == "stale"
 
+    def test_restore_code_узла_после_mark_removed(self, demo):
+        graph = scan(demo)
+        code_id = next(n.id for n in graph.nodes if n.kind == "scenario" and n.origin == "code")
+        out = apply_plan(graph, Plan(patches=[PlanPatch(target_id=code_id, mark_removed=True)]))
+        found = next(n for n in out.nodes if n.id == code_id)
+        assert found.origin == "stale"
+        out2 = apply_plan(out, Plan(patches=[PlanPatch(target_id=code_id, mark_removed=False)]))
+        found2 = next(n for n in out2.nodes if n.id == code_id)
+        assert found2.origin == "code"
+
+    def test_restore_code_ребра_после_mark_removed(self, demo):
+        graph = scan(demo)
+        edge = next(e for e in graph.edges if e.origin == "code")
+        out = apply_plan(graph, Plan(patches=[PlanPatch(target_id=edge.id, is_edge=True, mark_removed=True)]))
+        assert next(e for e in out.edges if e.id == edge.id).origin == "stale"
+        out2 = apply_plan(out, Plan(patches=[PlanPatch(target_id=edge.id, is_edge=True, mark_removed=False)]))
+        assert next(e for e in out2.edges if e.id == edge.id).origin == "code"
+
+    def test_restore_user_узла_не_ломается(self, demo):
+        graph = scan(demo)
+        node = _user_node("scenario:app/scenarios/new.py:NewScen")
+        out = apply_plan(graph, Plan(patches=[PlanPatch(target_id=node.id, node=node)]))
+        out = apply_plan(out, Plan(patches=[PlanPatch(target_id=node.id, mark_removed=True)]))
+        assert next(n for n in out.nodes if n.id == node.id).origin == "stale"
+        # снятие метки через node (с node) → user
+        out2 = apply_plan(out, Plan(patches=[PlanPatch(target_id=node.id, node=node, mark_removed=False)]))
+        assert next(n for n in out2.nodes if n.id == node.id).origin == "user"
+
+    def test_restore_не_воскрешает_удалённый_user_узел(self, demo):
+        graph = scan(demo)
+        node = _user_node("scenario:app/scenarios/new.py:NewScen")
+        plan = Plan(patches=[PlanPatch(target_id=node.id, node=node)])
+        out = apply_plan(graph, plan)
+        assert any(n.id == node.id for n in out.nodes)
+        remove_patch(plan, node.id, False)
+        # mark_removed:false без node на несуществующий узел не создаёт его заново
+        out2 = apply_plan(scan(demo), Plan(patches=[PlanPatch(target_id=node.id, mark_removed=False)]))
+        assert not any(n.id == node.id for n in out2.nodes)
+
 
 class TestUpsertPatch:
     def test_замена_по_target_id(self):

@@ -150,6 +150,16 @@ def apply_plan(scanned: Graph, plan: Plan) -> Graph:
                 if target_node is not None:
                     target_node.origin = "stale"
 
+        if patch.mark_removed is False:
+            if patch.is_edge:
+                target_edge = edges_by_id.get(patch.target_id)
+                if target_edge is not None and target_edge.origin == "stale":
+                    target_edge.origin = "code"
+            else:
+                target_node = nodes_by_id.get(patch.target_id)
+                if target_node is not None and target_node.origin == "stale":
+                    target_node.origin = "code"
+
     result.nodes.sort(key=lambda n: n.id)
     result.edges.sort(key=lambda e: e.id)
     result.endpoints = sorted(n.id for n in result.nodes if n.kind == "endpoint")
