@@ -57,8 +57,10 @@ class TestPage:
         srv, base = _serve(demo)
         try:
             _, body = _request(base, "/")
-            for marker in ("zoomLabel", "zIn", "zOut", "zFit", "zReset", "toWorld", "fitView", "ovSub"):
+            for marker in ("zoomLabel", "zIn", "zOut", "zFit", "zReset", "toWorld", "fitView",
+                           "hcat", "Режим", "Масштаб", "Действия"):
                 assert marker in body, f"в странице нет {marker}"
+            assert "Подробно" not in body, "режим «Подробно» удалён"
         finally:
             srv.shutdown()
 
@@ -108,6 +110,28 @@ class TestPage:
             for marker in ("btnSync", "onSync", "/api/metadata/preview",
                            "/api/metadata/apply", "diff-add", "diff-del"):
                 assert marker in body, f"в странице нет {marker}"
+        finally:
+            srv.shutdown()
+
+    def test_панель_и_edit_подсказки_на_месте(self, demo):
+        srv, base = _serve(demo)
+        try:
+            _, body = _request(base, "/")
+            for marker in ("panelState", "panel-legend", "editStatus", "Создать узел",
+                           "palette-hint", "PALETTE_HINTS", "errMsg", "insp-heading",
+                           "renderCreateForm", "createNodeFromForm", "kindTabs", "bCreateNode"):
+                assert marker in body, f"в странице нет {marker}"
+        finally:
+            srv.shutdown()
+
+    def test_связи_перетаскиванием_на_месте(self, demo):
+        srv, base = _serve(demo)
+        try:
+            _, body = _request(base, "/")
+            for marker in ("startEdgeDraft", "finishEdgeDraft", "createEdgeFromPorts",
+                           "edge-drafting", "portCenter"):
+                assert marker in body, f"в странице нет {marker}"
+            assert "onPortClick" not in body, "двухкликовый механизм заменён на drag"
         finally:
             srv.shutdown()
 

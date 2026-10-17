@@ -35,11 +35,11 @@ def test_версии_не_разъезжаются():
     assert studio.__version__.startswith("2.")
 
 
-def test_версия_2_5_0():
+def test_версия_2_6_0():
     import studio
 
-    assert studio.__version__ == "2.5.0"
-    assert _pyproject()["project"]["version"] == "2.5.0"
+    assert studio.__version__ == "2.6.0"
+    assert _pyproject()["project"]["version"] == "2.6.0"
 
 
 def test_ui_html_упакован_в_дистрибутив():

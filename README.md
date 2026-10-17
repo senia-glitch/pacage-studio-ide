@@ -56,6 +56,7 @@ studio scan     [--project .]                          # код → .studio/grap
 studio dev      [--project .] [--host 127.0.0.1] [--port 8777]
 studio list     [--project .]                          # сценарии в терминале
 studio scaffold [--project .] [--yes]                  # показать/создать скелеты из плана
+studio metadata [--project .] [--dry-run] [--yes]      # синхронизировать описание/критерии в код
 studio export   [--project .] [--format md|json] [--out FILE]
 studio reset    [--project .] [--yes]                  # удалить .studio/plan.json
 studio help
@@ -93,35 +94,53 @@ studio help
 
 ## Интерфейс
 
-Два режима работы с графом (кнопки в шапке): **View** (только чтение) и **Edit** (план).
+Два режима работы с графом (кнопки в шапке, категории подписаны):
+**Вид: View** (только чтение) и **Edit** (план). **Содержимое: Описание/Критерии** —
+включить/выключить секции в узлах (запоминается в localStorage).
+**Масштаб: − / % / + / вписать / 1:1**. **Действия: Export / Save / Синхронизировать**.
 
-Режимы просмотра (кнопки в шапке):
+Режимы просмотра (кнопка **Режим** в шапке):
 
 - **Сценарий** — путь одного запроса: колонки `representation → logic → io → model`,
   полка helpers, вложенный сценарий — полупрозрачный узел в нижней части logic-колонки
   (клик — перейти в его путь). Слои оформлены зонами; зоны не пересекаются.
-- **Обзор** — **Сетка** (все сценарии плиткой + shared-модели) и
-  **Подробно** (вся система дорожками «endpoint → scenario → io → model»).
+  В узле видны секции «описание» и «критерии» (со скроллом), у endpoint — плашка
+  HTTP-метода, у сценария — плашка домена.
+- **Обзор** — все сценарии плиткой, сгруппированные по HTTP-методу и домену,
+  справа — колонка shared-моделей.
+
+Левая панель: сценарии сгруппированы «HTTP-метод → домен» с поиском
+(фильтр по названию, классу, домену и методу); свёрнутость групп сохраняется
+при выборе сценария.
 
 Режим **Edit**:
 
-- палитра слева: `+ endpoint / scenario / io / model / test / helper` — узлы
-  создаются сразу с каноническим id и сохраняются на сервер (PUT plan patch);
-- связи: клик по порту узла, затем по порту целевого узла (допустимые типы —
-  `dispatch`, `scenario_call`, `port_call`, `table`, `tests`, `uses`);
-- инспектор: редактируются label, описание, acceptance, notes, file_path,
+- если ничего не выбрано — справа форма «Создание узла» (тип выбирается
+  вкладками, по умолчанию `scenario`): label, описание, acceptance, домен,
+  file_path и поля details — кнопка «Создать узел»;
+- если узел выбран (клик на канвасе/в списке) — справа форма правки этого узла;
+- слева — палитра «Создать узел»: `+ endpoint / scenario / io / model / test / helper`
+  (подсказки на кнопках); узлы создаются сразу с каноническим id и сохраняются
+  на сервер (PUT plan patch); ниже — список плана и расхождений (stale),
+  над ним — строка «Редактируется: …»;
+- связи: тяни от порта узла к порту целевого узла (допустимые типы —
+  `dispatch`, `scenario_call`, `port_call`, `table`, `tests`, `uses`; Esc — отмена);
+- инспектор: редактируются label, описание, acceptance, notes, домен, file_path,
   create_file/append_model и поля details (включая class_name/function_name —
-  при их смене id узла пересобирается); «Сохранить описание» шлёт узел целиком;
+  при их смене id узла пересобирается); кнопка «Сохранить изменения» шлёт узел целиком;
 - удаление: для узлов плана — `Удалить узел` (патч удаляется, скан пересобирается),
   для узлов кода — пометка на удаление (origin=stale), для stale — восстановление;
 - кнопка **Save** — preview scaffold в модальном окне и создание файлов;
+- кнопка **Синхронизировать** — переносит описание и критерии в исходники
+  блоками-комментариями `# studio: description/acceptance start … end`
+  (diff-предпросмотр, идемпотентно, docstring не трогается);
 - узлы плана/стale, не попавшие в текущий layout, рисуются зоной «план».
 
 Экспорт: **Export ▾** → Markdown (инструкция для AI-агента) / JSON (полный граф) /
 копировать в буфер.
 
-Глубокие ссылки: `#s=<scenario_id>`, `#overview`, `#overview-detail`.
-Навигация: тяни фон — панорама, колесо — зум, `+`/`−`/`вписать`/`1:1` — масштаб,
+Глубокие ссылки: `#s=<scenario_id>`, `#overview`.
+Навигация: тяни фон — панорама, колесо — зум, тяни за заголовок узла — перетащить,
 `Esc` — снять выделение.
 
 ## Разработка студии
@@ -141,8 +160,9 @@ studio/
   scanner/     ast_utils → indexer → resolver → helpers → tests_index → scenario_paths
   store/       .studio/graph.json, .studio/plan.json, .studio/.gitignore
   scaffold/    шаблоны скелетов, plan/apply scaffold, append моделей, IO-TODO
+  metadata/    синхронизация описания/критериев в код (маркеры # studio: … start/end)
   exporter/    markdown и JSON
-  server/      stdlib http.server: GET (просмотр) + PUT/DELETE (план) + POST (rescan, scaffold)
-  cli/         scan / dev / list / scaffold / export / reset / help
+  server/      stdlib http.server: GET (просмотр) + PUT/DELETE (план) + POST (rescan, scaffold, metadata)
+  cli/         scan / dev / list / scaffold / metadata / export / reset / help
   ui/          index.html (vanilla JS, без CDN)
 ```

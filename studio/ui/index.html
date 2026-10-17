@@ -118,56 +118,66 @@ main{flex:1;display:grid;grid-template-columns:250px 1fr 320px;min-height:0}
 .diff-hunk{color:#bb9af7}
 .diff-header{color:#9a9aa2}
 .diff-ctx{color:#b8b8c0}
+.hgroup{display:inline-flex;align-items:center;gap:5px}
+.hcat{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
+.panel-legend{font-size:10px;color:#6c6d75;padding:0 6px 4px}
+.palette-hint{font-size:10px;color:#6c6d75;padding:2px 8px 6px}
+.edit-status{font-size:11px;color:var(--dim);padding:4px 8px}
+.insp-heading{font-size:12px;margin-bottom:6px}
+.insp-heading b{color:var(--acc)}
+.kind-tabs{display:flex;flex-wrap:wrap;gap:4px}
+.kind-tabs button{font-size:11px;padding:3px 7px}
+#stage.edge-drafting .node .port{opacity:1!important}
 </style>
 </head>
 <body>
 <header>
 <span class="logo">⬢ studio</span>
-<span class="seg" id="modes">
-<button data-m="scenario">Сценарий</button>
-<button data-m="overview">Обзор</button>
-</span>
-<span class="seg" id="ovSub" style="display:none">
-<button data-s="grid">Сетка</button>
-<button data-s="detail">Подробно</button>
-</span>
-<span class="seg">
-<button id="vView" class="on">View</button>
-<button id="vEdit">Edit</button>
-</span>
-<span class="seg" id="contentSeg">
+<span class="hgroup"><span class="hcat">Режим</span><span class="seg" id="modes">
+<button data-m="scenario" title="путь одного запроса: HTTP → сценарий → база → модель">Сценарий</button>
+<button data-m="overview" title="все сценарии, сгруппированные по HTTP-методу и домену">Обзор</button>
+</span></span>
+<span class="hgroup"><span class="hcat">Вид</span><span class="seg">
+<button id="vView" class="on" title="просмотр карты (read-only)">View</button>
+<button id="vEdit" title="редактирование: создание узлов и связей, правка полей">Edit</button>
+</span></span>
+<span class="hgroup"><span class="hcat">Содержимое</span><span class="seg" id="contentSeg">
 <button id="btnDesc" class="on" title="показывать описание в узлах">Описание</button>
 <button id="btnAcc" class="on" title="показывать критерии приёмки в узлах">Критерии</button>
-</span>
-<span class="seg">
+</span></span>
+<span class="hgroup"><span class="hcat">Масштаб</span><span class="seg">
 <button id="zOut" title="отдалить">−</button>
 <span id="zoomLabel">100%</span>
 <button id="zIn" title="приблизить">+</button>
-<button id="zFit" title="вписать">вписать</button>
+<button id="zFit" title="вписать карту в окно">вписать</button>
 <button id="zReset" title="масштаб 100%">1:1</button>
-</span>
+</span></span>
 <span style="flex:1"></span>
-<span class="seg" id="exportSeg">
-<button id="btnExport">Export ▾</button>
+<span class="hgroup"><span class="hcat">Действия</span><span class="seg" id="exportSeg">
+<button id="btnExport" title="экспорт карты: Markdown / JSON / буфер обмена">Export ▾</button>
 <div id="exportMenu" style="display:none;position:absolute;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px;z-index:50">
 <button id="expMd" style="display:block;width:100%;text-align:left;border:none;background:none;padding:4px 8px">Markdown</button>
 <button id="expJson" style="display:block;width:100%;text-align:left;border:none;background:none;padding:4px 8px">JSON</button>
 <button id="expCopy" style="display:block;width:100%;text-align:left;border:none;background:none;padding:4px 8px">Копировать Markdown</button>
 </div>
-</span>
-<button id="btnSave" style="display:none">Save</button>
-<button id="btnSync" style="display:none">Синхронизировать</button>
+</span></span>
+<button id="btnSave" style="display:none" title="создать файлы-скелеты для узлов плана (scaffold)">Save</button>
+<button id="btnSync" style="display:none" title="синхронизировать описание и критерии в код (блоки # studio)">Синхронизировать</button>
 <span id="stats">—</span>
 </header>
 <main>
 <div id="left">
 <div id="viewLeft">
 <h3>Сценарии</h3>
-<input id="scenSearch" type="search" placeholder="поиск сценариев…" autocomplete="off">
+<input id="scenSearch" type="search" placeholder="поиск сценариев…" autocomplete="off" title="фильтр по названию, классу, домену и HTTP-методу">
+<div class="panel-legend">группировка: HTTP-метод → домен</div>
 <div id="slist"></div>
 </div>
 <div id="editLeft" style="display:none">
+<h3>Создать узел</h3>
 <div class="palette" id="palette"></div>
+<div class="palette-hint">выбери тип — узел добавится в план (штриховая рамка) · связи: тяни от порта к порту</div>
+<div id="editStatus" class="edit-status"></div>
 <h3>План</h3>
 <div class="plan-list" id="planList"></div>
 <h3>Расхождения</h3>
@@ -176,7 +186,7 @@ main{flex:1;display:grid;grid-template-columns:250px 1fr 320px;min-height:0}
 </div>
 <div id="center">
 <div id="canvas"><div id="view"><div id="stage"><svg id="edges"></svg></div></div>
-<div id="hint">фон — панорама · колесо — зум · тяни узел — перетащить · клик — узел · Esc — снять выделение</div>
+<div id="hint">фон — панорама · колесо — зум · тяни за заголовок узла — перетащить · клик — выделить · Esc — снять выделение</div>
 </div>
 </div>
 <div id="right"><h3>Инспектор</h3><div id="insp"></div></div>
@@ -221,7 +231,7 @@ const NODE_W=230,ROW=132,TOP=56,COL={rep:40,logic:400,nested:420,io:860,model:11
 const ZONE_ORDER=["representation","logic","io"];
 const ZONE_PRIO={representation:0,logic:1,io:2,helpers:3,plan:4};
 const ZONE_GAP=30,ZONE_PAD=24,ZONE_MIN_W=280,ZONE_MIN_H=110;
-let G=null,byId={},mode="scenario",ovSub="grid",viewMode="view",selScenario=null,selId=null,codeState=null,scenList=[];
+let G=null,byId={},mode="scenario",viewMode="view",selScenario=null,selId=null,codeState=null,scenList=[];
 const nodePos=new Map();
 let drag=null,justDragged=false,dragRaf=0;
 const view={x:40,y:40,k:1};
@@ -235,6 +245,11 @@ let scenFilter="";
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 function toast(m){const t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",2600)}
+function errMsg(e){
+  const m=e&&e.message?String(e.message):"";
+  if(m.indexOf("404")!==-1)return m+" — сервер не поддерживает операцию. Обновите пакет (pip install --upgrade \"git+https://github.com/senia-glitch/pacage-studio-ide.git\") и перезапустите studio dev";
+  return m;
+}
 function initContentToggles(){
   try{
     const d=localStorage.getItem(LS_DESC);
@@ -270,7 +285,6 @@ async function load(){
   }
   const hash=location.hash.slice(1);
   if(hash==="overview")mode="overview";
-  else if(hash==="overview-detail"){mode="overview";ovSub="detail";}
   else if(hash.indexOf("s=")===0){
     const want=decodeURIComponent(hash.slice(2));
     if(byId[want]){selScenario=want;selId=want;mode="scenario";}
@@ -281,9 +295,6 @@ async function load(){
 }
 function setModeButtons(){
   document.querySelectorAll("#modes button").forEach(b=>b.classList.toggle("on",b.dataset.m===mode));
-  const sub=$("ovSub");
-  sub.style.display=mode==="overview"?"":"none";
-  sub.querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.s===ovSub));
   $("vView").classList.toggle("on",viewMode==="view");
   $("vEdit").classList.toggle("on",viewMode==="edit");
   $("btnSave").style.display=viewMode==="edit"?"":"none";
@@ -339,15 +350,6 @@ function scenarioGroupsByMethodDomain(){
   });
   return ordered;
 }
-function orderedScenarioIdsByGroup(){
-  const out=[];
-  scenarioGroupsByMethodDomain().forEach(([method,byDom])=>{
-    byDom.forEach((items,domain)=>{
-      items.forEach(it=>out.push(it.id));
-    });
-  });
-  return out;
-}
 function matchesFilter(scenarioId,method,domain){
   if(!scenFilter)return true;
   const n=byId[scenarioId];
@@ -366,8 +368,12 @@ function originTag(n){
   if(n.origin==="stale")return' <span class="tag-stale">⊘ stale</span>';
   return"";
 }
+// свёрнутость групп переживает перерисовку панели (клик по сценарию, поиск)
+const panelState=new Map();
 function renderList(){
-  const el=$("slist");el.innerHTML="";
+  const el=$("slist");
+  el.querySelectorAll("details[data-key]").forEach(d=>panelState.set(d.dataset.key,d.open));
+  el.innerHTML="";
   if(!G)return;
   const groups=scenarioGroupsByMethodDomain();
   if(!groups.length){el.innerHTML='<p class="dim" style="padding:6px">Сценариев нет.<br>Запусти <b>studio scan</b>.</p>';return;}
@@ -379,17 +385,23 @@ function renderList(){
     });
     if(!visibleDomains.length)return;
     const methodCount=visibleDomains.reduce((s,[,items])=>s+items.length,0);
-    const mDet=document.createElement("details");mDet.open=true;
+    const mDet=document.createElement("details");
+    mDet.dataset.key="m:"+method;
+    mDet.open=panelState.has(mDet.dataset.key)?panelState.get(mDet.dataset.key):true;
     const mSum=document.createElement("summary");
     mSum.className="method-summary";
+    mSum.title="HTTP-метод, которым вызываются сценарии";
     const color=METHOD_COLORS[method]||"#9a9aa2";
     const label=METHOD_LABELS[method]||method.toUpperCase();
     mSum.innerHTML=`<span class="method-dot" style="background:${color}"></span>${esc(label)} <small>· ${methodCount}</small>`;
     mDet.appendChild(mSum);
     visibleDomains.forEach(([domain,items])=>{
-      const dDet=document.createElement("details");dDet.open=true;
+      const dDet=document.createElement("details");
+      dDet.dataset.key="d:"+method+":"+domain;
+      dDet.open=panelState.has(dDet.dataset.key)?panelState.get(dDet.dataset.key):true;
       const dSum=document.createElement("summary");
       dSum.className="domain-summary";
+      dSum.title=domain===NO_DOMAIN?"сценарии без заданного домена (домен задаётся в Edit)":"домен — логическая группа сценариев";
       dSum.innerHTML=`${esc(domain)} <small>· ${items.length}</small>`;
       dDet.appendChild(dSum);
       items.forEach(({id,shared})=>{
@@ -423,11 +435,20 @@ const PALETTE_DEFAULTS={
   test:{label:"test_new",details:{test_name:"test_new",test_for_scenario:null,test_for_endpoint:null,module:"tests.test_new"},file_path:"tests/test_new.py"},
   helper:{label:"new helper",details:{role:"other",module:"app.utils.new"},file_path:"app/utils/new.py"}
 };
+const PALETTE_HINTS={
+  endpoint:"маршрут HTTP: endpoint → сценарий",
+  scenario:"бизнес-сценарий (ядро запроса)",
+  io:"вызов базы данных (_db.<method>)",
+  model:"модель/таблица данных",
+  test:"тест сценария или endpoint",
+  helper:"вспомогательный модуль (utils, schema, …)"
+};
 function renderPalette(){
   const p=$("palette");p.innerHTML="";
   for(const kind of Object.keys(PALETTE_DEFAULTS)){
     const b=document.createElement("button");
     b.textContent="+ "+kind;
+    b.title=PALETTE_HINTS[kind]||"создать узел типа "+kind;
     b.onclick=()=>createNodeFromPalette(kind);
     p.appendChild(b);
   }
@@ -492,10 +513,15 @@ async function saveNewNode(node){
     if(node.kind==="io"&&!(node.details&&node.details.called_from))
       toast("IO-узел: выберите сценарий-родитель (called_from)");
     else toast(node.kind+" создан");
-  }catch(e){toast("ошибка создания: "+e.message)}
+  }catch(e){toast("ошибка создания: "+errMsg(e))}
 }
 function renderEditLists(){
   renderPalette();
+  const st=$("editStatus");
+  if(st){
+    const n=selId&&byId[selId]?byId[selId]:null;
+    st.textContent=n?`Редактируется: ${n.label} — поля справа в инспекторе`:"Создание нового узла — форма справа в инспекторе";
+  }
   const plan=$("planList");plan.innerHTML="";
   const planNodes=G.nodes.filter(n=>n.origin==="user");
   if(!planNodes.length)plan.innerHTML='<p class="dim">Нет узлов плана</p>';
@@ -549,7 +575,7 @@ function addNode(stage,id,x,y,opts){
   if(viewMode==="edit"&&n.origin!=="stale"){
     ["t","r","b","l"].forEach(pos=>{
       const p=document.createElement("div");p.className="port port-"+pos;p.dataset.node=id;p.dataset.pos=pos;
-      p.addEventListener("click",e=>{e.stopPropagation();onPortClick(id,pos)});
+      p.addEventListener("mousedown",e=>{e.preventDefault();e.stopPropagation();startEdgeDraft(id,pos,e);});
       el.appendChild(p);
     });
   }
@@ -610,15 +636,14 @@ function renderCanvas(){
   svg.innerHTML="";boxes={};edgeSrc=null;edgeDraftPath=null;
   if(!G){stage.style.width="100%";stage.style.height="100%";return;}
   const single=mode==="scenario"&&selScenario;
-  const detail=mode==="overview"&&ovSub==="detail";
-  if(single)layoutScenario(stage);else if(detail)layoutOverviewDetail(stage);else layoutOverview(stage);
+  if(single)layoutScenario(stage);else layoutOverview(stage);
   measure();
-  if(single)layoutShelf(stage);else if(detail)layoutShelfDetail(stage);
+  if(single)layoutShelf(stage);
   layoutPlanOrphans(stage);
   measure();
-  if(single||detail)fitZones();
+  if(single)fitZones();
   measure();
-  if(mode==="overview"&&!detail)layoutBadges(stage);
+  if(mode==="overview")layoutBadges(stage);
   measure();
   drawEdges();
   sizeStage();
@@ -668,90 +693,6 @@ function layoutScenario(stage){
 function layoutShelf(stage){
   const p=G.scenario_paths[selScenario];if(!p)return;
   const helpers=(p.helpers||[]).filter(id=>byId[id]);
-  if(!helpers.length)return;
-  let maxY=TOP;
-  document.querySelectorAll("#stage .node").forEach(el=>{maxY=Math.max(maxY,(parseFloat(el.style.top)||0)+el.offsetHeight)});
-  const shelfY=maxY+110;
-  helpers.forEach((id,i)=>{
-    const col=i%6,row=Math.floor(i/6);
-    addNode(stage,id,40+col*(NODE_W+18),shelfY+row*96,{zone:"helpers"});
-  });
-}
-function layoutOverviewDetail(stage){
-  const groups=scenarioGroupsByMethodDomain();
-  if(!groups.length){
-    const e=document.createElement("div");e.className="empty";
-    e.textContent="Пусто. Запусти studio scan в корне проекта.";stage.appendChild(e);return;
-  }
-  const placed=new Set();
-  const drawnScenarios=new Set();
-  const BAND_GAP=20;
-  let y=TOP;
-  groups.forEach(([method,byDom])=>{
-    const mh=document.createElement("div");
-    mh.className="colhead";mh.style.left=COL.rep+"px";mh.style.top=y+"px";
-    const color=METHOD_COLORS[method]||"#9a9aa2";
-    const label=METHOD_LABELS[method]||method.toUpperCase();
-    let count=0;byDom.forEach(items=>count+=items.length);
-    mh.innerHTML=`<span class="method-dot" style="background:${color}"></span>${esc(label)} <i>· ${count}</i>`;
-    stage.appendChild(mh);
-    y+=44;
-    byDom.forEach((items,domain)=>{
-      const dh=document.createElement("div");
-      dh.className="colhead";dh.style.left=COL.rep+"px";dh.style.top=y+"px";
-      dh.style.fontWeight="400";dh.style.fontSize="11px";
-      dh.innerHTML=`${esc(domain)} <i>· ${items.length}</i>`;
-      stage.appendChild(dh);
-      y+=34;
-      items.forEach(({id})=>{
-        const p=G.scenario_paths[id]||{};
-        const dup=drawnScenarios.has(id);
-        const bandY=y;
-        if(p.endpoint&&byId[p.endpoint]){
-          if(!placed.has(p.endpoint)){addNode(stage,p.endpoint,COL.rep,bandY,{zone:"representation"});placed.add(p.endpoint);}
-        }else{
-          const g=document.createElement("div");g.className="node ghost";g.dataset.zone="representation";
-          g.style.left=COL.rep+"px";g.style.top=bandY+"px";
-          g.innerHTML='<div class="hd" style="--c:#6c6d75">нет endpoint</div><div class="mt">сценарий вызывается не из HTTP</div>';
-          stage.appendChild(g);
-        }
-        addNodeForBand(stage,id,COL.logic,bandY,{zone:"logic",dup});
-        drawnScenarios.add(id);
-        const ioRow={};let ioRows=0;
-        (p.io_calls||[]).forEach((ioId,i)=>{
-          ioRow[ioId]=i;
-          if(byId[ioId]&&!placed.has(ioId))addNode(stage,ioId,COL.io,bandY+i*ROW,{zone:"io"});
-          placed.add(ioId);ioRows=Math.max(ioRows,i+1);
-        });
-        const taken=new Set();let modelRows=0;
-        (p.models||[]).forEach(mid=>{
-          if(!byId[mid]||placed.has(mid))return;
-          placed.add(mid);
-          let row=-1;
-          for(const ioId of (p.io_calls||[])){
-            const io=byId[ioId];if(!io||!io.details||!io.details.table)continue;
-            if(G.edges.some(e=>e.kind==="table"&&e.from_node===ioId&&e.to_node===mid)){row=ioRow[ioId];break;}
-          }
-          if(row<0)row=0;
-          while(taken.has(row))row++;
-          taken.add(row);
-          modelRows=Math.max(modelRows,row+1);
-          addNode(stage,mid,COL.model,bandY+row*ROW,{zone:"io"});
-        });
-        y+=Math.max(1,ioRows,modelRows)*ROW+BAND_GAP;
-      });
-      y+=16;
-    });
-    y+=30;
-  });
-}
-function layoutShelfDetail(stage){
-  const helpers=[];const seen=new Set();
-  orderedScenarioIdsByGroup().forEach(sid=>{
-    ((G.scenario_paths[sid]||{}).helpers||[]).forEach(h=>{
-      if(byId[h]&&!seen.has(h)){seen.add(h);helpers.push(h);}
-    });
-  });
   if(!helpers.length)return;
   let maxY=TOP;
   document.querySelectorAll("#stage .node").forEach(el=>{maxY=Math.max(maxY,(parseFloat(el.style.top)||0)+el.offsetHeight)});
@@ -833,7 +774,7 @@ function fitZones(){
 }
 function renderZoneDivs(){
   document.querySelectorAll("#stage .zone").forEach(el=>el.remove());
-  const on=(mode==="scenario"&&!!selScenario)||(mode==="overview"&&ovSub==="detail");
+  const on=mode==="scenario"&&!!selScenario;
   if(!on)return;
   const stage=$("stage"),svg=$("edges");
   const zones=zoneBBoxes();
@@ -947,7 +888,7 @@ function edgeList(){
   const out=[];
   if(!G)return out;
   const visible=id=>!!boxes[id];
-  const full=mode==="scenario"||(mode==="overview"&&ovSub==="detail");
+  const full=mode==="scenario";
   G.edges.forEach(e=>{
     if(!visible(e.from_node)||!visible(e.to_node))return;
     if(!full){if(e.kind==="scenario_call")out.push(e);return;}
@@ -1002,6 +943,7 @@ function renderInspector(){
   const d=$("insp");
   if(!G){d.innerHTML='<p class="dim">Загрузка…</p>';return;}
   if(!selId||!byId[selId]){
+    if(viewMode==="edit"){renderCreateForm();return;}
     d.innerHTML='<p class="dim">Выбери узел на канвасе или сценарий слева.</p>';return;
   }
   const n=byId[selId];const det=n.details||{};
@@ -1023,7 +965,7 @@ function renderInspector(){
       `<button id="bCode">code view</button>`+code;
     $("bCode").onclick=()=>openCode(n);
   }else{
-    let form=`<div class="edit-form">`;
+    let form=`<div class="edit-form"><div class="insp-heading">Редактирование: <b>${esc(n.label)}</b> <span class="dim">(${esc(n.kind)})</span></div>`;
     form+=`<label>label</label><input id="fLabel" value="${esc(n.label)}">`;
     form+=`<label>description</label><textarea id="fDesc" rows="4">${esc(n.description)}</textarea>`;
     form+=`<label>acceptance</label><div id="fAcc">`;
@@ -1086,7 +1028,7 @@ function renderInspector(){
       b.onclick=()=>{n.acceptance.splice(parseInt(b.dataset.delacc),1);renderInspector()};
     });
     const saveBtn=document.createElement("button");
-    saveBtn.id="bSaveDesc";saveBtn.textContent="Сохранить описание";saveBtn.style.marginRight="8px";
+    saveBtn.id="bSaveDesc";saveBtn.textContent="Сохранить изменения";saveBtn.style.marginRight="8px";
     saveBtn.onclick=()=>saveNodePatch(n);
     d.insertBefore(saveBtn,d.querySelector("#bCode"));
     if($("bDelNode"))$("bDelNode").onclick=()=>deleteNode(n);
@@ -1098,6 +1040,112 @@ function renderInspector(){
     const pre=$("codePre");
     if(pre&&codeState.line)pre.scrollTop=Math.max(0,(codeState.line-5)*15);
   }
+}
+// ---------- создание узла из формы (Edit, ничего не выбрано) ----------
+let newKind="scenario";
+function newNodeFieldsHtml(kind){
+  const d=PALETTE_DEFAULTS[kind];
+  let h="";
+  h+=`<label>label</label><input id="fNewLabel" value="${esc(d.label)}">`;
+  h+=`<label>description</label><textarea id="fNewDesc" rows="3"></textarea>`;
+  h+=`<label>acceptance (пункт на строку)</label><textarea id="fNewAcc" rows="3"></textarea>`;
+  h+=`<label>домен</label><input id="fNewDomain" placeholder="например, заказы">`;
+  if(kind!=="io")h+=`<label>file_path (часть id)</label><input id="fNewPath" value="${esc(d.file_path)}">`;
+  if(kind==="endpoint"){
+    h+=`<label>http_method</label><select id="fNewMethod">${["get","post","put","delete","patch"].map(m=>`<option ${d.details.http_method===m?"selected":""}>${m}</option>`).join("")}</select>`;
+    h+=`<label>path</label><input id="fNewPath2" value="${esc(d.details.path||"")}">`;
+    h+=`<label>function_name (часть id)</label><input id="fNewFunc" value="${esc(d.details.function_name||"")}">`;
+    h+=`<label>router_module</label><input id="fNewRouter" value="${esc(d.details.router_module||"")}">`;
+  }
+  if(kind==="scenario"){
+    h+=`<label>name</label><input id="fNewName" value="${esc(d.details.name||"")}">`;
+    h+=`<label>class_name (часть id)</label><input id="fNewClass" value="${esc(d.details.class_name||"")}">`;
+    h+=`<label>dto</label><input id="fNewDto" value="${esc(d.details.dto||"")}">`;
+    h+=`<label>response</label><input id="fNewResp" value="${esc(d.details.response||"")}">`;
+  }
+  if(kind==="io"){
+    h+=`<label>method</label><select id="fNewIoMethod">${["create","read","update","delete","query","custom"].map(m=>`<option ${d.details.method===m?"selected":""}>${m}</option>`).join("")}</select>`;
+    h+=`<label>table</label><input id="fNewTable" value="${esc(d.details.table||"")}">`;
+    h+=`<label>called_from (id сценария-родителя)</label><input id="fNewCalledFrom" value="${esc(selScenario||"")}">`;
+  }
+  if(kind==="model"){
+    h+=`<label>class_name (часть id)</label><input id="fNewClassName" value="${esc(d.details.class_name||"")}">`;
+    h+=`<label>tablename</label><input id="fNewTablename" value="${esc(d.details.tablename||"")}">`;
+  }
+  if(kind==="test"){
+    h+=`<label>test_name (часть id)</label><input id="fNewTestName" value="${esc(d.details.test_name||"")}">`;
+    h+=`<label>module</label><input id="fNewModule" value="${esc(d.details.module||"")}">`;
+    h+=`<label>test_for_scenario (id, опционально)</label><input id="fNewTestScen" value="">`;
+  }
+  if(kind==="helper"){
+    h+=`<label>role</label><select id="fNewRole">${["schema","dependency","exception","settings","utils","other"].map(r=>`<option ${d.details.role===r?"selected":""}>${r}</option>`).join("")}</select>`;
+    h+=`<label>module (часть id)</label><input id="fNewModule" value="${esc(d.details.module||"")}">`;
+  }
+  return h;
+}
+function renderCreateForm(){
+  const d=$("insp");
+  let html=`<div class="edit-form"><div class="insp-heading">Создание узла <span class="dim">(план)</span></div>`;
+  html+=`<label>тип узла</label><div class="kind-tabs" id="kindTabs">`;
+  Object.keys(PALETTE_DEFAULTS).forEach(k=>{
+    html+=`<button data-kind="${k}" class="${k===newKind?"on":""}" title="${esc(PALETTE_HINTS[k]||"")}">+ ${k}</button>`;
+  });
+  html+=`</div><div id="newFields">${newNodeFieldsHtml(newKind)}</div>`;
+  html+=`<button id="bCreateNode" style="margin-top:8px">Создать узел</button></div>`;
+  d.innerHTML=html;
+  document.querySelectorAll("#kindTabs button").forEach(b=>{
+    b.onclick=()=>{newKind=b.dataset.kind;renderCreateForm();};
+  });
+  $("bCreateNode").onclick=()=>createNodeFromForm(newKind);
+}
+function createNodeFromForm(kind){
+  const d=PALETTE_DEFAULTS[kind];
+  const details=JSON.parse(JSON.stringify(d.details));
+  const val=id=>{const el=$(id);return el?el.value.trim():""};
+  if(kind==="endpoint"){
+    details.http_method=val("fNewMethod")||details.http_method;
+    details.path=val("fNewPath2")||details.path;
+    details.function_name=val("fNewFunc")||details.function_name;
+    details.router_module=val("fNewRouter")||details.router_module;
+  }
+  if(kind==="scenario"){
+    details.name=val("fNewName")||details.name;
+    details.class_name=val("fNewClass")||details.class_name;
+    details.dto=val("fNewDto")||null;
+    details.response=val("fNewResp")||null;
+  }
+  if(kind==="io"){
+    details.method=val("fNewIoMethod")||details.method;
+    details.table=val("fNewTable");
+    details.called_from=val("fNewCalledFrom")||selScenario||"";
+  }
+  if(kind==="model"){
+    details.class_name=val("fNewClassName")||details.class_name;
+    details.tablename=val("fNewTablename")||details.tablename;
+  }
+  if(kind==="test"){
+    details.test_name=val("fNewTestName")||details.test_name;
+    details.module=val("fNewModule")||details.module;
+    details.test_for_scenario=val("fNewTestScen")||null;
+    details.test_for_endpoint=null;
+  }
+  if(kind==="helper"){
+    details.role=val("fNewRole")||details.role;
+    details.module=val("fNewModule")||details.module;
+  }
+  const layer=kind==="endpoint"||kind==="model"?"representation":kind==="scenario"?"logic":kind==="io"?"io":"";
+  const node={
+    id:"",kind,layer,
+    label:val("fNewLabel")||d.label,
+    file_path:kind==="io"?"":(val("fNewPath")||d.file_path),
+    line:1,details,origin:"user",
+    description:val("fNewDesc"),
+    acceptance:val("fNewAcc").split("\n").map(s=>s.trim()).filter(Boolean),
+    notes:"",domain:val("fNewDomain"),
+    scaffolded:false,create_file:true,append_model:kind==="model"
+  };
+  node.id=freeNodeId(nodeIdFor(node));
+  saveNewNode(node);
 }
 async function openCode(n){
   try{
@@ -1154,7 +1202,7 @@ async function saveNodePatch(n){
       if(r2.ok)applyGraph(await r2.json());
     }
     renderAll();toast("сохранено");
-  }catch(e){toast("ошибка: "+e.message)}
+  }catch(e){toast("ошибка сохранения: "+errMsg(e))}
 }
 async function deleteNode(n){
   if(!confirm("Удалить узел "+n.label+"?"))return;
@@ -1163,7 +1211,7 @@ async function deleteNode(n){
     if(!r.ok)throw new Error("HTTP "+r.status);
     applyGraph(await r.json());
     selId=null;renderAll();toast("узел удалён");
-  }catch(e){toast("ошибка: "+e.message)}
+  }catch(e){toast("ошибка удаления: "+errMsg(e))}
 }
 async function markStale(n){
   if(!confirm("Пометить "+n.label+" на удаление?"))return;
@@ -1185,18 +1233,35 @@ async function restoreNode(n){
   }catch(e){toast("ошибка: "+e.message)}
 }
 // ---------- рисование связей ----------
-async function onPortClick(nodeId,pos){
-  if(!edgeSrc){
-    edgeSrc={id:nodeId,pos};
-    document.querySelectorAll("#stage .node").forEach(el=>{if(el.dataset.id===nodeId)el.classList.add("edge-src")});
-    toast("выберите целевой узел");
+function startEdgeDraft(nodeId,pos,e){
+  if(edgeSrc){
+    finishEdgeDraft(nodeId);
     return;
   }
-  if(edgeSrc.id===nodeId){clearEdgeSrc();return;}
-  const fromNode=byId[edgeSrc.id];const toNode=byId[nodeId];
-  if(!fromNode||!toNode){clearEdgeSrc();return;}
+  edgeSrc={id:nodeId,pos,portEl:e.currentTarget};
+  document.querySelectorAll("#stage .node").forEach(el=>{if(el.dataset.id===nodeId)el.classList.add("edge-src")});
+  $("stage").classList.add("edge-drafting");
+  edgeDraftPath=document.createElementNS("http://www.w3.org/2000/svg","path");
+  edgeDraftPath.setAttribute("class","edge-draft");
+  $("edges").appendChild(edgeDraftPath);
+  toast("тяни к порту целевого узла · Esc — отмена");
+}
+function portCenter(el){
+  const r=el.getBoundingClientRect();
+  const c=$("canvas").getBoundingClientRect();
+  return{x:(r.left+r.width/2-c.left-view.x)/view.k,y:(r.top+r.height/2-c.top-view.y)/view.k};
+}
+function finishEdgeDraft(nodeId){
+  const src=edgeSrc;
+  clearEdgeSrc();
+  if(!src||src.id===nodeId)return;
+  createEdgeFromPorts(src.id,nodeId);
+}
+async function createEdgeFromPorts(fromId,toId){
+  const fromNode=byId[fromId];const toNode=byId[toId];
+  if(!fromNode||!toNode){toast("цель не найдена");return;}
   const valid=VALID_EDGES[fromNode.kind];
-  if(!valid||!valid[toNode.kind]){toast("недопустимая связь: "+fromNode.kind+" → "+toNode.kind);clearEdgeSrc();return;}
+  if(!valid||!valid[toNode.kind]){toast("недопустимая связь: "+fromNode.kind+" → "+toNode.kind);return;}
   const kind=valid[toNode.kind];
   let label="";
   if(kind==="dispatch")label=`run("${toNode.details?.name||toNode.label}")`;
@@ -1205,18 +1270,19 @@ async function onPortClick(nodeId,pos){
   else if(kind==="table")label="";
   else if(kind==="tests")label="tests";
   else label="";
-  const edge={id:`${edgeSrc.id}::${kind}::${nodeId}`,from_node:edgeSrc.id,to_node:nodeId,kind,label,line:1,origin:"user",description:""};
-  clearEdgeSrc();
+  const edge={id:`${fromId}::${kind}::${toId}`,from_node:fromId,to_node:toId,kind,label,line:1,origin:"user",description:""};
   try{
     const r=await fetch("/api/plan/patch",{method:"PUT",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({target_id:edge.id,is_edge:true,edge})});
     if(!r.ok)throw new Error("HTTP "+r.status);
     applyGraph(await r.json());
     renderAll();toast("связь создана");
-  }catch(e){toast("ошибка связи: "+e.message)}
+  }catch(e){toast("ошибка связи: "+errMsg(e))}
 }
 function clearEdgeSrc(){
-  edgeSrc=null;edgeDraftPath=null;
+  edgeSrc=null;
+  if(edgeDraftPath){edgeDraftPath.remove();edgeDraftPath=null;}
+  $("stage").classList.remove("edge-drafting");
   document.querySelectorAll("#stage .node").forEach(el=>el.classList.remove("edge-src"));
 }
 // ---------- Save / Scaffold ----------
@@ -1309,12 +1375,13 @@ document.querySelectorAll("#modes button").forEach(b=>b.onclick=()=>{
   if(mode==="scenario"&&!selScenario)selScenario=scenList[0]||null;
   setModeButtons();renderCanvas();renderInspector();fitView();
 });
-document.querySelectorAll("#ovSub button").forEach(b=>b.onclick=()=>{
-  ovSub=b.dataset.s;
-  setModeButtons();renderCanvas();renderInspector();fitView();
-});
 $("vView").onclick=()=>{viewMode="view";setModeButtons();renderAll();fitView()};
-$("vEdit").onclick=()=>{viewMode="edit";setModeButtons();renderAll();fitView()};
+$("vEdit").onclick=()=>{
+  const first=viewMode!=="edit";
+  viewMode="edit";
+  setModeButtons();renderAll();fitView();
+  if(first)toast("Edit: слева — создание узлов, справа — правка выбранного узла");
+};
 $("btnDesc").onclick=()=>{
   showDesc=!showDesc;
   saveContentToggles();
@@ -1347,6 +1414,7 @@ $("scenSearch").addEventListener("input",e=>{
 let panDrag=null;
 $("canvas").addEventListener("mousedown",e=>{
   if(e.button!==0)return;
+  if(edgeSrc)return;
   const hdEl=e.target.closest(".node[data-id] .hd");
   if(hdEl&&!hdEl.parentElement.classList.contains("ghost")){
     const nodeEl=hdEl.parentElement;
@@ -1361,6 +1429,13 @@ $("canvas").addEventListener("mousedown",e=>{
   $("canvas").classList.add("grabbing");e.preventDefault();
 });
 document.addEventListener("mousemove",e=>{
+  if(edgeSrc&&edgeDraftPath){
+    const p=portCenter(edgeSrc.portEl);
+    const r=$("canvas").getBoundingClientRect();
+    const mx=(e.clientX-r.left-view.x)/view.k,my=(e.clientY-r.top-view.y)/view.k;
+    edgeDraftPath.setAttribute("d",`M${p.x},${p.y} C${(p.x+mx)/2},${p.y} ${(p.x+mx)/2},${my} ${mx},${my}`);
+    return;
+  }
   if(drag){
     const dx=(e.clientX-drag.sx)/view.k,dy=(e.clientY-drag.sy)/view.k;
     if(!drag.moved&&Math.hypot(e.clientX-drag.sx,e.clientY-drag.sy)<4)return;
@@ -1374,7 +1449,14 @@ document.addEventListener("mousemove",e=>{
   if(!panDrag)return;
   view.x=panDrag.ox+e.clientX-panDrag.sx;view.y=panDrag.oy+e.clientY-panDrag.sy;applyView();
 });
-document.addEventListener("mouseup",()=>{
+document.addEventListener("mouseup",e=>{
+  if(edgeSrc){
+    const t=document.elementFromPoint(e.clientX,e.clientY);
+    const portEl=t&&t.closest?t.closest(".port"):null;
+    if(portEl&&portEl.dataset.node)finishEdgeDraft(portEl.dataset.node);
+    else clearEdgeSrc();
+    return;
+  }
   if(drag){
     if(drag.moved){justDragged=true;drag.el.classList.remove("dragging");fitZones();drawEdges();sizeStage();}
     drag=null;
