@@ -199,7 +199,7 @@ class TestScaffoldApi:
                 details={"name": "evil", "class_name": "Evil", "module": "evil"},
             )
             _request(base, "/api/plan/patch", "PUT", {"target_id": node.id, "is_edge": False, "node": node.model_dump()})
-            status, body = _request(base, "/api/scaffold/apply", "POST")
+            status, _ = _request(base, "/api/scaffold/apply", "POST")
             assert status == 200
             outside = (demo / "../../evil.py").resolve()
             assert not outside.exists()

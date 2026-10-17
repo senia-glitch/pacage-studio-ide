@@ -8,7 +8,14 @@ sync user-узлов не трогает узлы кода; upsert_patch не т
 
 from studio.metamodel import Edge, Node
 from studio.scanner import scan
-from studio.store.plan import Plan, PlanPatch, apply_plan, read_plan, remove_patch, upsert_patch
+from studio.store.plan import (
+    Plan,
+    PlanPatch,
+    apply_plan,
+    read_plan,
+    remove_patch,
+    upsert_patch,
+)
 
 
 def _user_node(node_id: str, **kw) -> Node:
