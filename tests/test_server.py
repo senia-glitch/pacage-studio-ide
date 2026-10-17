@@ -163,6 +163,22 @@ class TestApi:
         finally:
             srv.shutdown()
 
+    def test_api_file_абсолютный_путь_пусто(self, demo):
+        srv, base = _serve(demo)
+        try:
+            _, body = _request(base, "/api/file?path=/etc/passwd")
+            assert json.loads(body)["code"] == ""
+        finally:
+            srv.shutdown()
+
+    def test_api_file_null_byte_пусто(self, demo):
+        srv, base = _serve(demo)
+        try:
+            _, body = _request(base, "/api/file?path=models.py%00.txt")
+            assert json.loads(body)["code"] == ""
+        finally:
+            srv.shutdown()
+
 
 class TestReadOnly:
     def test_изменяющие_методы_404(self, demo):

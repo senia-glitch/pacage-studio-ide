@@ -8,7 +8,7 @@ sync user-узлов не трогает узлы кода; upsert_patch не т
 
 from studio.metamodel import Edge, Node
 from studio.scanner import scan
-from studio.store.plan import Plan, PlanPatch, apply_plan, remove_patch, upsert_patch
+from studio.store.plan import Plan, PlanPatch, apply_plan, read_plan, remove_patch, upsert_patch
 
 
 def _user_node(node_id: str, **kw) -> Node:
@@ -189,3 +189,12 @@ class TestRemovePatch:
         # после удаления патча новый scan не вернёт узел
         out2 = scan(demo)
         assert not any(n.id == node.id for n in out2.nodes)
+
+    def test_план_с_битым_json_не_роняет_scan(self, demo):
+        from studio.store.plan import plan_path
+
+        plan_path(demo).parent.mkdir(parents=True, exist_ok=True)
+        plan_path(demo).write_text("{oops не json", encoding="utf-8")
+        assert read_plan(demo).patches == []
+        graph = scan(demo)
+        assert any(n.kind == "scenario" for n in graph.nodes)
