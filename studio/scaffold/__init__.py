@@ -6,13 +6,16 @@
 from __future__ import annotations
 
 import ast
+import os
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from studio import log as slog
 from studio.metamodel import Graph, Node
+from studio.scanner.ast_utils import find_method
 
 SCAFFOLD_MARKER = "# studio: scaffold — этот файл создан автоматически, можно свободно редактировать"
 MODEL_BLOCK_START = "# --- studio: planned model (не трогать комментарий) ---"
@@ -226,6 +229,25 @@ def _safe_target(root: Path, rel: str) -> Path | None:
     return None
 
 
+def _atomic_write(path: Path, text: str) -> bool:
+    """Атомарная запись: временный файл в том же каталоге + os.replace."""
+    try:
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".studio-tmp-", suffix=".py")
+    except OSError:
+        return False
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return False
+
+
 def plan_scaffold(graph: Graph, project_root: Path) -> list[ScaffoldOp]:
     """Список ScaffoldOp для всех origin=user узлов."""
     ops: list[ScaffoldOp] = []
@@ -356,10 +378,7 @@ def _update_docstring_file(target: Path, node: Node) -> None:
     elif new_acc_lines:
         lines = lines + [""] + new_acc_lines
 
-    try:
-        target.write_text("\n".join(lines), encoding="utf-8")
-    except OSError:
-        return
+    _atomic_write(target, "\n".join(lines))
 
 
 def _apply_model_appends(graph: Graph, project_root: Path, nodes_by_id: dict[str, Node]) -> None:
@@ -378,9 +397,9 @@ def _apply_model_appends(graph: Graph, project_root: Path, nodes_by_id: dict[str
         return
     try:
         if not models_path.exists():
-            models_path.write_text(
+            _atomic_write(
+                models_path,
                 "from sqlmodel import SQLModel, Field\n\nmetadata = SQLModel.metadata\n",
-                encoding="utf-8",
             )
         text = models_path.read_text(encoding="utf-8")
     except OSError:
@@ -420,9 +439,7 @@ def _apply_model_appends(graph: Graph, project_root: Path, nodes_by_id: dict[str
                 text += "\n"
             text += "\n" + block_text + "\n"
 
-    try:
-        models_path.write_text(text, encoding="utf-8")
-    except OSError:
+    if not _atomic_write(models_path, text):
         return
     for node in model_nodes:
         node.scaffolded = True
@@ -464,12 +481,30 @@ def _apply_io_todos(
 
 
 def _update_io_todo(scenario_file: Path, graph: Graph, scenario_id: str, ios: list[Node]) -> None:
-    """Обновить блок '# Планируемые IO-вызовы:' в execute."""
+    """Обновить блок '# Планируемые IO-вызовы:' в execute (AST-вставка, §5.7)."""
     try:
         text = scenario_file.read_text(encoding="utf-8")
     except OSError:
         return
-    lines = text.splitlines()
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        slog.step(f"scaffold skip: {scenario_file.name} не парсится — IO-TODO не трогаем")
+        return
+
+    scenario_node = graph.by_id().get(scenario_id)
+    class_name = str((scenario_node.details if scenario_node else {}).get("class_name") or "").strip()
+    class_node = next(
+        (n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == class_name),
+        None,
+    )
+    if class_node is None:
+        slog.step(f"scaffold skip: класс {class_name or '?'} не найден в {scenario_file.name}")
+        return
+    execute = find_method(class_node, "execute")
+    if execute is None:
+        slog.step(f"scaffold skip: метод execute не найден в {scenario_file.name}")
+        return
 
     io_lines = []
     for io_node in sorted(ios, key=lambda n: n.line):
@@ -490,13 +525,34 @@ def _update_io_todo(scenario_file: Path, graph: Graph, scenario_id: str, ios: li
         *called_lines,
     ]
 
+    lines = text.splitlines()
+    body = execute.body
+    if not body:
+        # пустое тело — вставить сразу после сигнатуры (конец определения)
+        insert_at = execute.end_lineno
+    elif (
+        isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        # docstring первым statement'ом — блок после него
+        insert_at = body[0].end_lineno
+    else:
+        # иначе — в начало тела, не ломая многострочную сигнатуру
+        insert_at = body[0].lineno - 1
+
+    body_start = execute.lineno - 1
+    body_end = execute.end_lineno
+
     block_start: int | None = None
     block_end: int | None = None
-    for i, line in enumerate(lines):
-        if "# Планируемые IO-вызовы:" in line:
+    for i in range(body_start, body_end):
+        if i >= len(lines):
+            break
+        if "# Планируемые IO-вызовы:" in lines[i]:
             block_start = i
             block_end = i + 1
-            while block_end < len(lines) and (
+            while block_end < body_end and block_end < len(lines) and (
                 lines[block_end].startswith("#") or lines[block_end].strip() == ""
             ):
                 if lines[block_end].strip() == "" and block_end > i + 1:
@@ -507,21 +563,9 @@ def _update_io_todo(scenario_file: Path, graph: Graph, scenario_id: str, ios: li
     if block_start is not None and block_end is not None:
         lines = lines[:block_start] + block_lines + lines[block_end:]
     else:
-        new_lines = []
-        inserted = False
-        for line in lines:
-            new_lines.append(line)
-            if not inserted and line.strip().startswith("async def execute"):
-                new_lines.extend(block_lines)
-                inserted = True
-        if not inserted:
-            new_lines.extend(block_lines)
-        lines = new_lines
+        lines = lines[:insert_at] + block_lines + lines[insert_at:]
 
-    try:
-        scenario_file.write_text("\n".join(lines), encoding="utf-8")
-    except OSError:
-        return
+    _atomic_write(scenario_file, "\n".join(lines))
 
 
 def collect_model_appends(graph: Graph) -> list[tuple[str, str, str]]:

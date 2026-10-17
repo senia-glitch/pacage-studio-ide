@@ -9,9 +9,10 @@ docstring (SyntaxError); OSError при записи пропускается б
 
 from pathlib import Path
 
-from studio.metamodel import Node
+from studio.metamodel import Graph, Node
 from studio.scaffold import (
     SCAFFOLD_MARKER,
+    _update_io_todo,
     apply_scaffold,
     collect_model_appends,
     plan_scaffold,
@@ -202,3 +203,150 @@ class TestPathTraversal:
         assert any(o.action == "create" and o.path == "app/scenarios/ok_scen.py" for o in ops)
         apply_scaffold(ops, graph, demo)
         assert (demo / "app" / "scenarios" / "ok_scen.py").is_file()
+
+
+def _write_scenario_file(root: Path, class_name: str, execute_src: str) -> Path:
+    rel = f"app/scenarios/{class_name.lower()}.py"
+    target = root / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        f"{SCAFFOLD_MARKER}\nclass {class_name}(BaseScenario):\n{execute_src}\n",
+        encoding="utf-8",
+    )
+    return target
+
+
+def _io_todo_graph(class_name: str, file_path: str) -> tuple[Graph, Node, Node]:
+    scen = Node(
+        id=f"scenario:{file_path}:{class_name}",
+        kind="scenario",
+        layer="logic",
+        label=class_name,
+        file_path=file_path,
+        origin="user",
+        details={"class_name": class_name},
+    )
+    io = Node(
+        id=f"io:{scen.id}:create:orders:1",
+        kind="io",
+        layer="io",
+        label="db.create",
+        file_path=file_path,
+        origin="user",
+        details={"method": "create", "table": "orders", "called_from": scen.id},
+    )
+    return Graph(nodes=[scen, io]), scen, io
+
+
+class TestUpdateIoTodo:
+    def test_io_todo_синхронный_execute(self, demo):
+        class_name = "SyncScen"
+        rel = f"app/scenarios/{class_name.lower()}.py"
+        target = _write_scenario_file(demo, class_name, "    def execute(self):\n        pass\n")
+        graph, scen, io = _io_todo_graph(class_name, rel)
+        _update_io_todo(target, graph, scen.id, [io])
+        text = target.read_text(encoding="utf-8")
+        assert "# Планируемые IO-вызовы:" in text
+        assert 'await self._db.create("orders", ...)' in text
+
+    def test_io_todo_многострочная_сигнатура(self, demo):
+        class_name = "MultiScen"
+        target = _write_scenario_file(
+            demo,
+            class_name,
+            "    async def execute(\n        self, dto\n    ):\n        raise NotImplementedError\n",
+        )
+        graph, scen, io = _io_todo_graph(class_name, f"app/scenarios/{class_name.lower()}.py")
+        _update_io_todo(target, graph, scen.id, [io])
+        text = target.read_text(encoding="utf-8")
+        import ast
+
+        ast.parse(text)  # не бросает SyntaxError
+        assert "# Планируемые IO-вызовы:" in text
+        # блок внутри тела, а не в середине сигнатуры
+        assert "self, dto" in text
+        assert text.index("# Планируемые IO-вызовы:") > text.index("    ):")
+
+    def test_io_todo_с_docstring(self, demo):
+        class_name = "DocScen"
+        target = _write_scenario_file(
+            demo,
+            class_name,
+            '    async def execute(self, dto):\n        """doc."""\n        return dto\n',
+        )
+        graph, scen, io = _io_todo_graph(class_name, f"app/scenarios/{class_name.lower()}.py")
+        _update_io_todo(target, graph, scen.id, [io])
+        text = target.read_text(encoding="utf-8")
+        # docstring остаётся первым statement'ом, блок после него
+        assert text.index('"""doc."""') < text.index("# Планируемые IO-вызовы:")
+        assert text.index("# Планируемые IO-вызовы:") < text.index("return dto")
+
+    def test_io_todo_битый_python_не_трогает(self, demo):
+        class_name = "BrokenScen"
+        target = _write_scenario_file(demo, class_name, "    async def execute(:\n        pass\n")
+        before = target.read_text(encoding="utf-8")
+        graph, scen, io = _io_todo_graph(class_name, f"app/scenarios/{class_name.lower()}.py")
+        _update_io_todo(target, graph, scen.id, [io])
+        assert target.read_text(encoding="utf-8") == before
+
+    def test_io_todo_повторный_apply_идемпотентен(self, demo):
+        class_name = "IdemScen"
+        target = _write_scenario_file(
+            demo,
+            class_name,
+            "    async def execute(self, dto):\n        return dto\n",
+        )
+        graph, scen, io = _io_todo_graph(class_name, f"app/scenarios/{class_name.lower()}.py")
+        _update_io_todo(target, graph, scen.id, [io])
+        _update_io_todo(target, graph, scen.id, [io])
+        text = target.read_text(encoding="utf-8")
+        assert text.count("# Планируемые IO-вызовы:") == 1
+
+
+class TestScaffoldSafety:
+    def test_scaffold_не_перезаписывает_файл_без_маркера(self, demo):
+        rel = "app/scenarios/existing.py"
+        target = demo / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("class Existing:\n    pass\n", encoding="utf-8")
+        node = Node(
+            id=f"scenario:{rel}:Existing",
+            kind="scenario",
+            layer="logic",
+            label="existing",
+            file_path=rel,
+            origin="user",
+            description="d",
+            details={"name": "existing", "class_name": "Existing", "module": "app.scenarios.existing"},
+        )
+        graph = apply_plan(scan(demo), Plan(patches=[PlanPatch(target_id=node.id, node=node)]))
+        ops = plan_scaffold(graph, demo)
+        assert any(o.action == "skip_no_marker" for o in ops)
+        before = target.read_text(encoding="utf-8")
+        apply_scaffold(ops, graph, demo)
+        assert target.read_text(encoding="utf-8") == before
+
+    def test_scaffold_атомарная_запись(self, demo, monkeypatch):
+        node = _plan_scenario(demo, name="atomic_case", class_name="AtomicCase")
+        graph = apply_plan(scan(demo), Plan(patches=[PlanPatch(target_id=node.id, node=node)]))
+        target = demo / "app" / "scenarios" / "atomic_case.py"
+        target.write_text(f"{SCAFFOLD_MARKER}\nclass AtomicCase:\n    pass\n", encoding="utf-8")
+        before = target.read_text(encoding="utf-8")
+
+        import os
+
+        def _boom(src, dst):
+            raise OSError("сбой os.replace")
+
+        monkeypatch.setattr(os, "replace", _boom)
+        apply_scaffold(plan_scaffold(graph, demo), graph, demo)
+        assert target.read_text(encoding="utf-8") == before
+
+    def test_scaffold_create_file_false_пропускает(self, demo):
+        node = _plan_scenario(demo, name="no_create", class_name="NoCreate")
+        node.create_file = False
+        graph = apply_plan(scan(demo), Plan(patches=[PlanPatch(target_id=node.id, node=node)]))
+        ops = plan_scaffold(graph, demo)
+        assert any(o.action == "skip_disabled" and o.reason == "create_file=false" for o in ops)
+        apply_scaffold(ops, graph, demo)
+        assert not (demo / "app" / "scenarios" / "no_create.py").exists()
