@@ -18,7 +18,7 @@ from studio.store import studio_dir
 PLAN_NAME = "plan.json"
 PLAN_VERSION = 1
 
-_PATCH_FIELDS = ("description", "acceptance", "notes", "label", "file_path", "create_file", "append_model")
+_PATCH_FIELDS = ("description", "acceptance", "notes", "label", "file_path", "create_file", "append_model", "domain")
 
 
 class PlanPatch(BaseModel):
@@ -178,6 +178,7 @@ def _sync_user_node(target: Node, src: Node) -> None:
     target.description = src.description
     target.acceptance = copy.deepcopy(src.acceptance)
     target.notes = src.notes
+    target.domain = src.domain
     target.scaffolded = src.scaffolded
     target.create_file = src.create_file
     target.append_model = src.append_model

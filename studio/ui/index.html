@@ -48,6 +48,12 @@ main{flex:1;display:grid;grid-template-columns:250px 1fr 320px;min-height:0}
 .zone .zlab{position:absolute;top:-10px;left:14px;font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--dim);background:var(--bg);padding:1px 10px;border-radius:6px;border:1px solid var(--line);white-space:nowrap}
 .zone .zlab i{font-style:normal;font-weight:400;color:#7c7d85}
 .node .ds{padding:0 8px 6px;font-size:10.5px;font-style:italic;color:#84858d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3}
+.node-sec{padding:4px 8px 6px}
+.node-sec-label{font-size:9px;text-transform:uppercase;letter-spacing:.4px;color:#6c6d75;margin-bottom:2px}
+.node-sec-body{font-size:10.5px;color:#b8b8c0;white-space:pre-wrap;overflow-wrap:anywhere;font-style:normal;line-height:1.35}
+.ds-full{max-height:12em;overflow-y:auto}
+.acc-full{max-height:8em;overflow-y:auto}
+.node-sec-divider{height:1px;background:#3a3b40;margin:2px 8px}
 .node.dragging{cursor:grabbing;box-shadow:0 8px 22px #000a;opacity:.95}
 .node[data-id]{cursor:grab}
 .badge{position:absolute;background:#2a2b30;border:1px dashed #55565e;border-radius:16px;padding:4px 12px;font-size:11px;color:var(--dim);white-space:nowrap}
@@ -94,6 +100,24 @@ main{flex:1;display:grid;grid-template-columns:250px 1fr 320px;min-height:0}
 .edit-form .acc-row{display:flex;gap:4px;align-items:center;margin:2px 0}
 .edit-form .acc-row input{flex:1}
 .edit-form .acc-row button{padding:2px 6px;font-size:10px}
+#scenSearch{width:calc(100% - 12px);margin:4px 6px 6px;background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--txt);padding:4px 8px;font-size:12px;font-family:inherit}
+#scenSearch:focus{outline:none;border-color:var(--acc)}
+#slist .method-summary{cursor:pointer;font-weight:600;font-size:11px;color:var(--txt);padding:4px 4px;margin-top:4px}
+.method-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}
+#slist .domain-summary{cursor:pointer;color:var(--dim);font-size:11px;padding:2px 4px 2px 14px}
+#slist .sitem{padding-left:26px}
+.tag-dup{color:#888;font-size:10px}
+.dup-badge{position:absolute;top:3px;right:5px;font-size:11px;color:#9a9aa2}
+.method-plate{display:inline-block;padding:0 5px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.3px;color:#141310;margin-right:4px;vertical-align:1px}
+.domain-plate{display:inline-block;padding:0 5px;border-radius:3px;font-size:9px;background:#3a3b40;color:#b8b8c0;margin-left:4px;vertical-align:1px}
+.diff-file{margin:8px 0}
+.diff-path{font-size:11px;color:var(--dim);padding:2px 0}
+.diff-body{margin:0;padding:8px;background:#1e1f22;font:11px/15px Consolas,monospace;max-height:320px;overflow:auto;white-space:pre}
+.diff-add{color:#7fc97f;background:#1f3a1f}
+.diff-del{color:#ff5d5d;background:#3a1f1f}
+.diff-hunk{color:#bb9af7}
+.diff-header{color:#9a9aa2}
+.diff-ctx{color:#b8b8c0}
 </style>
 </head>
 <body>
@@ -110,6 +134,10 @@ main{flex:1;display:grid;grid-template-columns:250px 1fr 320px;min-height:0}
 <span class="seg">
 <button id="vView" class="on">View</button>
 <button id="vEdit">Edit</button>
+</span>
+<span class="seg" id="contentSeg">
+<button id="btnDesc" class="on" title="показывать описание в узлах">Описание</button>
+<button id="btnAcc" class="on" title="показывать критерии приёмки в узлах">Критерии</button>
 </span>
 <span class="seg">
 <button id="zOut" title="отдалить">−</button>
@@ -128,12 +156,14 @@ main{flex:1;display:grid;grid-template-columns:250px 1fr 320px;min-height:0}
 </div>
 </span>
 <button id="btnSave" style="display:none">Save</button>
+<button id="btnSync" style="display:none">Синхронизировать</button>
 <span id="stats">—</span>
 </header>
 <main>
 <div id="left">
 <div id="viewLeft">
 <h3>Сценарии</h3>
+<input id="scenSearch" type="search" placeholder="поиск сценариев…" autocomplete="off">
 <div id="slist"></div>
 </div>
 <div id="editLeft" style="display:none">
@@ -155,6 +185,18 @@ main{flex:1;display:grid;grid-template-columns:250px 1fr 320px;min-height:0}
 <div id="modal"><div class="modal-box" id="modalBox"></div></div>
 <script>
 const KIND_COLORS={endpoint:"#5aa0ff",scenario:"#e8833a",io:"#7fc97f",model:"#bb9af7",test:"#c9a86a",helper:"#9a9aa2"};
+const METHOD_ORDER=["get","post","put","patch","delete"];
+const METHOD_LABELS={get:"GET",post:"POST",put:"PUT",patch:"PATCH",delete:"DELETE"};
+const METHOD_COLORS={
+  get:"#5aa0ff",
+  post:"#7fc97f",
+  put:"#e8833a",
+  patch:"#bb9af7",
+  delete:"#ff5d5d",
+  "без метода":"#9a9aa2",
+};
+const NO_METHOD="без метода";
+const NO_DOMAIN="без домена";
 const EDGE_STYLE={
   dispatch:{c:"#5aa0ff",m:"ar-dispatch"},
   scenario_call:{c:"#e8833a",m:"ar-scenario"},
@@ -185,9 +227,28 @@ let drag=null,justDragged=false,dragRaf=0;
 const view={x:40,y:40,k:1};
 let boxes={};
 let edgeSrc=null,edgeDraftPath=null;
+let showDesc=true;
+let showAcc=true;
+const LS_DESC="studio.showDescription";
+const LS_ACC="studio.showAcceptance";
+let scenFilter="";
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 function toast(m){const t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",2600)}
+function initContentToggles(){
+  try{
+    const d=localStorage.getItem(LS_DESC);
+    const a=localStorage.getItem(LS_ACC);
+    showDesc=d!=="0";
+    showAcc=a!=="0";
+  }catch(_){}
+}
+function saveContentToggles(){
+  try{
+    localStorage.setItem(LS_DESC,showDesc?"1":"0");
+    localStorage.setItem(LS_ACC,showAcc?"1":"0");
+  }catch(_){}
+}
 function applyGraph(g){
   G=g||{};
   byId={};(G.nodes||[]).forEach(x=>byId[x.id]=x);
@@ -198,6 +259,7 @@ function applyGraph(g){
   }
 }
 async function load(){
+  initContentToggles();
   const r=await fetch("/api/graph");
   if(!r.ok)throw new Error("HTTP "+r.status);
   applyGraph(await r.json());
@@ -225,30 +287,79 @@ function setModeButtons(){
   $("vView").classList.toggle("on",viewMode==="view");
   $("vEdit").classList.toggle("on",viewMode==="edit");
   $("btnSave").style.display=viewMode==="edit"?"":"none";
+  $("btnSync").style.display=viewMode==="edit"?"":"none";
   $("viewLeft").style.display=viewMode==="view"?"":"none";
   $("editLeft").style.display=viewMode==="edit"?"":"none";
+  $("btnDesc").classList.toggle("on",showDesc);
+  $("btnAcc").classList.toggle("on",showAcc);
 }
 function renderAll(){renderList();renderCanvas();renderInspector();renderStats();if(viewMode==="edit")renderEditLists();}
 function renderStats(){$("stats").textContent=G?`узлов ${G.nodes.length} · связей ${G.edges.length}`:"—"}
-// ---------- левая панель: сценарии по endpoint'ам ----------
-function scenarioGroups(){
+// ---------- левая панель: метод → домен ----------
+function methodOfScenario(scenarioId){
+  const methods=new Set();
+  (G.edges||[]).forEach(e=>{
+    if(e.kind==="dispatch"&&e.to_node===scenarioId){
+      const m=byId[e.from_node]?.details?.http_method;
+      if(m)methods.add(String(m).toLowerCase());
+    }
+  });
+  return methods.size?[...methods]:[NO_METHOD];
+}
+function domainOfScenario(scenarioId){
+  const d=(byId[scenarioId]?.domain||"").trim();
+  return d||NO_DOMAIN;
+}
+function scenarioGroupsByMethodDomain(){
   const groups=new Map();
   scenList.forEach(id=>{
-    const p=G.scenario_paths[id]||{};
-    let key,label;
-    if(p.endpoint&&byId[p.endpoint]){key=p.endpoint;label=byId[p.endpoint].label;}
-    else{key="";label="(без endpoint)";}
-    if(!groups.has(key))groups.set(key,{label,items:[]});
-    groups.get(key).items.push(id);
+    const methods=methodOfScenario(id);
+    const domain=domainOfScenario(id);
+    const shared=methods.length>1;
+    methods.forEach(m=>{
+      if(!groups.has(m))groups.set(m,new Map());
+      const byDom=groups.get(m);
+      if(!byDom.has(domain))byDom.set(domain,[]);
+      byDom.get(domain).push({id,shared});
+    });
   });
-  const order=[...(G.endpoints||[])].filter(k=>groups.has(k));
-  if(groups.has(""))order.push("");
-  return order.map(k=>({key:k,label:groups.get(k).label,items:groups.get(k).items}));
+  const ordered=[];
+  METHOD_ORDER.forEach(m=>{if(groups.has(m))ordered.push([m,groups.get(m)]);});
+  if(groups.has(NO_METHOD))ordered.push([NO_METHOD,groups.get(NO_METHOD)]);
+  ordered.forEach(([m,byDom])=>{
+    const sorted=[...byDom.keys()].sort((a,b)=>{
+      if(a===NO_DOMAIN)return 1;
+      if(b===NO_DOMAIN)return -1;
+      return a.localeCompare(b);
+    });
+    const sortedMap=new Map();
+    sorted.forEach(d=>sortedMap.set(d,byDom.get(d)));
+    byDom.clear();
+    sorted.forEach(d=>byDom.set(d,sortedMap.get(d)));
+  });
+  return ordered;
 }
-function orderedScenarioIds(){
+function orderedScenarioIdsByGroup(){
   const out=[];
-  scenarioGroups().forEach(g=>g.items.forEach(id=>out.push(id)));
+  scenarioGroupsByMethodDomain().forEach(([method,byDom])=>{
+    byDom.forEach((items,domain)=>{
+      items.forEach(it=>out.push(it.id));
+    });
+  });
   return out;
+}
+function matchesFilter(scenarioId,method,domain){
+  if(!scenFilter)return true;
+  const n=byId[scenarioId];
+  if(!n)return false;
+  const hay=[
+    n.label,
+    n.details?.name,
+    n.details?.class_name,
+    domain,
+    METHOD_LABELS[method]||method,
+  ].filter(Boolean).map(s=>String(s).toLowerCase());
+  return hay.some(s=>s.indexOf(scenFilter)!==-1);
 }
 function originTag(n){
   if(n.origin==="user")return' <span class="tag-plan">✦ план</span>';
@@ -258,25 +369,44 @@ function originTag(n){
 function renderList(){
   const el=$("slist");el.innerHTML="";
   if(!G)return;
-  const groups=scenarioGroups();
+  const groups=scenarioGroupsByMethodDomain();
   if(!groups.length){el.innerHTML='<p class="dim" style="padding:6px">Сценариев нет.<br>Запусти <b>studio scan</b>.</p>';return;}
-  groups.forEach(g=>{
-    const det=document.createElement("details");det.open=true;
-    const sm=document.createElement("summary");
-    const ep=g.key?byId[g.key]:null;
-    const tags=ep&&ep.details&&ep.details.tags&&ep.details.tags.length?" · "+ep.details.tags.join(", "):"";
-    sm.textContent=g.label+tags;det.appendChild(sm);
-    g.items.forEach(id=>{
-      const n=byId[id];if(!n)return;
-      const item=document.createElement("div");
-      item.className="sitem"+(selScenario===id?" sel":"");
-      item.dataset.id=id;
-      const p=G.scenario_paths[id]||{};
-      item.innerHTML=`${esc(n.label)} <small>· io ${p.io_calls?p.io_calls.length:0}</small>${originTag(n)}`;
-      item.onclick=()=>selectScenario(id);
-      det.appendChild(item);
+  groups.forEach(([method,byDom])=>{
+    const visibleDomains=[];
+    byDom.forEach((items,domain)=>{
+      const filtered=items.filter(it=>matchesFilter(it.id,method,domain));
+      if(filtered.length)visibleDomains.push([domain,filtered]);
     });
-    el.appendChild(det);
+    if(!visibleDomains.length)return;
+    const methodCount=visibleDomains.reduce((s,[,items])=>s+items.length,0);
+    const mDet=document.createElement("details");mDet.open=true;
+    const mSum=document.createElement("summary");
+    mSum.className="method-summary";
+    const color=METHOD_COLORS[method]||"#9a9aa2";
+    const label=METHOD_LABELS[method]||method.toUpperCase();
+    mSum.innerHTML=`<span class="method-dot" style="background:${color}"></span>${esc(label)} <small>· ${methodCount}</small>`;
+    mDet.appendChild(mSum);
+    visibleDomains.forEach(([domain,items])=>{
+      const dDet=document.createElement("details");dDet.open=true;
+      const dSum=document.createElement("summary");
+      dSum.className="domain-summary";
+      dSum.innerHTML=`${esc(domain)} <small>· ${items.length}</small>`;
+      dDet.appendChild(dSum);
+      items.forEach(({id,shared})=>{
+        const n=byId[id];if(!n)return;
+        const item=document.createElement("div");
+        item.className="sitem"+(selScenario===id?" sel":"");
+        item.dataset.id=id;
+        const p=G.scenario_paths[id]||{};
+        const ioCount=p.io_calls?p.io_calls.length:0;
+        const dupBadge=shared?' <span class="tag-dup" title="вызывается из нескольких методов">↻</span>':"";
+        item.innerHTML=`${esc(n.label)} <small>· io ${ioCount}</small>${dupBadge}${originTag(n)}`;
+        item.onclick=()=>selectScenario(id);
+        dDet.appendChild(item);
+      });
+      mDet.appendChild(dDet);
+    });
+    el.appendChild(mDet);
   });
 }
 function selectScenario(id){
@@ -398,9 +528,24 @@ function addNode(stage,id,x,y,opts){
   if(n.origin==="user")el.style.border="1px dashed var(--acc)";
   if(n.origin==="stale")el.style.opacity=".45";
   if(n.origin==="stale")el.style.background="#3a3a3a";
-  const ds=n.description?`<div class="ds">${esc(firstLine(n.description))}</div>`:"";
   const icon=n.origin==="user"?(n.scaffolded?"✦ создан":"✦ план"):n.origin==="stale"?"⊘":"";
-  el.innerHTML=`<div class="hd" style="--c:${c}">${icon?icon+" ":""}${esc(n.label)}</div><div class="mt">${esc(meta(n))}</div>${ds}`;
+  let body=`<div class="hd" style="--c:${c}">${icon?icon+" ":""}${esc(n.label)}</div><div class="mt">${esc(meta(n))}</div>`;
+  const hasDesc=showDesc&&!!n.description;
+  const hasAcc=showAcc&&Array.isArray(n.acceptance)&&n.acceptance.length>0;
+  if(hasDesc)body+=`<div class="node-sec"><div class="node-sec-label">описание</div><div class="node-sec-body ds-full">${esc(n.description)}</div></div>`;
+  if(hasDesc&&hasAcc)body+=`<div class="node-sec-divider"></div>`;
+  if(hasAcc)body+=`<div class="node-sec"><div class="node-sec-label">критерии</div><div class="node-sec-body acc-full">${esc(n.acceptance.join("\n"))}</div></div>`;
+  el.innerHTML=body;
+  if(mode==="scenario"){
+    if(n.kind==="endpoint"){
+      const mt=el.querySelector(".mt");
+      if(mt)mt.insertAdjacentHTML("afterbegin",methodPlate(n.details?.http_method));
+    }
+    if(n.kind==="scenario"){
+      const mt=el.querySelector(".mt");
+      if(mt)mt.insertAdjacentHTML("beforeend",domainPlate(n.id));
+    }
+  }
   if(viewMode==="edit"&&n.origin!=="stale"){
     ["t","r","b","l"].forEach(pos=>{
       const p=document.createElement("div");p.className="port port-"+pos;p.dataset.node=id;p.dataset.pos=pos;
@@ -408,7 +553,22 @@ function addNode(stage,id,x,y,opts){
       el.appendChild(p);
     });
   }
+  el.querySelectorAll(".node-sec-body").forEach(b=>{
+    b.addEventListener("wheel",e=>{e.stopPropagation()});
+  });
   stage.appendChild(el);return el;
+}
+function addNodeForBand(stage,id,x,y,opts){
+  const el=addNode(stage,id,x,y,opts);
+  if(!el)return null;
+  if(opts&&opts.dup){
+    const badge=document.createElement("span");
+    badge.className="dup-badge";
+    badge.textContent="↻";
+    badge.title="вызывается из нескольких методов";
+    el.appendChild(badge);
+  }
+  return el;
 }
 function firstLine(doc){const s=String(doc).trim();const i=s.indexOf("\n");return (i<0?s:s.slice(0,i)).slice(0,90)}
 function meta(n){
@@ -420,6 +580,17 @@ function meta(n){
   if(n.kind==="test")return"test · "+(d.test_name||"");
   if(n.kind==="helper")return"helper · "+(d.role||"");
   return n.kind;
+}
+function methodPlate(method){
+  if(!method)return"";
+  const color=METHOD_COLORS[method]||"#9a9aa2";
+  const label=METHOD_LABELS[method]||String(method).toUpperCase();
+  return `<span class="method-plate" style="background:${color}">${esc(label)}</span>`;
+}
+function domainPlate(scenarioId){
+  const d=domainOfScenario(scenarioId);
+  if(d===NO_DOMAIN)return"";
+  return `<span class="domain-plate">${esc(d)}</span>`;
 }
 function colhead(stage,x,label,sub,y){
   const el=document.createElement("div");
@@ -507,52 +678,76 @@ function layoutShelf(stage){
   });
 }
 function layoutOverviewDetail(stage){
-  const ids=orderedScenarioIds();
-  if(!ids.length){
+  const groups=scenarioGroupsByMethodDomain();
+  if(!groups.length){
     const e=document.createElement("div");e.className="empty";
     e.textContent="Пусто. Запусти studio scan в корне проекта.";stage.appendChild(e);return;
   }
   const placed=new Set();
-  const BAND_GAP=56;
-  let bandY=TOP;
-  ids.forEach(sid=>{
-    const p=G.scenario_paths[sid]||{};
-    if(p.endpoint&&byId[p.endpoint]){
-      if(!placed.has(p.endpoint)){addNode(stage,p.endpoint,COL.rep,bandY,{zone:"representation"});placed.add(p.endpoint);}
-    }else{
-      const g=document.createElement("div");g.className="node ghost";g.dataset.zone="representation";
-      g.style.left=COL.rep+"px";g.style.top=bandY+"px";
-      g.innerHTML='<div class="hd" style="--c:#6c6d75">нет endpoint</div><div class="mt">сценарий вызывается не из HTTP</div>';
-      stage.appendChild(g);
-    }
-    addNode(stage,sid,COL.logic,bandY,{zone:"logic"});placed.add(sid);
-    const ioRow={};let ioRows=0;
-    (p.io_calls||[]).forEach((id,i)=>{
-      ioRow[id]=i;
-      if(byId[id]&&!placed.has(id))addNode(stage,id,COL.io,bandY+i*ROW,{zone:"io"});
-      placed.add(id);ioRows=Math.max(ioRows,i+1);
+  const drawnScenarios=new Set();
+  const BAND_GAP=20;
+  let y=TOP;
+  groups.forEach(([method,byDom])=>{
+    const mh=document.createElement("div");
+    mh.className="colhead";mh.style.left=COL.rep+"px";mh.style.top=y+"px";
+    const color=METHOD_COLORS[method]||"#9a9aa2";
+    const label=METHOD_LABELS[method]||method.toUpperCase();
+    let count=0;byDom.forEach(items=>count+=items.length);
+    mh.innerHTML=`<span class="method-dot" style="background:${color}"></span>${esc(label)} <i>· ${count}</i>`;
+    stage.appendChild(mh);
+    y+=44;
+    byDom.forEach((items,domain)=>{
+      const dh=document.createElement("div");
+      dh.className="colhead";dh.style.left=COL.rep+"px";dh.style.top=y+"px";
+      dh.style.fontWeight="400";dh.style.fontSize="11px";
+      dh.innerHTML=`${esc(domain)} <i>· ${items.length}</i>`;
+      stage.appendChild(dh);
+      y+=34;
+      items.forEach(({id})=>{
+        const p=G.scenario_paths[id]||{};
+        const dup=drawnScenarios.has(id);
+        const bandY=y;
+        if(p.endpoint&&byId[p.endpoint]){
+          if(!placed.has(p.endpoint)){addNode(stage,p.endpoint,COL.rep,bandY,{zone:"representation"});placed.add(p.endpoint);}
+        }else{
+          const g=document.createElement("div");g.className="node ghost";g.dataset.zone="representation";
+          g.style.left=COL.rep+"px";g.style.top=bandY+"px";
+          g.innerHTML='<div class="hd" style="--c:#6c6d75">нет endpoint</div><div class="mt">сценарий вызывается не из HTTP</div>';
+          stage.appendChild(g);
+        }
+        addNodeForBand(stage,id,COL.logic,bandY,{zone:"logic",dup});
+        drawnScenarios.add(id);
+        const ioRow={};let ioRows=0;
+        (p.io_calls||[]).forEach((ioId,i)=>{
+          ioRow[ioId]=i;
+          if(byId[ioId]&&!placed.has(ioId))addNode(stage,ioId,COL.io,bandY+i*ROW,{zone:"io"});
+          placed.add(ioId);ioRows=Math.max(ioRows,i+1);
+        });
+        const taken=new Set();let modelRows=0;
+        (p.models||[]).forEach(mid=>{
+          if(!byId[mid]||placed.has(mid))return;
+          placed.add(mid);
+          let row=-1;
+          for(const ioId of (p.io_calls||[])){
+            const io=byId[ioId];if(!io||!io.details||!io.details.table)continue;
+            if(G.edges.some(e=>e.kind==="table"&&e.from_node===ioId&&e.to_node===mid)){row=ioRow[ioId];break;}
+          }
+          if(row<0)row=0;
+          while(taken.has(row))row++;
+          taken.add(row);
+          modelRows=Math.max(modelRows,row+1);
+          addNode(stage,mid,COL.model,bandY+row*ROW,{zone:"io"});
+        });
+        y+=Math.max(1,ioRows,modelRows)*ROW+BAND_GAP;
+      });
+      y+=16;
     });
-    const taken=new Set();let modelRows=0;
-    (p.models||[]).forEach(id=>{
-      if(!byId[id]||placed.has(id))return;
-      placed.add(id);
-      let row=-1;
-      for(const ioId of (p.io_calls||[])){
-        const io=byId[ioId];if(!io||!io.details||!io.details.table)continue;
-        if(G.edges.some(e=>e.kind==="table"&&e.from_node===ioId&&e.to_node===id)){row=ioRow[ioId];break;}
-      }
-      if(row<0)row=0;
-      while(taken.has(row))row++;
-      taken.add(row);
-      modelRows=Math.max(modelRows,row+1);
-      addNode(stage,id,COL.model,bandY+row*ROW,{zone:"io"});
-    });
-    bandY+=Math.max(1,ioRows,modelRows)*ROW+BAND_GAP;
+    y+=30;
   });
 }
 function layoutShelfDetail(stage){
   const helpers=[];const seen=new Set();
-  orderedScenarioIds().forEach(sid=>{
+  orderedScenarioIdsByGroup().forEach(sid=>{
     ((G.scenario_paths[sid]||{}).helpers||[]).forEach(h=>{
       if(byId[h]&&!seen.has(h)){seen.add(h);helpers.push(h);}
     });
@@ -654,14 +849,36 @@ function renderZoneDivs(){
   }
 }
 function layoutOverview(stage){
-  const list=scenList;
-  colhead(stage,40,"все сценарии",list.length);
-  if(!list.length){
+  const groups=scenarioGroupsByMethodDomain();
+  if(!groups.length){
     const e=document.createElement("div");e.className="empty";
     e.textContent="Пусто. Запусти studio scan в корне проекта.";stage.appendChild(e);return;
   }
-  const cols=Math.max(1,Math.min(6,Math.ceil(Math.sqrt(list.length))));
-  list.forEach((id,i)=>addNode(stage,id,40+(i%cols)*270,TOP+Math.floor(i/cols)*ROW));
+  let y=TOP;
+  groups.forEach(([method,byDom])=>{
+    const mh=document.createElement("div");
+    mh.className="colhead";mh.style.left="40px";mh.style.top=y+"px";
+    const color=METHOD_COLORS[method]||"#9a9aa2";
+    const label=METHOD_LABELS[method]||method.toUpperCase();
+    let count=0;byDom.forEach(items=>count+=items.length);
+    mh.innerHTML=`<span class="method-dot" style="background:${color}"></span>${esc(label)} <i>· ${count}</i>`;
+    stage.appendChild(mh);
+    y+=44;
+    byDom.forEach((items,domain)=>{
+      const dh=document.createElement("div");
+      dh.className="colhead";dh.style.left="60px";dh.style.top=y+"px";
+      dh.style.fontWeight="400";dh.style.fontSize="11px";
+      dh.innerHTML=`${esc(domain)} <i>· ${items.length}</i>`;
+      stage.appendChild(dh);
+      y+=34;
+      const cols=Math.min(3,Math.max(1,items.length));
+      items.forEach(({id,shared},i)=>{
+        addNodeForBand(stage,id,60+(i%cols)*270,y+Math.floor(i/cols)*ROW,{dup:shared});
+      });
+      y+=Math.ceil(items.length/cols)*ROW+18;
+    });
+    y+=30;
+  });
 }
 function layoutBadges(stage){
   const shared=sharedModels();
@@ -802,7 +1019,7 @@ function renderInspector(){
     code=`<div class="codewrap"><div class="codehd"><span>${esc(codeState.path)}${codeState.line?": "+codeState.line:""}</span><button id="bCloseCode">закрыть</button></div><pre id="codePre">${esc(codeState.code)}</pre></div>`;
   }
   if(viewMode==="view"){
-    d.innerHTML=rows([["kind",n.kind],["label",n.label],["origin",n.origin],["file",n.file_path],["line",n.line]])+extra+doc+
+    d.innerHTML=rows([["kind",n.kind],["label",n.label],["origin",n.origin],["file",n.file_path],["line",n.line],["домен",n.domain||""]])+extra+doc+
       `<button id="bCode">code view</button>`+code;
     $("bCode").onclick=()=>openCode(n);
   }else{
@@ -815,6 +1032,8 @@ function renderInspector(){
     });
     form+=`</div><button id="bAddAcc" style="margin-top:4px;font-size:11px;padding:2px 6px">+ добавить</button>`;
     form+=`<label>notes</label><input id="fNotes" value="${esc(n.notes)}">`;
+    form+=`<label>домен (логическая группа)</label>`;
+    form+=`<input id="fDomain" value="${esc(n.domain||"")}" placeholder="например, заказы">`;
     if(n.origin==="user"){
       form+=`<label>file_path</label><input id="fPath" value="${esc(n.file_path)}">`;
       form+=`<label><input type="checkbox" id="fCreateFile" ${n.create_file?"checked":""}> создать файл</label>`;
@@ -896,6 +1115,7 @@ async function saveNodePatch(n){
     acceptance:(n.acceptance||[]).filter(a=>String(a).trim()!==""),
     notes:$("fNotes")?.value??n.notes,
   };
+  if($("fDomain"))fields.domain=$("fDomain").value.trim();
   const body={target_id:oldId,is_edge:false,patch:fields};
   if(n.origin==="user"){
     if($("fPath"))n.file_path=$("fPath").value;
@@ -917,7 +1137,7 @@ async function saveNodePatch(n){
     if($("fTestName"))n.details.test_name=$("fTestName").value;
     if($("fModule"))n.details.module=$("fModule").value;
     if($("fTestScen"))n.details.test_for_scenario=$("fTestScen").value||null;
-    n.label=fields.label;n.description=fields.description;n.acceptance=fields.acceptance;n.notes=fields.notes;
+    n.label=fields.label;n.description=fields.description;n.acceptance=fields.acceptance;n.notes=fields.notes;n.domain=fields.domain??"";
     // id зависит от file_path/идентичности — пересобираем и переименовываем патч.
     const newId=freeNodeId(nodeIdFor(n),oldId);
     if(newId!==oldId)remapNodeId(oldId,newId);
@@ -1032,7 +1252,58 @@ async function onSave(){
     };
   }catch(e){toast("ошибка: "+e.message)}
 }
-// ---------- события ----------
+// ---------- Sync metadata ----------
+function diffLineClass(line){
+  if(line.startsWith("+++")||line.startsWith("---"))return"diff-header";
+  if(line.startsWith("@@"))return"diff-hunk";
+  if(line.startsWith("+"))return"diff-add";
+  if(line.startsWith("-"))return"diff-del";
+  return"diff-ctx";
+}
+function diffToHtml(text){
+  return text.split("\n").map(l=>`<span class="${diffLineClass(l)}">${esc(l)}</span>`).join("\n");
+}
+async function onSync(){
+  try{
+    const r=await fetch("/api/metadata/preview",{method:"POST"});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const data=await r.json();
+    const ops=data.ops||[];const diff=data.diff||{};
+    const written=ops.filter(o=>o.action.startsWith("write"));
+    const updated=ops.filter(o=>o.action.startsWith("update"));
+    const deleted=ops.filter(o=>o.action.startsWith("delete"));
+    const skipped=ops.filter(o=>o.action.startsWith("skip"));
+    let html=`<h3>Синхронизация в код</h3>`;
+    html+=`<div class="msec"><b>Будут созданы (${written.length}):</b></div>`;
+    written.forEach(o=>{html+=`<div class="item">${esc(o.path)}</div>`});
+    html+=`<div class="msec"><b>Будут обновлены (${updated.length}):</b></div>`;
+    updated.forEach(o=>{html+=`<div class="item">${esc(o.path)}</div>`});
+    html+=`<div class="msec"><b>Будут очищены (${deleted.length}):</b></div>`;
+    deleted.forEach(o=>{html+=`<div class="item">${esc(o.path)}</div>`});
+    html+=`<div class="msec"><b>Пропущено (${skipped.length}):</b></div>`;
+    skipped.forEach(o=>{html+=`<div class="item">${esc(o.path)} — ${esc(o.reason)}</div>`});
+    const diffPaths=Object.keys(diff);
+    if(diffPaths.length){
+      html+=`<h3>Diff:</h3>`;
+      diffPaths.forEach(p=>{
+        html+=`<div class="diff-file"><div class="diff-path">${esc(p)}</div><pre class="diff-body">${diffToHtml(diff[p])}</pre></div>`;
+      });
+    }
+    html+=`<div class="modal-btns"><button id="mCancel">Отмена</button><button id="mApply">Применить</button></div>`;
+    $("modalBox").innerHTML=html;$("modal").style.display="flex";
+    $("mCancel").onclick=()=>{$("modal").style.display="none"};
+    $("mApply").onclick=async()=>{
+      $("modal").style.display="none";
+      const r2=await fetch("/api/metadata/apply",{method:"POST"});
+      if(r2.ok){
+        const res=await r2.json();
+        applyGraph(await(await fetch("/api/graph")).json());
+        renderAll();
+        toast(`sync: ${res.written} создано, ${res.updated} обновлено, ${res.deleted} очищено, ${res.skipped} пропущено`);
+      }
+    };
+  }catch(e){toast("ошибка: "+e.message)}
+}
 document.querySelectorAll("#modes button").forEach(b=>b.onclick=()=>{
   mode=b.dataset.m;
   if(mode==="scenario"&&!selScenario)selScenario=scenList[0]||null;
@@ -1044,16 +1315,41 @@ document.querySelectorAll("#ovSub button").forEach(b=>b.onclick=()=>{
 });
 $("vView").onclick=()=>{viewMode="view";setModeButtons();renderAll();fitView()};
 $("vEdit").onclick=()=>{viewMode="edit";setModeButtons();renderAll();fitView()};
+$("btnDesc").onclick=()=>{
+  showDesc=!showDesc;
+  saveContentToggles();
+  setModeButtons();
+  renderCanvas();
+  fitView();
+};
+$("btnAcc").onclick=()=>{
+  showAcc=!showAcc;
+  saveContentToggles();
+  setModeButtons();
+  renderCanvas();
+  fitView();
+};
 $("zIn").onclick=()=>zoomCenter(1.2);
 $("zOut").onclick=()=>zoomCenter(1/1.2);
 $("zFit").onclick=fitView;
 $("zReset").onclick=()=>{view.k=1;applyView()};
 $("btnSave").onclick=onSave;
+$("btnSync").onclick=onSync;
+let _searchT=null;
+$("scenSearch").addEventListener("input",e=>{
+  clearTimeout(_searchT);
+  const val=e.target.value;
+  _searchT=setTimeout(()=>{
+    scenFilter=val.trim().toLowerCase();
+    renderList();
+  },150);
+});
 let panDrag=null;
 $("canvas").addEventListener("mousedown",e=>{
   if(e.button!==0)return;
-  const nodeEl=e.target.closest(".node[data-id]");
-  if(nodeEl&&!nodeEl.classList.contains("ghost")){
+  const hdEl=e.target.closest(".node[data-id] .hd");
+  if(hdEl&&!hdEl.parentElement.classList.contains("ghost")){
+    const nodeEl=hdEl.parentElement;
     const id=nodeEl.dataset.id;
     const nx=parseFloat(nodeEl.style.left)||0,ny=parseFloat(nodeEl.style.top)||0;
     drag={id,el:nodeEl,sx:e.clientX,sy:e.clientY,ox:nx,oy:ny,moved:false};

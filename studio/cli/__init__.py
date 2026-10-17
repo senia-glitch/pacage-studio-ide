@@ -13,6 +13,7 @@ from pathlib import Path
 from studio import log as slog
 from studio import store
 from studio.exporter import to_json, to_markdown
+from studio.metadata import apply_metadata, plan_metadata
 from studio.scaffold import apply_scaffold, collect_model_appends, plan_scaffold
 from studio.scanner import build_scenario_paths, scan
 from studio.server import serve
@@ -181,6 +182,60 @@ def cmd_scaffold(args) -> int:
     return 0
 
 
+def cmd_metadata(args) -> int:
+    root = _root(args)
+    graph = store.read_graph(root)
+    if graph is None:
+        print("no graph: run studio scan first")
+        return 2
+    slog.start_run(root, "metadata")
+    slog.step(f"проект: {root}")
+
+    ops = plan_metadata(graph, root)
+
+    if args.dry_run:
+        print("dry-run: операции без записи")
+        for op in ops:
+            print(f"  {op.action}: {op.path} ({op.node_id}){f' — {op.reason}' if op.reason else ''}")
+        return 0
+
+    actionable = [op for op in ops if not op.action.startswith("skip")]
+    if not actionable:
+        print("metadata: нечего синхронизировать")
+        return 0
+
+    written = [op for op in ops if op.action.startswith("write")]
+    updated = [op for op in ops if op.action.startswith("update")]
+    deleted = [op for op in ops if op.action.startswith("delete")]
+    skipped = [op for op in ops if op.action.startswith("skip")]
+
+    print(f"Будут созданы блоки ({len(written)}):")
+    for op in written:
+        print(f"  {op.path} — {op.node_id}")
+    print(f"Будут обновлены ({len(updated)}):")
+    for op in updated:
+        print(f"  {op.path} — {op.node_id}")
+    print(f"Будут очищены ({len(deleted)}):")
+    for op in deleted:
+        print(f"  {op.path} — {op.node_id}")
+    print(f"Пропущено ({len(skipped)}):")
+    for op in skipped:
+        print(f"  {op.path} — {op.reason}")
+
+    if not args.yes and not _confirm("Применить? [y/N] "):
+        print("отмена")
+        return 1
+
+    apply_metadata(ops, graph, root)
+    graph = scan(root)
+    store.write_graph(root, graph)
+    slog.step(f"metadata: создано={len(written)} обновлено={len(updated)} "
+              f"очищено={len(deleted)} пропущено={len(skipped)}")
+    print(f"metadata: создано={len(written)}, обновлено={len(updated)}, "
+          f"очищено={len(deleted)}, пропущено={len(skipped)}")
+    return 0
+
+
 def cmd_export(args) -> int:
     root = _root(args)
     graph = store.read_graph(root)
@@ -241,6 +296,7 @@ def cmd_help(args) -> int:
     print("                                          поднять интерфейс (граф сканируется сам)")
     print("  list      [--project .]                            список сценариев с endpoint'ами и io")
     print("  scaffold  [--project .] [--dry-run] [--yes]        создать скелеты для узлов плана")
+    print("  metadata  [--project .] [--dry-run] [--yes]         синхронизировать описание/критерии в код")
     print("  export    [--project .] [--format md|json] [--out P] экспорт графа")
     print("  reset     [--project .] [--yes]                     удалить .studio/plan.json")
     print("  help                                     этот экран")
@@ -280,6 +336,12 @@ def build_parser() -> argparse.ArgumentParser:
     scaffold_p.add_argument("--dry-run", action="store_true", help="печать операций без записи")
     scaffold_p.add_argument("--yes", "-y", action="store_true", help="без подтверждения")
     scaffold_p.set_defaults(f=cmd_scaffold)
+
+    metadata_p = sub.add_parser("metadata", help="синхронизировать описание/критерии в код")
+    _add_project(metadata_p)
+    metadata_p.add_argument("--dry-run", action="store_true", help="печать операций без записи")
+    metadata_p.add_argument("--yes", "-y", action="store_true", help="без подтверждения")
+    metadata_p.set_defaults(f=cmd_metadata)
 
     export_p = sub.add_parser("export", help="экспорт графа")
     _add_project(export_p)

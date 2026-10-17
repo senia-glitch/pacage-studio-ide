@@ -7,6 +7,7 @@ GET — просмотр графа. PUT/DELETE — патчи плана. POST 
 from __future__ import annotations
 
 import datetime as _dt
+import difflib
 import json
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,9 +16,11 @@ from pathlib import Path
 from studio import log as slog
 from studio import store
 from studio.exporter import to_json, to_markdown
+from studio.metadata import MetadataOp, apply_metadata, plan_metadata, render_after
 from studio.metamodel import Graph
 from studio.scaffold import (
     ScaffoldOp,
+    _safe_target,
     apply_scaffold,
     collect_model_appends,
     plan_scaffold,
@@ -194,6 +197,64 @@ def _scaffold_apply(project_root: Path) -> dict:
     return {"created": created, "updated": updated, "skipped": skipped}
 
 
+def _metadata_op_to_dict(op: MetadataOp) -> dict:
+    return {"action": op.action, "path": op.path, "node_id": op.node_id, "reason": op.reason}
+
+
+def _simulate_apply(file_ops: list[MetadataOp], graph: Graph, root: Path, before: str) -> str:
+    nodes_by_id = graph.by_id()
+    nodes = [nodes_by_id[op.node_id] for op in file_ops if op.node_id in nodes_by_id]
+    return render_after(nodes, before)
+
+
+def _build_preview_diff(ops: list[MetadataOp], graph: Graph, root: Path) -> dict[str, str]:
+    by_file: dict[str, list[MetadataOp]] = {}
+    for op in ops:
+        if op.action.startswith("skip"):
+            continue
+        by_file.setdefault(op.path, []).append(op)
+    result: dict[str, str] = {}
+    for path, file_ops in by_file.items():
+        target = _safe_target(root, path)
+        if target is None or not target.is_file():
+            continue
+        try:
+            before = target.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        after = _simulate_apply(file_ops, graph, root, before)
+        if after == before:
+            continue
+        diff_lines = difflib.unified_diff(
+            before.splitlines(keepends=True),
+            after.splitlines(keepends=True),
+            fromfile=f"{path} (до)",
+            tofile=f"{path} (после)",
+        )
+        result[path] = "".join(diff_lines)
+    return result
+
+
+def _metadata_preview(project_root: Path) -> dict:
+    graph = reload_graph(project_root)
+    ops = plan_metadata(graph, project_root)
+    diff = _build_preview_diff(ops, graph, project_root)
+    return {"ops": [_metadata_op_to_dict(op) for op in ops], "diff": diff}
+
+
+def _metadata_apply(project_root: Path) -> dict:
+    graph = reload_graph(project_root)
+    ops = plan_metadata(graph, project_root)
+    apply_metadata(ops, graph, project_root)
+    graph = scan(project_root)
+    store.write_graph(project_root, graph)
+    written = sum(1 for op in ops if op.action.startswith("write"))
+    updated = sum(1 for op in ops if op.action.startswith("update"))
+    deleted = sum(1 for op in ops if op.action.startswith("delete"))
+    skipped = sum(1 for op in ops if op.action.startswith("skip"))
+    return {"written": written, "updated": updated, "deleted": deleted, "skipped": skipped}
+
+
 def make_handler(ctx: Ctx):
     class H(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args) -> None:
@@ -290,6 +351,10 @@ def make_handler(ctx: Ctx):
             if url.path == "/api/scaffold/apply":
                 result = _scaffold_apply(root)
                 return _send_json(self, result)
+            if url.path == "/api/metadata/preview":
+                return _send_json(self, _metadata_preview(root))
+            if url.path == "/api/metadata/apply":
+                return _send_json(self, _metadata_apply(root))
             self._not_found()
 
         def _not_found(self) -> None:

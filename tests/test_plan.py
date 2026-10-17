@@ -205,3 +205,50 @@ class TestRemovePatch:
         assert read_plan(demo).patches == []
         graph = scan(demo)
         assert any(n.kind == "scenario" for n in graph.nodes)
+
+
+class TestDomain:
+    def test_домен_применяется_через_patch_на_user_узел(self, demo):
+        graph = scan(demo)
+        node = _user_node("scenario:app/scenarios/new.py:NewScen")
+        plan = Plan(patches=[PlanPatch(target_id=node.id, node=node)])
+        out = apply_plan(graph, plan)
+        plan2 = Plan(patches=[PlanPatch(target_id=node.id, patch={"domain": "заказы"})])
+        out2 = apply_plan(out, plan2)
+        found = next(n for n in out2.nodes if n.id == node.id)
+        assert found.domain == "заказы"
+
+    def test_домен_на_code_узел_не_меняет_origin(self, demo):
+        graph = scan(demo)
+        code_id = next(n.id for n in graph.nodes if n.kind == "scenario" and n.origin == "code")
+        plan = Plan(patches=[PlanPatch(target_id=code_id, patch={"domain": "billing"})])
+        out = apply_plan(graph, plan)
+        found = next(n for n in out.nodes if n.id == code_id)
+        assert found.domain == "billing"
+        assert found.origin == "code"
+
+    def test_домен_переживает_rescan(self, demo):
+        from studio import store
+        from studio.store.plan import write_plan
+
+        graph = scan(demo)
+        code_id = next(n.id for n in graph.nodes if n.kind == "scenario" and n.origin == "code")
+        plan = Plan(patches=[PlanPatch(target_id=code_id, patch={"domain": "billing"})])
+        write_plan(demo, plan)
+        again = scan(demo)
+        found = next(n for n in again.nodes if n.id == code_id)
+        assert found.domain == "billing"
+
+    def test_старый_граф_без_домена_читается(self, demo):
+        from studio import store
+        import json
+
+        graph = scan(demo)
+        store.write_graph(demo, graph)
+        raw = json.loads(store.graph_path(demo).read_text(encoding="utf-8"))
+        for n in raw["nodes"]:
+            n.pop("domain", None)
+        store.graph_path(demo).write_text(json.dumps(raw), encoding="utf-8")
+        again = store.read_graph(demo)
+        assert again is not None
+        assert all(n.domain == "" for n in again.nodes)

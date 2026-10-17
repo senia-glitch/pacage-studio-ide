@@ -35,6 +35,13 @@ def test_версии_не_разъезжаются():
     assert studio.__version__.startswith("2.")
 
 
+def test_версия_2_5_0():
+    import studio
+
+    assert studio.__version__ == "2.5.0"
+    assert _pyproject()["project"]["version"] == "2.5.0"
+
+
 def test_ui_html_упакован_в_дистрибутив():
     """Без package-data wheel ставится без index.html и studio dev падает — ловим это метаданными."""
     data = _pyproject()["tool"]["setuptools"].get("package-data", {})

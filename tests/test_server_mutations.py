@@ -92,6 +92,20 @@ class TestPlanPatch:
         finally:
             srv.shutdown()
 
+    def test_домен_через_api_переживает_rescan(self, demo):
+        srv, base = _serve(demo)
+        try:
+            code_id = next(n.id for n in scan(demo).nodes if n.kind == "scenario" and n.origin == "code")
+            status, _ = _request(base, "/api/plan/patch", "PUT",
+                                 {"target_id": code_id, "is_edge": False, "patch": {"domain": "billing"}})
+            assert status == 200
+            _request(base, "/api/rescan", "POST")
+            _, body = _request(base, "/api/graph")
+            nodes = {n["id"]: n for n in json.loads(body)["nodes"]}
+            assert nodes[code_id]["domain"] == "billing"
+        finally:
+            srv.shutdown()
+
     def test_mark_removed_и_снятие(self, demo):
         srv, base = _serve(demo)
         try:

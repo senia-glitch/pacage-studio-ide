@@ -69,6 +69,7 @@ class Node(BaseModel):
     description: str = ""
     acceptance: list[str] = Field(default_factory=list)
     notes: str = ""
+    domain: str = ""
     scaffolded: bool = False
     create_file: bool = True
     append_model: bool = False

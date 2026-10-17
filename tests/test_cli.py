@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from studio import store
-from studio.cli import build_parser, cmd_help, cmd_list, cmd_scan, main
+from studio.cli import build_parser, cmd_help, cmd_list, cmd_metadata, cmd_scan, main
 
 
 def _args(project, **kw):
@@ -102,7 +102,7 @@ class TestHelp:
     def test_help_печатает_команды(self, capsys):
         assert cmd_help(_args(".")) == 0
         out = capsys.readouterr().out
-        for word in ("scan", "dev", "list", "help", "scaffold", "export", "reset"):
+        for word in ("scan", "dev", "list", "help", "scaffold", "export", "reset", "metadata"):
             assert word in out
 
     def test_main_help(self, capsys):
@@ -119,6 +119,22 @@ class TestHelp:
         assert exc.value.code == 0
         stream.flush()
         assert buf.getvalue()
+
+
+class TestMetadata:
+    def test_dry_run(self, demo, capsys):
+        cmd_scan(_args(demo))
+        capsys.readouterr()
+        assert cmd_metadata(_args(demo, dry_run=True, yes=False)) == 0
+        assert "dry-run" in capsys.readouterr().out
+
+    def test_без_графа_возвращает_2(self, tmp_path, capsys):
+        assert cmd_metadata(_args(tmp_path, dry_run=False, yes=False)) == 2
+        assert "no graph" in capsys.readouterr().out
+
+    def test_help_упоминает_metadata(self, capsys):
+        cmd_help(_args("."))
+        assert "metadata" in capsys.readouterr().out
 
 
 class TestParser:

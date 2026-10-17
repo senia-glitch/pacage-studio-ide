@@ -73,6 +73,44 @@ class TestPage:
         finally:
             srv.shutdown()
 
+    def test_переключатели_содержимого_на_месте(self, demo):
+        srv, base = _serve(demo)
+        try:
+            _, body = _request(base, "/")
+            for marker in ("btnDesc", "btnAcc", "contentSeg",
+                           "node-sec", "node-sec-label", "node-sec-body",
+                           "node-sec-divider", "ds-full", "acc-full",
+                           "showDesc", "showAcc", "saveContentToggles",
+                           "initContentToggles",
+                           "studio.showDescription", "studio.showAcceptance"):
+                assert marker in body, f"в странице нет {marker}"
+        finally:
+            srv.shutdown()
+
+    def test_группировка_метод_домен_на_месте(self, demo):
+        srv, base = _serve(demo)
+        try:
+            _, body = _request(base, "/")
+            for marker in ("scenSearch", "scenarioGroupsByMethodDomain",
+                           "methodOfScenario", "domainOfScenario",
+                           "METHOD_ORDER", "METHOD_COLORS", "METHOD_LABELS",
+                           "NO_METHOD", "NO_DOMAIN",
+                           "dup-badge", "method-plate", "domain-plate",
+                           "fDomain", "matchesFilter"):
+                assert marker in body, f"в странице нет {marker}"
+        finally:
+            srv.shutdown()
+
+    def test_кнопка_синхронизации_на_месте(self, demo):
+        srv, base = _serve(demo)
+        try:
+            _, body = _request(base, "/")
+            for marker in ("btnSync", "onSync", "/api/metadata/preview",
+                           "/api/metadata/apply", "diff-add", "diff-del"):
+                assert marker in body, f"в странице нет {marker}"
+        finally:
+            srv.shutdown()
+
 
 class TestApi:
     def test_граф_версии_4(self, demo):
