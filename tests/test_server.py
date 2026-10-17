@@ -66,29 +66,29 @@ class TestPage:
         srv, base = _serve(demo)
         try:
             _, body = _request(base, "/")
-            for marker in ("bSave", "bValidate", "bDiff", "bConfig", "bScan"):
+            for marker in ("bValidate", "bDiff", "bConfig", "bScan"):
                 assert marker not in body, f"кнопка {marker} не должна существовать"
         finally:
             srv.shutdown()
 
 
 class TestApi:
-    def test_граф_версии_2(self, demo):
+    def test_граф_версии_4(self, demo):
         srv, base = _serve(demo)
         try:
             status, body = _request(base, "/api/graph")
             assert status == 200
             graph = json.loads(body)
-            assert graph["version"] == 2
+            assert graph["version"] == 4
             assert len(graph["endpoints"]) == 4
             assert len(graph["scenarios"]) == 4
             by_id = {n["id"]: n for n in graph["nodes"]}
             scen = next(n for n in graph["nodes"] if n["id"].endswith("CreateOrderScenario"))
-            assert scen["doc"] == "Сценарий создания заказа."
+            assert scen["origin"] == "code"
             model = by_id["model:models.py:User"]
-            assert model["doc"] == "Модель пользователя."
+            assert model["origin"] == "code"
             ep = next(n for n in graph["nodes"] if n["id"].endswith("create_order") and n["kind"] == "endpoint")
-            assert ep["doc"] == "Создать заказ."
+            assert ep["origin"] == "code"
         finally:
             srv.shutdown()
 
@@ -96,7 +96,7 @@ class TestApi:
         srv, base = _serve(tmp_path)
         try:
             _, body = _request(base, "/api/graph")
-            assert json.loads(body)["version"] == 2
+            assert json.loads(body)["version"] == 4
             assert store.graph_path(tmp_path).is_file()
         finally:
             srv.shutdown()
@@ -109,7 +109,7 @@ class TestApi:
         srv, base = _serve(demo)
         try:
             _, body = _request(base, "/api/graph")
-            assert json.loads(body)["version"] == 2
+            assert json.loads(body)["version"] == 4
         finally:
             srv.shutdown()
 

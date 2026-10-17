@@ -125,7 +125,7 @@ class TestIndexer:
 
     def test_tests_не_индексируются(self, demo):
         junk = demo / "tests"
-        junk.mkdir()
+        junk.mkdir(exist_ok=True)
         (junk / "junk.py").write_text(
             "from core import register_scenario\n"
             '@register_scenario("junk_scenario")\n'

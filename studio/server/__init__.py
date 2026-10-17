@@ -1,11 +1,12 @@
-"""Read-only сервер интерфейса: stdlib http.server, только GET.
+"""Сервер интерфейса студии: stdlib http.server.
 
-Ни одной POST/PUT/DELETE: студия только смотрит на код, ничего не пишет,
-кроме `.studio/graph.json` и `.studio/studio.log`.
+GET — просмотр графа. PUT/DELETE — патчи плана. POST — rescan, scaffold.
+Изменяющие эндпоинты пишут только в `.studio/*` и файлы-скелеты (с маркером).
 """
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,8 +14,11 @@ from pathlib import Path
 
 from studio import log as slog
 from studio import store
+from studio.exporter import to_json, to_markdown
 from studio.metamodel import Graph
-from studio.scanner import scan
+from studio.scaffold import ScaffoldOp, apply_scaffold, collect_model_appends, plan_scaffold
+from studio.scanner import build_scenario_paths, scan
+from studio.store.plan import PlanPatch, apply_plan, read_plan, remove_patch, upsert_patch, write_plan
 from studio.ui import INDEX
 
 
@@ -28,11 +32,23 @@ def load_graph(project_root: Path) -> Graph:
     graph = store.read_graph(project_root)
     if graph is not None:
         return graph
-    slog.step("graph.json отсутствует или версия != 2 — сканирую проект")
+    slog.step("graph.json отсутствует или версия != 4 — сканирую проект")
     graph = scan(project_root)
     store.write_graph(project_root, graph)
     slog.step(f"граф построен: узлов={len(graph.nodes)} связей={len(graph.edges)}")
     return graph
+
+
+def reload_graph(project_root: Path) -> Graph:
+    """Перечитать graph.json; если нет — scan."""
+    graph = store.read_graph(project_root)
+    if graph is None:
+        return load_graph(project_root)
+    return graph
+
+
+def save_graph(project_root: Path, graph: Graph) -> None:
+    store.write_graph(project_root, graph)
 
 
 def scenarios_payload(graph: Graph) -> dict:
@@ -104,6 +120,68 @@ def _read_file(root: Path, rel: str) -> str:
         return ""
 
 
+def _read_body(handler: BaseHTTPRequestHandler) -> dict:
+    length = int(handler.headers.get("Content-Length") or 0)
+    if length <= 0:
+        return {}
+    raw = handler.rfile.read(length)
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _op_to_dict(op: ScaffoldOp) -> dict:
+    return {"action": op.action, "path": op.path, "node_id": op.node_id, "reason": op.reason}
+
+
+def _plan_patch(project_root: Path, patch: PlanPatch) -> Graph:
+    plan = read_plan(project_root)
+    upsert_patch(plan, patch)
+    plan.meta.last_edit = _dt.datetime.now().isoformat(timespec="seconds")
+    write_plan(project_root, plan)
+    graph = reload_graph(project_root)
+    graph = apply_plan(graph, plan)
+    build_scenario_paths(graph)
+    save_graph(project_root, graph)
+    return graph
+
+
+def _remove_patch(project_root: Path, target_id: str, is_edge: bool) -> Graph:
+    plan = read_plan(project_root)
+    remove_patch(plan, target_id, is_edge)
+    plan.meta.last_edit = _dt.datetime.now().isoformat(timespec="seconds")
+    write_plan(project_root, plan)
+    graph = reload_graph(project_root)
+    graph = apply_plan(graph, plan)
+    build_scenario_paths(graph)
+    save_graph(project_root, graph)
+    return graph
+
+
+def _scaffold_preview(project_root: Path) -> dict:
+    graph = reload_graph(project_root)
+    ops = plan_scaffold(graph, project_root)
+    models = collect_model_appends(graph)
+    return {
+        "ops": [_op_to_dict(op) for op in ops],
+        "models": [{"node_id": m[0], "class_name": m[1], "tablename": m[2]} for m in models],
+    }
+
+
+def _scaffold_apply(project_root: Path) -> dict:
+    graph = reload_graph(project_root)
+    ops = plan_scaffold(graph, project_root)
+    apply_scaffold(ops, graph, project_root)
+    build_scenario_paths(graph)
+    save_graph(project_root, graph)
+    created = sum(1 for op in ops if op.action == "create")
+    updated = sum(1 for op in ops if op.action == "update_docstring")
+    skipped = sum(1 for op in ops if op.action.startswith("skip"))
+    return {"created": created, "updated": updated, "skipped": skipped}
+
+
 def make_handler(ctx: Ctx):
     class H(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args) -> None:
@@ -126,19 +204,58 @@ def make_handler(ctx: Ctx):
             if url.path == "/api/file":
                 rel = (query.get("path") or [""])[0]
                 return _send_json(self, {"path": rel, "code": _read_file(root, rel)})
+            if url.path == "/api/export":
+                fmt = (query.get("format") or ["md"])[0]
+                graph = load_graph(root)
+                if fmt == "json":
+                    return _send_text(self, to_json(graph), "application/json; charset=utf-8")
+                return _send_text(self, to_markdown(graph), "text/markdown; charset=utf-8")
             return _send_text(self, "not found", code=404)
 
-        def _not_found(self) -> None:
-            _send_text(self, "not found", code=404)
-
-        def do_POST(self) -> None:
-            self._not_found()
-
         def do_PUT(self) -> None:
+            root = ctx.root
+            url = urllib.parse.urlsplit(self.path)
+            if url.path == "/api/plan/patch":
+                data = _read_body(self)
+                try:
+                    patch = PlanPatch.model_validate(data)
+                except Exception:
+                    return _send_text(self, "invalid patch", code=400)
+                graph = _plan_patch(root, patch)
+                return _send_json(self, graph.model_dump())
             self._not_found()
 
         def do_DELETE(self) -> None:
+            root = ctx.root
+            url = urllib.parse.urlsplit(self.path)
+            query = urllib.parse.parse_qs(url.query)
+            if url.path == "/api/plan/patch":
+                target_id = (query.get("target_id") or [""])[0]
+                is_edge = (query.get("is_edge") or ["0"])[0] == "1"
+                if not target_id:
+                    return _send_text(self, "target_id required", code=400)
+                graph = _remove_patch(root, target_id, is_edge)
+                return _send_json(self, graph.model_dump())
             self._not_found()
+
+        def do_POST(self) -> None:
+            root = ctx.root
+            url = urllib.parse.urlsplit(self.path)
+            if url.path == "/api/rescan":
+                slog.step("rescan")
+                graph = scan(root)
+                store.write_graph(root, graph)
+                slog.step(f"граф обновлён: узлов={len(graph.nodes)} связей={len(graph.edges)}")
+                return _send_json(self, graph.model_dump())
+            if url.path == "/api/scaffold/preview":
+                return _send_json(self, _scaffold_preview(root))
+            if url.path == "/api/scaffold/apply":
+                result = _scaffold_apply(root)
+                return _send_json(self, result)
+            self._not_found()
+
+        def _not_found(self) -> None:
+            _send_text(self, "not found", code=404)
 
         def do_PATCH(self) -> None:
             self._not_found()
@@ -152,7 +269,7 @@ def serve(project_root: Path, host: str = "127.0.0.1", port: int = 8777) -> None
     slog.step(f"сервер слушает http://{host}:{port}")
     server = ThreadingHTTPServer((host, port), make_handler(Ctx(project_root)))
     print(f"studio dev -> http://{host}:{port}  (project: {project_root})")
-    print("Read-only viewer: the project is NOT started, code is never written.")
+    print("Studio: карта проекта для AI-разработки.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

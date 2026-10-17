@@ -35,11 +35,11 @@ class TestScan:
         assert "io 7" in out
         assert "models 2" in out
 
-    def test_scan_пишет_граф_версии_2(self, demo):
+    def test_scan_пишет_граф_версии_4(self, demo):
         cmd_scan(_args(demo))
         graph = store.read_graph(demo)
         assert graph is not None
-        assert graph.version == 2
+        assert graph.version == 4
         assert len(graph.endpoints) == 4
         assert len(graph.scenarios) == 4
         assert set(graph.scenario_paths) == set(graph.scenarios)
@@ -98,7 +98,7 @@ class TestHelp:
     def test_help_печатает_команды(self, capsys):
         assert cmd_help(_args(".")) == 0
         out = capsys.readouterr().out
-        for word in ("scan", "dev", "list", "help", "только просмотр"):
+        for word in ("scan", "dev", "list", "help", "scaffold", "export", "reset"):
             assert word in out
 
     def test_main_help(self, capsys):

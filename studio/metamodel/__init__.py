@@ -1,7 +1,7 @@
-"""Pydantic-схема графа студии v2.
+"""Pydantic-схема графа студии v4.
 
 Один запрос: HTTP → endpoint (fastbase) → scenario (core) → _db.<method> (io) → model (event-infra).
-Только модели данных, никакой логики. Версия схемы — 2.
+Только модели данных, никакой логики. Версия схемы — 4.
 """
 
 from __future__ import annotations
@@ -10,9 +10,10 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-NodeKind = Literal["endpoint", "scenario", "io", "model", "helper"]
+NodeKind = Literal["endpoint", "scenario", "io", "model", "test", "helper"]
+Origin = Literal["code", "user", "stale"]
 Layer = Literal["representation", "logic", "io", ""]
-EdgeKind = Literal["dispatch", "scenario_call", "port_call", "table", "uses", "depends"]
+EdgeKind = Literal["dispatch", "scenario_call", "port_call", "table", "tests", "uses", "depends"]
 
 
 class EndpointDetails(BaseModel):
@@ -49,6 +50,13 @@ class HelperDetails(BaseModel):
     module: str
 
 
+class TestDetails(BaseModel):
+    test_name: str
+    test_for_scenario: str | None = None
+    test_for_endpoint: str | None = None
+    module: str
+
+
 class Node(BaseModel):
     id: str
     kind: NodeKind
@@ -56,8 +64,14 @@ class Node(BaseModel):
     label: str
     file_path: str
     line: int = 1
-    doc: str | None = None
     details: dict = Field(default_factory=dict)
+    origin: Origin = "code"
+    description: str = ""
+    acceptance: list[str] = Field(default_factory=list)
+    notes: str = ""
+    scaffolded: bool = False
+    create_file: bool = True
+    append_model: bool = False
 
 
 class Edge(BaseModel):
@@ -67,6 +81,8 @@ class Edge(BaseModel):
     kind: EdgeKind
     label: str = ""
     line: int = 1
+    origin: Origin = "code"
+    description: str = ""
 
 
 class ScenarioPath(BaseModel):
@@ -76,16 +92,24 @@ class ScenarioPath(BaseModel):
     models: list[str] = Field(default_factory=list)
     helpers: list[str] = Field(default_factory=list)
     called_scenarios: list[str] = Field(default_factory=list)
+    tests: list[str] = Field(default_factory=list)
+
+
+class PlanMeta(BaseModel):
+    last_scan: str | None = None
+    last_edit: str | None = None
+    last_scaffold: str | None = None
 
 
 class Graph(BaseModel):
-    version: int = 2
+    version: int = 4
     project_root: str = ""
     nodes: list[Node] = Field(default_factory=list)
     edges: list[Edge] = Field(default_factory=list)
     endpoints: list[str] = Field(default_factory=list)
     scenarios: list[str] = Field(default_factory=list)
     scenario_paths: dict[str, ScenarioPath] = Field(default_factory=dict)
+    plan_meta: PlanMeta = Field(default_factory=PlanMeta)
 
     def by_id(self) -> dict[str, Node]:
         return {n.id: n for n in self.nodes}

@@ -174,6 +174,21 @@ FILES: dict[str, str] = {
         "def lvl3(x):\n"
         "    return x\n"
     ),
+    "tests/test_orders.py": (
+        "import pytest\n"
+        "\n"
+        "\n"
+        "async def test_create_order():\n"
+        "    assert True\n"
+        "\n"
+        "\n"
+        "async def test_charge_payment():\n"
+        "    assert True\n"
+        "\n"
+        "\n"
+        "async def test_health_endpoint():\n"
+        "    assert True\n"
+    ),
 }
 
 
