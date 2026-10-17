@@ -128,6 +128,8 @@ studio help
 
 ```bash
 pytest tests/          # env, indexer, resolver, helpers, paths, CLI, server, export, plan API, scaffold
+python -m build --clean              # чистая сборка
+rm -rf build dist *.egg-info          # убрать регенерируемые артефакты
 ```
 
 Структура пакета:
