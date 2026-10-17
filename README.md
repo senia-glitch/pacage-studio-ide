@@ -13,11 +13,27 @@ HTTP → endpoint (fastbase) → scenario (core) → _db.<method> (io) → model
 
 ## Установка
 
+Полная установка (студия + fastbase / core / event-infra) в venv проекта:
+
+```powershell
+python -m pip install --upgrade --force-reinstall "pacage-studio[full] @ git+https://github.com/senia-glitch/pacage-studio-ide.git"
+```
+
+Только студия (без стека):
+
+```powershell
+python -m pip install --upgrade --force-reinstall "pacage-studio @ git+https://github.com/senia-glitch/pacage-studio-ide.git"
+```
+
+Из клона репозитория:
+
 ```bash
-pip install -e .            # голая студия: только pydantic
-pip install -e ".[full]"    # + fastbase / core / event-infra из гита
+pip install -e ".[full]"    # + fastbase / core / event-infra
+pip install -e .            # голая студия
 pip install -e ".[dev]"     # + pytest для разработки самой студии
 ```
+
+Подробная инструкция: [УСТАНОВКА.md](УСТАНОВКА.md).
 
 ## Команды
 
