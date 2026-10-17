@@ -57,7 +57,7 @@ class TestPage:
         srv, base = _serve(demo)
         try:
             _, body = _request(base, "/")
-            for marker in ("zoomLabel", "zIn", "zOut", "zFit", "zReset", "toWorld", "fitView"):
+            for marker in ("zoomLabel", "zIn", "zOut", "zFit", "zReset", "toWorld", "fitView", "ovSub"):
                 assert marker in body, f"в странице нет {marker}"
         finally:
             srv.shutdown()
