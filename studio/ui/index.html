@@ -871,7 +871,7 @@ function onPortClick(nodeId,pos){
   else if(kind==="table")label="";
   else if(kind==="tests")label="tests";
   else label="";
-  const edge={id:`${edgeSrc.id}::${kind}::${nodeId}`,from_node:edgeSrc.id,to_node:nodeId kind,label,line:1,origin:"user",description:""};
+  const edge={id:`${edgeSrc.id}::${kind}::${nodeId}`,from_node:edgeSrc.id,to_node:nodeId,kind,label,line:1,origin:"user",description:""};
   G.edges.push(edge);
   saveGraph();
   clearEdgeSrc();
