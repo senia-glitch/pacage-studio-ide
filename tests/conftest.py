@@ -36,11 +36,13 @@ FILES: dict[str, str] = {
         "from sqlmodel import SQLModel\n"
         "\n"
         "\n"
-        "class User(SQLModel, table=True):\n"
+        'class User(SQLModel, table=True):\n'
+        '    """Модель пользователя."""\n'
         '    __tablename__ = "users"\n'
         "\n"
         "\n"
-        "class Order(SQLModel, table=True):\n"
+        'class Order(SQLModel, table=True):\n'
+        '    """Модель заказа."""\n'
         '    __tablename__ = "orders"\n'
         "\n"
         "\n"
@@ -62,11 +64,13 @@ FILES: dict[str, str] = {
         "\n"
         '@router.post("/create")\n'
         "async def create_order(dto: UserDTO, cur=Depends(get_current_user)):\n"
+        '    """Создать заказ."""\n'
         '    return await run("create_order", dto)\n'
         "\n"
         "\n"
         '@router.get("/list")\n'
         "async def list_orders():\n"
+        '    """Список заказов."""\n'
         '    return await run("no_endpoint_scenario")\n'
     ),
     "app/api/v1/routes/health.py": (
@@ -86,6 +90,7 @@ FILES: dict[str, str] = {
         '    return {"ok": True}\n'
     ),
     "app/api/v1/dependencies.py": (
+        '"""Зависимости FastAPI."""\n'
         "async def get_current_user():\n"
         "    return {}\n"
     ),
@@ -100,6 +105,7 @@ FILES: dict[str, str] = {
         "\n"
         '@register_scenario("create_order", dto=UserDTO, response=OrderOut)\n'
         "class CreateOrderScenario(BaseScenario):\n"
+        '    """Сценарий создания заказа."""\n'
         "    async def execute(self, dto):\n"
         '        await self._db.create("orders", {})\n'
         "        await self._db.query('SELECT id FROM \"orders\" WHERE id = 1')\n"

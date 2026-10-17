@@ -27,12 +27,12 @@ def test_по_умолчанию_зависимостей_почти_нет():
     assert deps == ["pydantic>=2"]
 
 
-def test_версия_2_0_0():
+def test_версии_не_разъезжаются():
     """Пакет и pyproject разом: студия v2, версии не разъезжаются."""
     import studio
 
-    assert studio.__version__ == "2.0.0"
-    assert _pyproject()["project"]["version"] == "2.0.0"
+    assert studio.__version__ == _pyproject()["project"]["version"]
+    assert studio.__version__.startswith("2.")
 
 
 def test_ui_html_упакован_в_дистрибутив():

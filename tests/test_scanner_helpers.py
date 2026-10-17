@@ -32,6 +32,11 @@ class TestAttach:
         assert node.label == "app.utils.money"
         assert node.file_path == "app/utils/money.py"
         assert node.layer == ""
+        assert node.doc is None
+
+    def test_docstring_модуля(self, demo):
+        g = scan(demo)
+        assert _helpers(g)["helper:app.api.v1.dependencies"].doc == "Зависимости FastAPI."
 
     def test_неиспользуемый_импорт_не_привязан(self, demo):
         g = scan(demo)

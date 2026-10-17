@@ -59,6 +59,7 @@ def build_core_graph(env: ProjectEnv, index: Index) -> Graph:
                     router_module=entry.router_module,
                     tags=list(entry.tags),
                 ).model_dump(),
+                doc=entry.doc,
             )
         )
 
@@ -79,6 +80,7 @@ def build_core_graph(env: ProjectEnv, index: Index) -> Graph:
                     dto=entry.dto,
                     response=entry.response,
                 ).model_dump(),
+                doc=entry.doc,
             )
         )
 
@@ -96,6 +98,7 @@ def build_core_graph(env: ProjectEnv, index: Index) -> Graph:
                     class_name=entry.class_name,
                     source_file=entry.file_path,
                 ).model_dump(),
+                doc=entry.doc,
             )
         )
 

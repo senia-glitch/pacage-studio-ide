@@ -274,6 +274,9 @@ def attach_helpers(graph: Graph, env: ProjectEnv, index: Index) -> None:
                     label=imp.module,
                     file_path=rel,
                     line=_anchor_line(helper_tree) if helper_tree is not None else 1,
+                    doc=ast.get_docstring(helper_tree, clean=True).strip()
+                    if helper_tree is not None and ast.get_docstring(helper_tree)
+                    else None,
                     details=HelperDetails(
                         role=_module_role(helper_file, rel, is_dep),
                         module=imp.module,

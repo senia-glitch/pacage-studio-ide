@@ -82,6 +82,13 @@ class TestApi:
             assert graph["version"] == 2
             assert len(graph["endpoints"]) == 4
             assert len(graph["scenarios"]) == 4
+            by_id = {n["id"]: n for n in graph["nodes"]}
+            scen = next(n for n in graph["nodes"] if n["id"].endswith("CreateOrderScenario"))
+            assert scen["doc"] == "Сценарий создания заказа."
+            model = by_id["model:models.py:User"]
+            assert model["doc"] == "Модель пользователя."
+            ep = next(n for n in graph["nodes"] if n["id"].endswith("create_order") and n["kind"] == "endpoint")
+            assert ep["doc"] == "Создать заказ."
         finally:
             srv.shutdown()
 

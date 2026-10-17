@@ -19,6 +19,16 @@ from studio.scanner.ast_utils import (
 HTTP_METHODS = ("get", "post", "put", "delete", "patch")
 
 
+def _doc(*nodes: ast.AST | None) -> str | None:
+    """Склеить docstring-и узлов через пустую строку; пустое — None."""
+    parts: list[str] = []
+    for node in nodes:
+        text = ast.get_docstring(node, clean=True) if node is not None else None
+        if text:
+            parts.append(text.strip())
+    return "\n\n".join(parts) if parts else None
+
+
 @dataclass
 class ScenarioEntry:
     name: str
@@ -29,6 +39,7 @@ class ScenarioEntry:
     dto: str | None
     response: str | None
     class_node: ast.ClassDef
+    doc: str | None = None
 
 
 @dataclass
@@ -37,6 +48,7 @@ class ModelEntry:
     class_name: str
     file_path: str
     line: int
+    doc: str | None = None
 
 
 @dataclass
@@ -50,6 +62,7 @@ class EndpointEntry:
     line: int
     function_node: ast.FunctionDef | ast.AsyncFunctionDef
     tags: list[str] = field(default_factory=list)
+    doc: str | None = None
 
 
 @dataclass
@@ -121,6 +134,15 @@ def index_scenarios(env: ProjectEnv) -> dict[str, ScenarioEntry]:
             name = call_first_str_arg(dec)
             if name is None:
                 continue
+            execute = next(
+                (
+                    item
+                    for item in node.body
+                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and item.name == "execute"
+                ),
+                None,
+            )
             out[name] = ScenarioEntry(
                 name=name,
                 class_name=node.name,
@@ -130,6 +152,7 @@ def index_scenarios(env: ProjectEnv) -> dict[str, ScenarioEntry]:
                 dto=kwarg_str_value(dec, "dto"),
                 response=kwarg_str_value(dec, "response"),
                 class_node=node,
+                doc=_doc(node, execute),
             )
     return out
 
@@ -155,6 +178,7 @@ def index_models(env: ProjectEnv) -> dict[str, ModelEntry]:
             class_name=node.name,
             file_path=file_path,
             line=node.lineno,
+            doc=_doc(node),
         )
     return out
 
@@ -222,6 +246,7 @@ def index_endpoints(env: ProjectEnv) -> list[EndpointEntry]:
                         line=node.lineno,
                         function_node=node,
                         tags=list(tags),
+                        doc=_doc(node),
                     )
                 )
     return out

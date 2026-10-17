@@ -85,6 +85,7 @@ class TestIndexer:
         assert entry.module == "app.scenarios.orders"
         assert entry.dto == "UserDTO"
         assert entry.response == "OrderOut"
+        assert entry.doc == "Сценарий создания заказа."
 
     def test_сценарии_из_вложенного_каталога(self, demo):
         index = build_index(read_env(demo))
@@ -95,7 +96,9 @@ class TestIndexer:
         assert set(index.models) == {"users", "orders"}
         assert index.models["users"].class_name == "User"
         assert index.models["users"].file_path == "models.py"
+        assert index.models["users"].doc == "Модель пользователя."
         assert index.models["orders"].tablename == "orders"
+        assert index.models["orders"].doc == "Модель заказа."
 
     def test_модель_без_tablename_пропущена(self, demo):
         index = build_index(read_env(demo))
@@ -107,10 +110,12 @@ class TestIndexer:
         assert set(by_name) == {"create_order", "list_orders", "health", "root"}
         assert by_name["create_order"].http_method == "post"
         assert by_name["create_order"].path == "/create"
+        assert by_name["create_order"].doc == "Создать заказ."
         assert by_name["create_order"].id == (
             "endpoint:app/api/v1/routes/orders.py:create_order"
         )
         assert by_name["root"].path == ""
+        assert by_name["root"].doc is None
 
     def test_router_tags(self, demo):
         index = build_index(read_env(demo))

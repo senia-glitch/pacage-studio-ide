@@ -56,6 +56,7 @@ class Node(BaseModel):
     label: str
     file_path: str
     line: int = 1
+    doc: str | None = None
     details: dict = Field(default_factory=dict)
 
 
