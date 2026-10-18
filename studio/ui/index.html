@@ -75,6 +75,7 @@ main{flex:1;display:grid;grid-template-columns:250px 1fr 320px;min-height:0}
 .port{position:absolute;width:10px;height:10px;border-radius:50%;background:var(--acc);border:2px solid #111;cursor:crosshair;z-index:5;opacity:0;transition:opacity .15s}
 .node:hover .port{opacity:1}
 .port:hover{opacity:1!important;transform:scale(1.3)}
+#canvas.edit-mode .port{opacity:.85}
 .port-t{top:-6px;left:50%;margin-left:-5px}
 .port-r{top:50%;right:-6px;margin-top:-5px}
 .port-b{bottom:-6px;left:50%;margin-left:-5px}
@@ -217,11 +218,13 @@ const EDGE_STYLE={
   depends:{c:"#9a9aa2",m:"ar-plain",dash:"6,5"},
   shared:{c:"#4c4e56",m:"ar-shared",dash:"4,6"}
 };
+// Направление как в сканере: тест → сценарий/endpoint (test_for_scenario / test_for_endpoint).
 const VALID_EDGES={
-  endpoint:{scenario:"dispatch",test:"tests"},
-  scenario:{scenario:"scenario_call",io:"port_call",helper:"uses",test:"tests"},
+  endpoint:{scenario:"dispatch"},
+  scenario:{scenario:"scenario_call",io:"port_call",helper:"uses"},
   io:{model:"table"},
-  model:{},helper:{},test:{}
+  model:{},helper:{},
+  test:{scenario:"tests",endpoint:"tests"}
 };
 const MARKERS=[
   ["ar-dispatch","#5aa0ff"],["ar-scenario","#e8833a"],["ar-port","#7fc97f"],
@@ -297,6 +300,7 @@ function setModeButtons(){
   document.querySelectorAll("#modes button").forEach(b=>b.classList.toggle("on",b.dataset.m===mode));
   $("vView").classList.toggle("on",viewMode==="view");
   $("vEdit").classList.toggle("on",viewMode==="edit");
+  $("canvas").classList.toggle("edit-mode",viewMode==="edit");
   $("btnSave").style.display=viewMode==="edit"?"":"none";
   $("btnSync").style.display=viewMode==="edit"?"":"none";
   $("viewLeft").style.display=viewMode==="view"?"":"none";
@@ -508,8 +512,8 @@ async function saveNewNode(node){
       body:JSON.stringify({target_id:node.id,is_edge:false,node})});
     if(!r.ok)throw new Error("HTTP "+r.status);
     applyGraph(await r.json());
-    selId=node.id;codeState=null;
-    renderAll();
+    if(node.kind==="scenario"&&byId[node.id])selectScenario(node.id);
+    else{selId=node.id;codeState=null;renderAll();}
     if(node.kind==="io"&&!(node.details&&node.details.called_from))
       toast("IO-узел: выберите сценарий-родитель (called_from)");
     else toast(node.kind+" создан");
@@ -939,9 +943,32 @@ function rows(pairs){
   return pairs.filter(p=>p&&p[1]!==undefined&&p[1]!==null&&p[1]!=="")
     .map(([k,v])=>`<div class="kv"><span>${esc(k)}</span><b>${esc(Array.isArray(v)?v.join(", "):v)}</b></div>`).join("");
 }
+// Введённое в форме инспектора, но ещё не сохранённое, переживает перерисовку панели
+// («+ добавить», «code view», повторный клик по тому же узлу). Смена узла — сбрасывает.
+let formCarry=null,skipCarry=false;
+function captureInspectorForm(){
+  const f=document.querySelector("#insp .edit-form[data-node]");
+  if(!f)return null;
+  const vals={};
+  f.querySelectorAll("input[id],textarea[id],select[id]").forEach(el=>{
+    vals[el.id]=el.type==="checkbox"?el.checked:el.value;
+  });
+  const acc=[...f.querySelectorAll("#fAcc input[data-acc]")].map(el=>el.value);
+  return{nodeId:f.dataset.node,vals,acc};
+}
+function addAccRow(value){
+  const box=$("fAcc");if(!box)return;
+  const row=document.createElement("div");
+  row.className="acc-row";
+  row.innerHTML=`<input data-acc value="${esc(value)}"><button type="button" data-delacc title="удалить критерий">×</button>`;
+  box.appendChild(row);
+  row.querySelector("input").focus();
+}
 function renderInspector(){
   const d=$("insp");
   if(!G){d.innerHTML='<p class="dim">Загрузка…</p>';return;}
+  formCarry=skipCarry?null:captureInspectorForm();
+  skipCarry=false;
   if(!selId||!byId[selId]){
     if(viewMode==="edit"){renderCreateForm();return;}
     d.innerHTML='<p class="dim">Выбери узел на канвасе или сценарий слева.</p>';return;
@@ -965,12 +992,13 @@ function renderInspector(){
       `<button id="bCode">code view</button>`+code;
     $("bCode").onclick=()=>openCode(n);
   }else{
-    let form=`<div class="edit-form"><div class="insp-heading">Редактирование: <b>${esc(n.label)}</b> <span class="dim">(${esc(n.kind)})</span></div>`;
+    const carry=formCarry&&formCarry.nodeId===n.id?formCarry:null;
+    let form=`<div class="edit-form" data-node="${esc(n.id)}"><div class="insp-heading">Редактирование: <b>${esc(n.label)}</b> <span class="dim">(${esc(n.kind)})</span></div>`;
     form+=`<label>label</label><input id="fLabel" value="${esc(n.label)}">`;
     form+=`<label>description</label><textarea id="fDesc" rows="4">${esc(n.description)}</textarea>`;
     form+=`<label>acceptance</label><div id="fAcc">`;
-    (n.acceptance||[]).forEach((a,i)=>{
-      form+=`<div class="acc-row"><input data-acc="${i}" value="${esc(a)}"><button data-delacc="${i}">×</button></div>`;
+    (carry?carry.acc:(n.acceptance||[])).forEach(a=>{
+      form+=`<div class="acc-row"><input data-acc value="${esc(a)}"><button type="button" data-delacc title="удалить критерий">×</button></div>`;
     });
     form+=`</div><button id="bAddAcc" style="margin-top:4px;font-size:11px;padding:2px 6px">+ добавить</button>`;
     form+=`<label>notes</label><input id="fNotes" value="${esc(n.notes)}">`;
@@ -1019,14 +1047,18 @@ function renderInspector(){
     else if(n.origin==="stale")btnHtml+=`<button id="bRestore">Восстановить узел</button>`;
     btnHtml+=`<button id="bCode">code view</button>`;
     d.innerHTML=rows([["kind",n.kind],["origin",n.origin],["file",n.file_path],["line",n.line]])+extra+doc+form+btnHtml+code;
+    if(carry){
+      Object.keys(carry.vals).forEach(id=>{
+        const el=$(id);if(!el)return;
+        if(el.type==="checkbox")el.checked=carry.vals[id];else el.value=carry.vals[id];
+      });
+    }
     $("bCode").onclick=()=>openCode(n);
-    $("bAddAcc").onclick=()=>{
-      n.acceptance=n.acceptance||[];n.acceptance.push("");
-      renderInspector();
+    $("bAddAcc").onclick=()=>addAccRow("");
+    $("fAcc").onclick=e=>{
+      const b=e.target.closest("[data-delacc]");
+      if(b)b.parentElement.remove();
     };
-    document.querySelectorAll("[data-delacc]").forEach(b=>{
-      b.onclick=()=>{n.acceptance.splice(parseInt(b.dataset.delacc),1);renderInspector()};
-    });
     const saveBtn=document.createElement("button");
     saveBtn.id="bSaveDesc";saveBtn.textContent="Сохранить изменения";saveBtn.style.marginRight="8px";
     saveBtn.onclick=()=>saveNodePatch(n);
@@ -1083,7 +1115,7 @@ function newNodeFieldsHtml(kind){
   }
   return h;
 }
-function renderCreateForm(){
+function renderCreateForm(keep){
   const d=$("insp");
   let html=`<div class="edit-form"><div class="insp-heading">Создание узла <span class="dim">(план)</span></div>`;
   html+=`<label>тип узла</label><div class="kind-tabs" id="kindTabs">`;
@@ -1093,8 +1125,20 @@ function renderCreateForm(){
   html+=`</div><div id="newFields">${newNodeFieldsHtml(newKind)}</div>`;
   html+=`<button id="bCreateNode" style="margin-top:8px">Создать узел</button></div>`;
   d.innerHTML=html;
+  if(keep){
+    // смена типа не должна стирать уже введённый текст; label — только если он не дефолтный
+    if($("fNewDesc"))$("fNewDesc").value=keep.desc;
+    if($("fNewAcc"))$("fNewAcc").value=keep.acc;
+    if($("fNewDomain"))$("fNewDomain").value=keep.domain;
+    if($("fNewLabel")&&keep.label!==PALETTE_DEFAULTS[keep.kind].label)$("fNewLabel").value=keep.label;
+  }
   document.querySelectorAll("#kindTabs button").forEach(b=>{
-    b.onclick=()=>{newKind=b.dataset.kind;renderCreateForm();};
+    b.onclick=()=>{
+      const prev={kind:newKind,label:$("fNewLabel")?.value??"",desc:$("fNewDesc")?.value??"",
+        acc:$("fNewAcc")?.value??"",domain:$("fNewDomain")?.value??""};
+      newKind=b.dataset.kind;
+      renderCreateForm(prev);
+    };
   });
   $("bCreateNode").onclick=()=>createNodeFromForm(newKind);
 }
@@ -1157,10 +1201,11 @@ async function openCode(n){
 }
 async function saveNodePatch(n){
   const oldId=n.id;
+  const accInputs=$("fAcc")?[...document.querySelectorAll("#fAcc input[data-acc]")]:null;
   const fields={
     label:$("fLabel")?.value??n.label,
     description:$("fDesc")?.value??n.description,
-    acceptance:(n.acceptance||[]).filter(a=>String(a).trim()!==""),
+    acceptance:accInputs?accInputs.map(el=>el.value.trim()).filter(Boolean):(n.acceptance||[]),
     notes:$("fNotes")?.value??n.notes,
   };
   if($("fDomain"))fields.domain=$("fDomain").value.trim();
@@ -1187,9 +1232,10 @@ async function saveNodePatch(n){
     if($("fTestScen"))n.details.test_for_scenario=$("fTestScen").value||null;
     n.label=fields.label;n.description=fields.description;n.acceptance=fields.acceptance;n.notes=fields.notes;n.domain=fields.domain??"";
     // id зависит от file_path/идентичности — пересобираем и переименовываем патч.
+    // Переименование: target_id остаётся старым, узел уходит с новым id — сервер переносит
+    // патчи, рёбра и called_from на новый id и пересобирает граф.
     const newId=freeNodeId(nodeIdFor(n),oldId);
     if(newId!==oldId)remapNodeId(oldId,newId);
-    body.target_id=newId;
     body.node=n;
     body.patch=Object.assign({file_path:n.file_path,create_file:n.create_file,append_model:n.append_model},fields);
   }
@@ -1197,12 +1243,14 @@ async function saveNodePatch(n){
     const r=await fetch("/api/plan/patch",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     if(!r.ok)throw new Error("HTTP "+r.status);
     applyGraph(await r.json());
-    if(body.target_id!==oldId){
-      const r2=await fetch("/api/plan/patch?target_id="+encodeURIComponent(oldId)+"&is_edge=0",{method:"DELETE"});
-      if(r2.ok)applyGraph(await r2.json());
-    }
+    if(selId===oldId)selId=n.id;
+    skipCarry=true;
     renderAll();toast("сохранено");
-  }catch(e){toast("ошибка сохранения: "+errMsg(e))}
+  }catch(e){
+    toast("ошибка сохранения: "+errMsg(e));
+    // локальное переименование уже применилось к G — вернуть состояние сервера
+    try{applyGraph(await(await fetch("/api/graph")).json());selId=byId[oldId]?oldId:null;renderAll();}catch(_){}
+  }
 }
 async function deleteNode(n){
   if(!confirm("Удалить узел "+n.label+"?"))return;
@@ -1274,9 +1322,11 @@ async function createEdgeFromPorts(fromId,toId){
   try{
     const r=await fetch("/api/plan/patch",{method:"PUT",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({target_id:edge.id,is_edge:true,edge})});
+    if(r.status===409)throw new Error(await r.text());
     if(!r.ok)throw new Error("HTTP "+r.status);
     applyGraph(await r.json());
-    renderAll();toast("связь создана");
+    renderAll();
+    toast(kind==="port_call"?"io привязан к сценарию "+fromNode.label:"связь создана");
   }catch(e){toast("ошибка связи: "+errMsg(e))}
 }
 function clearEdgeSrc(){

@@ -224,6 +224,17 @@ def _router_tags(tree: ast.Module) -> list[str]:
     return []
 
 
+def _route_path(dec: ast.Call) -> str | None:
+    """Путь маршрута: строковый литерал первым аргументом или `path="..."` (как в FastAPI)."""
+    path = call_first_str_arg(dec)
+    if path is not None:
+        return path
+    for kw in dec.keywords:
+        if kw.arg == "path" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+            return kw.value.value
+    return None
+
+
 def index_endpoints(env: ProjectEnv) -> list[EndpointEntry]:
     """Функции с декоратором @router.<method>("<path>") в пакете роутов."""
     out: list[EndpointEntry] = []
@@ -245,7 +256,7 @@ def index_endpoints(env: ProjectEnv) -> list[EndpointEntry]:
                 func = dec.func
                 if not isinstance(func, ast.Attribute) or func.attr not in HTTP_METHODS:
                     continue
-                http_path = call_first_str_arg(dec)
+                http_path = _route_path(dec)
                 if http_path is None:
                     continue
                 entry_id = f"endpoint:{file_path}:{node.name}"

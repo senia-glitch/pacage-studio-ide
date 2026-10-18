@@ -118,6 +118,10 @@ def apply_plan(scanned: Graph, plan: Plan) -> Graph:
                 # stale → user: патч с node снимает метку удаления (см. mark_removed=false).
                 target.origin = "user"
                 _sync_user_node(target, patch.node)
+            elif target.origin == "code" and patch.node.origin == "user":
+                # Узел создан в плане (форма/палитра), после scaffold код появился под тем же id:
+                # пользовательские поля плана переживают scan, структуру берёт код.
+                _sync_plan_data(target, patch.node)
 
         if patch.edge is not None:
             target_edge = edges_by_id.get(patch.edge.id)
@@ -182,6 +186,48 @@ def _sync_user_node(target: Node, src: Node) -> None:
     target.scaffolded = src.scaffolded
     target.create_file = src.create_file
     target.append_model = src.append_model
+
+
+def _sync_plan_data(target: Node, src: Node) -> None:
+    """Перенести в код-узел только пользовательские поля плана (структуру берёт скан)."""
+    target.label = src.label
+    target.description = src.description
+    target.acceptance = copy.deepcopy(src.acceptance)
+    target.notes = src.notes
+    target.domain = src.domain
+
+
+def rename_node_refs(plan: Plan, old_id: str, new_id: str) -> None:
+    """Перенести ссылки плана со старого id узла на новый (переименование class_name/function_name).
+
+    Меняются: target_id и id узла патча, from/to у user-рёбер (и их id по схеме UI
+    `from::kind::to`), called_from у io-узлов плана.
+    """
+    if old_id == new_id:
+        return
+    edge_remap: dict[str, str] = {}
+    for patch in plan.patches:
+        edge = patch.edge
+        if edge is None or old_id not in (edge.from_node, edge.to_node):
+            continue
+        edge.from_node = new_id if edge.from_node == old_id else edge.from_node
+        edge.to_node = new_id if edge.to_node == old_id else edge.to_node
+        if edge.origin == "user":
+            new_edge_id = f"{edge.from_node}::{edge.kind}::{edge.to_node}"
+            edge_remap[patch.target_id] = new_edge_id
+            edge.id = new_edge_id
+    for patch in plan.patches:
+        if patch.is_edge and patch.target_id in edge_remap:
+            patch.target_id = edge_remap[patch.target_id]
+        elif not patch.is_edge and patch.target_id == old_id:
+            patch.target_id = new_id
+        node = patch.node
+        if node is None:
+            continue
+        if node.id == old_id:
+            node.id = new_id
+        if node.kind == "io" and node.details.get("called_from") == old_id:
+            node.details = {**node.details, "called_from": new_id}
 
 
 def _sync_user_edge(target: Edge, src: Edge) -> None:

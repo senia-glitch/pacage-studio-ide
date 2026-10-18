@@ -234,9 +234,17 @@ def _edit_sort_key(e: _Edit) -> tuple[int, int]:
 
 
 def render_after(nodes: list[Node], text: str) -> str:
-    """Построить текст «после» для набора узлов без записи на диск."""
+    """Построить текст «после» для набора узлов без записи на диск.
+
+    Один узел может давать несколько операций (description + acceptance), поэтому
+    набор нормализуется по id: иначе блоки вставились бы повторно.
+    """
     edits: list[_Edit] = []
+    seen: set[str] = set()
     for node in nodes:
+        if node.id in seen:
+            continue
+        seen.add(node.id)
         edits.extend(_analyze_node_text(node, text).edits)
     lines = text.splitlines()
     for e in sorted(edits, key=_edit_sort_key):

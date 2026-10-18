@@ -14,6 +14,7 @@ from studio.store.plan import (
     apply_plan,
     read_plan,
     remove_patch,
+    rename_node_refs,
     upsert_patch,
 )
 
@@ -71,14 +72,25 @@ class TestApplyPlan:
         assert found.description == "v2"
         assert found.origin == "user"
 
-    def test_кодовый_узел_не_перезаписывается(self, demo):
+    def test_план_переносит_данные_в_код_узел(self, demo):
+        # Узел создан в плане, код появился под тем же id: данные плана переживают scan,
+        # а структура (file_path, origin) остаётся от кода.
         graph = scan(demo)
         code_id = next(n.id for n in graph.nodes if n.kind == "scenario")
-        patch_node = _user_node(code_id, description="не должно примениться")
+        code_file = next(n.file_path for n in graph.nodes if n.id == code_id)
+        patch_node = _user_node(
+            code_id, description="из плана", acceptance=["ок"], label="метка", domain="заказы"
+        )
         out = apply_plan(graph, Plan(patches=[PlanPatch(target_id=code_id, node=patch_node)]))
         found = next(n for n in out.nodes if n.id == code_id)
         assert found.origin == "code"
-        assert found.description != "не должно примениться"
+        assert found.file_path == code_file
+        assert (found.description, found.acceptance, found.label, found.domain) == (
+            "из плана",
+            ["ок"],
+            "метка",
+            "заказы",
+        )
 
     def test_ребро_добавляется(self, demo):
         graph = scan(demo)
@@ -151,6 +163,39 @@ class TestApplyPlan:
         # mark_removed:false без node на несуществующий узел не создаёт его заново
         out2 = apply_plan(scan(demo), Plan(patches=[PlanPatch(target_id=node.id, mark_removed=False)]))
         assert not any(n.id == node.id for n in out2.nodes)
+
+
+class TestRenameRefs:
+    def test_переименование_переносит_патчи_и_user_рёбра(self):
+        old = "scenario:app/scenarios/new.py:OldScen"
+        new = "scenario:app/scenarios/new.py:NewScen"
+        io_id = "io:old:create:orders:5"
+        node = _user_node(old)
+        edge = Edge(id=f"{old}::port_call::{io_id}", from_node=old, to_node=io_id, kind="port_call", origin="user")
+        plan = Plan(
+            patches=[
+                PlanPatch(target_id=old, node=node, patch={"label": "x"}),
+                PlanPatch(target_id=edge.id, is_edge=True, edge=edge),
+            ]
+        )
+        rename_node_refs(plan, old, new)
+        assert plan.patches[0].target_id == new
+        assert plan.patches[0].node.id == new
+        e = plan.patches[1].edge
+        assert e.from_node == new
+        assert e.id == f"{new}::port_call::{io_id}"
+        assert plan.patches[1].target_id == e.id
+
+    def test_io_called_from_переписывается(self):
+        old = "scenario:app/scenarios/new.py:OldScen"
+        new = "scenario:app/scenarios/new.py:NewScen"
+        io_node = Node(
+            id="io:x", kind="io", layer="io", label="_db.create(orders)", file_path="", origin="user",
+            details={"method": "create", "table": "orders", "called_from": old},
+        )
+        plan = Plan(patches=[PlanPatch(target_id=io_node.id, node=io_node)])
+        rename_node_refs(plan, old, new)
+        assert plan.patches[0].node.details["called_from"] == new
 
 
 class TestUpsertPatch:

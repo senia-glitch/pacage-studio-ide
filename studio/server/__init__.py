@@ -27,10 +27,12 @@ from studio.scaffold import (
 )
 from studio.scanner import build_scenario_paths, scan
 from studio.store.plan import (
+    Plan,
     PlanPatch,
     apply_plan,
     read_plan,
     remove_patch,
+    rename_node_refs,
     upsert_patch,
     write_plan,
 )
@@ -151,13 +153,41 @@ def _op_to_dict(op: ScaffoldOp) -> dict:
     return {"action": op.action, "path": op.path, "node_id": op.node_id, "reason": op.reason}
 
 
+class PlanError(Exception):
+    """Операция плана отклонена (понятное пользователю сообщение, ответ 409)."""
+
+
+def _reassign_io(plan: Plan, io_id: str, scenario_id: str) -> None:
+    """Связь «сценарий → io» переносит io-узел плана на этот сценарий (called_from)."""
+    for patch in plan.patches:
+        node = patch.node
+        if patch.is_edge or node is None or node.id != io_id or node.kind != "io":
+            continue
+        node.details = {**node.details, "called_from": scenario_id}
+        return
+    raise PlanError(
+        "io-узел создан из кода и привязан к своему сценарию в коде — переназначить нельзя"
+    )
+
+
 def _plan_patch(project_root: Path, patch: PlanPatch) -> Graph:
     plan = read_plan(project_root)
+    renamed = patch.node is not None and not patch.is_edge and patch.node.id != patch.target_id
+    if renamed:
+        rename_node_refs(plan, patch.target_id, patch.node.id)
+        patch = patch.model_copy(update={"target_id": patch.node.id})
+    if patch.is_edge and patch.edge is not None and patch.edge.kind == "port_call":
+        _reassign_io(plan, patch.edge.to_node, patch.edge.from_node)
     upsert_patch(plan, patch)
     plan.meta.last_edit = _dt.datetime.now().isoformat(timespec="seconds")
     write_plan(project_root, plan)
-    graph = reload_graph(project_root)
-    graph = apply_plan(graph, plan)
+    if renamed:
+        # Переименование меняет id узлов кода: граф пересобираем из кода + плана,
+        # иначе в graph.json остались бы старый узел и рёбра на него.
+        graph = scan(project_root)
+    else:
+        graph = reload_graph(project_root)
+        graph = apply_plan(graph, plan)
     build_scenario_paths(graph)
     save_graph(project_root, graph)
     return graph
@@ -320,7 +350,10 @@ def make_handler(ctx: Ctx):
                     patch = PlanPatch.model_validate(data)
                 except Exception:
                     return _send_text(self, "invalid patch", code=400)
-                graph = _plan_patch(root, patch)
+                try:
+                    graph = _plan_patch(root, patch)
+                except PlanError as exc:
+                    return _send_text(self, str(exc), code=409)
                 return _send_json(self, graph.model_dump())
             self._not_found()
 

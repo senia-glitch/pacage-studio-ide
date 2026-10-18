@@ -161,6 +161,74 @@ class TestPlanPatch:
         finally:
             srv.shutdown()
 
+    def test_переименование_переносит_связи_без_висячих_рёбер(self, demo):
+        srv, base = _serve(demo)
+        try:
+            old = _scenario_node("renamed", "OldName")
+            _request(base, "/api/plan/patch", "PUT", {"target_id": old.id, "is_edge": False, "node": old.model_dump()})
+            io = Node(id="io:tmp:create:orders:5", kind="io", layer="io", label="_db.create(orders)",
+                      file_path="", origin="user",
+                      details={"method": "create", "table": "orders", "via_attr": "_db", "called_from": old.id})
+            _request(base, "/api/plan/patch", "PUT", {"target_id": io.id, "is_edge": False, "node": io.model_dump()})
+            edge = Edge(id=f"{old.id}::port_call::{io.id}", from_node=old.id, to_node=io.id,
+                        kind="port_call", origin="user")
+            _request(base, "/api/plan/patch", "PUT", {"target_id": edge.id, "is_edge": True, "edge": edge.model_dump()})
+
+            # переименование: как UI — PUT со старым target_id и узлом с новым id
+            new = _scenario_node("renamed", "NewName")
+            status, body = _request(base, "/api/plan/patch", "PUT",
+                                    {"target_id": old.id, "is_edge": False, "node": new.model_dump()})
+            assert status == 200
+            graph = json.loads(body)
+            ids = {n["id"] for n in graph["nodes"]}
+            assert new.id in ids and old.id not in ids
+            assert f"{new.id}::port_call::{io.id}" in {e["id"] for e in graph["edges"]}
+            dangling = [e["id"] for e in graph["edges"] if e["from_node"] not in ids or e["to_node"] not in ids]
+            assert dangling == []
+            io_node = next(n for n in graph["nodes"] if n["id"] == io.id)
+            assert io_node["details"]["called_from"] == new.id
+            assert io.id in graph["scenario_paths"][new.id]["io_calls"]
+            # старый id не остался в плане
+            assert all(p.target_id != old.id for p in read_plan(demo).patches)
+        finally:
+            srv.shutdown()
+
+    def test_port_call_переназначает_user_io(self, demo):
+        srv, base = _serve(demo)
+        try:
+            scen = _scenario_node("reassign", "Reassign")
+            _request(base, "/api/plan/patch", "PUT", {"target_id": scen.id, "is_edge": False, "node": scen.model_dump()})
+            io = Node(id="io:tmp:update:orders:9", kind="io", layer="io", label="_db.update(orders)",
+                      file_path="", origin="user",
+                      details={"method": "update", "table": "orders", "via_attr": "_db", "called_from": ""})
+            _request(base, "/api/plan/patch", "PUT", {"target_id": io.id, "is_edge": False, "node": io.model_dump()})
+            edge = Edge(id=f"{scen.id}::port_call::{io.id}", from_node=scen.id, to_node=io.id,
+                        kind="port_call", origin="user")
+            status, body = _request(base, "/api/plan/patch", "PUT",
+                                    {"target_id": edge.id, "is_edge": True, "edge": edge.model_dump()})
+            assert status == 200
+            graph = json.loads(body)
+            assert io.id in graph["scenario_paths"][scen.id]["io_calls"]
+            assert next(n for n in graph["nodes"] if n["id"] == io.id)["details"]["called_from"] == scen.id
+        finally:
+            srv.shutdown()
+
+    def test_port_call_из_кода_io_отклоняется(self, demo):
+        srv, base = _serve(demo)
+        try:
+            io_id = next(n.id for n in scan(demo).nodes if n.kind == "io")
+            scen = _scenario_node("reassign2", "Reassign2")
+            _request(base, "/api/plan/patch", "PUT", {"target_id": scen.id, "is_edge": False, "node": scen.model_dump()})
+            edge = Edge(id=f"{scen.id}::port_call::{io_id}", from_node=scen.id, to_node=io_id,
+                        kind="port_call", origin="user")
+            status, body = _request(base, "/api/plan/patch", "PUT",
+                                    {"target_id": edge.id, "is_edge": True, "edge": edge.model_dump()})
+            assert status == 409
+            assert "переназначить нельзя" in body
+            assert all(p.target_id != edge.id for p in read_plan(demo).patches)
+        finally:
+            srv.shutdown()
+
     def test_битое_telo_400(self, demo):
         srv, base = _serve(demo)
         try:

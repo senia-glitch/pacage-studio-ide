@@ -123,6 +123,22 @@ class TestIndexer:
         assert by_name["create_order"].tags == ["orders"]
         assert by_name["health"].tags == ["health"]
 
+    def test_endpoint_с_keyword_path_индексируется(self, demo):
+        routes = demo / "app" / "api" / "v1" / "routes"
+        (routes / "kw.py").write_text(
+            "from fastapi import APIRouter\n"
+            "router = APIRouter()\n"
+            "\n"
+            '@router.get(path="/kw")\n'
+            "async def kw_endpoint():\n"
+            "    return {}\n",
+            encoding="utf-8",
+        )
+        index = build_index(read_env(demo))
+        by_name = {e.function_name: e for e in index.endpoints}
+        assert by_name["kw_endpoint"].http_method == "get"
+        assert by_name["kw_endpoint"].path == "/kw"
+
     def test_tests_не_индексируются(self, demo):
         junk = demo / "tests"
         junk.mkdir(exist_ok=True)

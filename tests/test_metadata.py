@@ -23,7 +23,7 @@ from studio.metadata import (
 )
 from studio.metamodel import Node
 from studio.scanner import scan
-from studio.server import Ctx, make_handler
+from studio.server import Ctx, _build_preview_diff, make_handler
 from studio.store.plan import Plan, PlanPatch, apply_plan
 
 
@@ -181,6 +181,21 @@ class TestApplyMetadata:
         text = (demo / "app" / "scenarios" / "orders.py").read_text(encoding="utf-8")
         assert text.index(DESC_START) < text.index(ACC_START)
         assert DESC_END in text and ACC_END in text
+
+    def test_preview_diff_без_дублей_блоков(self, demo):
+        # Узел с описанием и критериями даёт две операции; diff не должен вставлять блоки дважды.
+        graph = scan(demo)
+        sid = _scenario_id(graph)
+        graph = _with_meta(graph, sid, description="Описание", acceptance=["к1", "к2"])
+        preview_text = "\n".join(
+            _build_preview_diff(plan_metadata(graph, demo), graph, demo).values()
+        )
+        assert preview_text.count("+    " + DESC_START) == 1
+        assert preview_text.count("+    " + ACC_START) == 1
+        apply_metadata(plan_metadata(graph, demo), graph, demo)
+        text = (demo / "app" / "scenarios" / "orders.py").read_text(encoding="utf-8")
+        assert text.count(DESC_START) == 1
+        assert text.count(ACC_START) == 1
 
     def test_перечитывание_файла_перед_записью(self, demo):
         graph = scan(demo)
