@@ -15,7 +15,7 @@ from studio import store
 from studio.exporter import to_json, to_markdown
 from studio.metadata import apply_metadata, plan_metadata
 from studio.scaffold import apply_scaffold, collect_model_appends, plan_scaffold
-from studio.scanner import build_scenario_paths, scan
+from studio.scanner import scan
 from studio.server import serve
 
 
@@ -175,7 +175,9 @@ def cmd_scaffold(args) -> int:
         return 1
 
     apply_scaffold(ops, graph, root)
-    build_scenario_paths(graph)
+    # Перескан: созданные скелеты — теперь код, граф должен их видеть
+    # (иначе scaffold + metadata подряд сообщает «кода ещё нет»).
+    graph = scan(root)
     store.write_graph(root, graph)
     slog.step(f"scaffold: создано={created} обновлено={updated} пропущено={skipped}")
     print(f"scaffold: создано={created}, обновлено={updated}, пропущено={skipped}")

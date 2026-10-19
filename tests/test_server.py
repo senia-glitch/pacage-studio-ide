@@ -68,7 +68,7 @@ class TestPage:
         srv, base = _serve(demo)
         try:
             _, body = _request(base, "/")
-            for marker in ("btnSave", "vView", "vEdit", "palette", "applyGraph", "nodeIdFor", "layoutPlanOrphans"):
+            for marker in ("btnSave", "mView", "mEdit", "palette", "applyGraph", "nodeIdFor", "layoutOrphans"):
                 assert marker in body, f"в странице нет {marker}"
             for marker in ("bValidate", "bDiff", "bConfig", "bScan"):
                 assert marker not in body, f"кнопка {marker} не должна существовать"
@@ -83,7 +83,7 @@ class TestPage:
                            "node-sec", "node-sec-label", "node-sec-body",
                            "node-sec-divider", "ds-full", "acc-full",
                            "showDesc", "showAcc", "saveContentToggles",
-                           "initContentToggles",
+                           "setContentToggles",
                            "studio.showDescription", "studio.showAcceptance"):
                 assert marker in body, f"в странице нет {marker}"
         finally:
@@ -97,7 +97,7 @@ class TestPage:
                            "methodOfScenario", "domainOfScenario",
                            "METHOD_ORDER", "METHOD_COLORS", "METHOD_LABELS",
                            "NO_METHOD", "NO_DOMAIN",
-                           "dup-badge", "method-plate", "domain-plate",
+                           "tag-stale", "method-plate", "domain-plate",
                            "fDomain", "matchesFilter"):
                 assert marker in body, f"в странице нет {marker}"
         finally:
@@ -117,9 +117,9 @@ class TestPage:
         srv, base = _serve(demo)
         try:
             _, body = _request(base, "/")
-            for marker in ("panelState", "panel-legend", "editStatus", "Создать узел",
-                           "palette-hint", "PALETTE_HINTS", "errMsg", "insp-heading",
-                           "renderCreateForm", "createNodeFromForm", "kindTabs", "bCreateNode"):
+            for marker in ("panelState", "panel-legend", "Добавить", "palette-hint", "PAL",
+                           "toast", "insp-heading", "renderWizard", "createWizard",
+                           "data-kind", "bCreateNode", "Редактируется"):
                 assert marker in body, f"в странице нет {marker}"
         finally:
             srv.shutdown()

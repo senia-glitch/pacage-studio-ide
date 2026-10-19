@@ -61,16 +61,14 @@ class _Analysis:
 
 
 def _desc_content(description: str, indent: int) -> list[str]:
+    """Построчно в комментариях: многострочное описание не должно ломать файл."""
     pad = " " * indent
-    out = []
-    for line in description.split("\n"):
-        out.append(pad if line == "" else pad + "# " + line)
-    return out
+    return [pad if line == "" else pad + "# " + line for line in description.split("\n")]
 
 
 def _acc_content(acceptance: list[str], indent: int) -> list[str]:
     pad = " " * indent
-    return [pad + "# " + item for item in acceptance]
+    return [pad + "# " + item for item in acceptance if item.strip()]
 
 
 def _desc_block(description: str, indent: int) -> list[str]:

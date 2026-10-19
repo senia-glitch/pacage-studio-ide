@@ -137,6 +137,34 @@ class TestMetadata:
         assert "metadata" in capsys.readouterr().out
 
 
+class TestScaffoldApply:
+    def test_apply_обновляет_граф_без_ручного_scan(self, demo, capsys):
+        """После scaffold --yes созданные скелеты сразу видны в graph.json."""
+        from studio.cli import cmd_scaffold
+        from studio.metamodel import Node
+        from studio.store.plan import PlanPatch, load_plan_for_write, upsert_patch, write_plan
+
+        cmd_scan(_args(demo))
+        node = Node(
+            id="scenario:app/scenarios/cli_scaf.py:CliScaf",
+            kind="scenario",
+            layer="logic",
+            label="cli",
+            file_path="app/scenarios/cli_scaf.py",
+            origin="user",
+            details={"name": "cli_scaf", "class_name": "CliScaf", "module": "app.scenarios.cli_scaf", "dto": None, "response": None},
+        )
+        plan = load_plan_for_write(demo)
+        upsert_patch(plan, PlanPatch(target_id=node.id, is_edge=False, node=node))
+        write_plan(demo, plan)
+        cmd_scan(_args(demo))
+        capsys.readouterr()
+        assert cmd_scaffold(_args(demo, yes=True, dry_run=False)) == 0
+        assert (demo / "app" / "scenarios" / "cli_scaf.py").is_file()
+        graph = store.read_graph(demo)
+        assert graph.by_id()[node.id].origin == "code"
+
+
 class TestParser:
     def test_project_до_подкоманды(self):
         args = build_parser().parse_args(["--project", "X", "scan"])

@@ -44,8 +44,9 @@ def _sort_key(node: Node) -> tuple[str, str]:
 
 
 def _desc_block(node: Node, indent: str = "") -> list[str]:
-    if node.description:
-        return [f"{indent}{node.description}", ""]
+    text = node.description or node.doc
+    if text:
+        return [f"{indent}{text}", ""]
     return [f"{indent}> (описания нет)", ""]
 
 

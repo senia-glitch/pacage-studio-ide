@@ -66,10 +66,15 @@ class Node(BaseModel):
     line: int = 1
     details: dict = Field(default_factory=dict)
     origin: Origin = "code"
+    # Описание из плана (редактируется в студии).
     description: str = ""
+    # Docstring из кода (только чтение; показывается, если описания в плане нет).
+    doc: str = ""
     acceptance: list[str] = Field(default_factory=list)
     notes: str = ""
     domain: str = ""
+    # Область плана: id эндпоинта плана, к которому относится узел ("" — без области).
+    area: str = ""
     scaffolded: bool = False
     create_file: bool = True
     append_model: bool = False

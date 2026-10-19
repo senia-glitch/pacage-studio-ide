@@ -6,13 +6,18 @@ sync user-узлов не трогает узлы кода; upsert_patch не т
 при частичных PUT; delete-патч переживает повторный scan.
 """
 
+import pytest
+
 from studio.metamodel import Edge, Node
 from studio.scanner import scan
 from studio.store.plan import (
     Plan,
+    PlanCorruptedError,
     PlanPatch,
     apply_plan,
+    plan_path,
     read_plan,
+    remove_node_edges,
     remove_patch,
     rename_node_refs,
     upsert_patch,
@@ -186,6 +191,20 @@ class TestRenameRefs:
         assert e.id == f"{new}::port_call::{io_id}"
         assert plan.patches[1].target_id == e.id
 
+    def test_area_переписывается_у_узлов_и_патчей(self):
+        old = "endpoint:app/api/v1/routes/x.py:old_fn"
+        new = "endpoint:app/api/v1/routes/x.py:new_fn"
+        scen = _user_node("scenario:app/scenarios/new.py:NewScen", area=old)
+        plan = Plan(
+            patches=[
+                PlanPatch(target_id=scen.id, node=scen, patch={"area": old, "label": "x"}),
+                PlanPatch(target_id=old, node=_user_node(old, kind="endpoint", area="")),
+            ]
+        )
+        rename_node_refs(plan, old, new)
+        assert plan.patches[0].node.area == new
+        assert plan.patches[0].patch == {"area": new, "label": "x"}
+
     def test_io_called_from_переписывается(self):
         old = "scenario:app/scenarios/new.py:OldScen"
         new = "scenario:app/scenarios/new.py:NewScen"
@@ -196,6 +215,24 @@ class TestRenameRefs:
         plan = Plan(patches=[PlanPatch(target_id=io_node.id, node=io_node)])
         rename_node_refs(plan, old, new)
         assert plan.patches[0].node.details["called_from"] == new
+
+
+class TestRemoveNodeEdges:
+    def test_рёбра_удалённого_узла_уходят_из_плана(self):
+        keep = "scenario:app/scenarios/a.py:A"
+        gone = "scenario:app/scenarios/b.py:B"
+        other = "io:x:create:orders:1"
+        e_gone = Edge(id=f"{gone}::port_call::{other}", from_node=gone, to_node=other, kind="port_call", origin="user")
+        e_keep = Edge(id=f"{keep}::port_call::{other}", from_node=keep, to_node=other, kind="port_call", origin="user")
+        plan = Plan(
+            patches=[
+                PlanPatch(target_id=e_gone.id, is_edge=True, edge=e_gone),
+                PlanPatch(target_id=e_keep.id, is_edge=True, edge=e_keep),
+                PlanPatch(target_id=f"{gone}::uses::{other}", is_edge=True, mark_removed=True),
+            ]
+        )
+        remove_node_edges(plan, gone)
+        assert [p.target_id for p in plan.patches] == [e_keep.id]
 
 
 class TestUpsertPatch:
@@ -250,6 +287,72 @@ class TestRemovePatch:
         assert read_plan(demo).patches == []
         graph = scan(demo)
         assert any(n.kind == "scenario" for n in graph.nodes)
+
+
+class TestDocFromCode:
+    def test_docstring_попадает_в_граф(self, demo):
+        graph = scan(demo)
+        endpoint = next(n for n in graph.nodes if n.kind == "endpoint" and n.details["function_name"] == "create_order")
+        scenario = next(n for n in graph.nodes if n.id.endswith("CreateOrderScenario"))
+        assert endpoint.doc == "Создать заказ."
+        assert endpoint.description == ""  # описание из плана отдельно
+        assert scenario.doc  # docstring класса/execute в demo-проекте
+
+
+class TestCorruptedPlan:
+    def _corrupt(self, demo, text="{битый json"):
+        plan_path(demo).parent.mkdir(parents=True, exist_ok=True)
+        plan_path(demo).write_text(text, encoding="utf-8")
+
+    def _corrupt_schema(self, demo):
+        """JSON валиден, но схема плана — нет."""
+        plan_path(demo).parent.mkdir(parents=True, exist_ok=True)
+        plan_path(demo).write_text(
+            '{"version": 1, "patches": [{"target_id": "x", "node": {"id": "x", "kind": "нет-такого-вида"}}]}',
+            encoding="utf-8",
+        )
+
+    def test_чтение_на_запись_делает_бэкап_вместо_потери(self, demo):
+        # Как в сервере: файл не читается → копия сохраняется рядом, ошибка понятная.
+        from studio.store.plan import load_plan_for_write
+
+        self._corrupt_schema(demo)
+        with pytest.raises(PlanCorruptedError) as err:
+            load_plan_for_write(demo)
+        assert "plan.json.corrupt-" in str(err.value)
+        backups = [p for p in plan_path(demo).parent.iterdir() if p.name.startswith("plan.json.corrupt-")]
+        assert backups
+
+    def test_запись_в_испорченный_файл_отменяется(self, demo):
+        from studio.store.plan import write_plan
+
+        self._corrupt(demo)
+        with pytest.raises(PlanCorruptedError):
+            write_plan(demo, Plan())
+        assert any(p.name.startswith("plan.json.corrupt-") for p in plan_path(demo).parent.iterdir())
+
+    def test_невалидная_схема_не_пишется_поверх(self, demo):
+        from studio.store.plan import write_plan
+
+        write_plan(demo, Plan(patches=[PlanPatch(target_id="x", node=_user_node("keep_me"))]))
+        raw = plan_path(demo).read_text(encoding="utf-8")
+        plan_path(demo).write_text(raw.replace('"kind": "scenario"', '"kind": "нет-такого-вида"'), encoding="utf-8")
+        with pytest.raises(PlanCorruptedError):
+            write_plan(demo, Plan())
+        backups = [p for p in plan_path(demo).parent.iterdir() if p.name.startswith("plan.json.corrupt-")]
+        assert backups
+
+    def test_пустой_файл_не_считается_повреждением(self, demo):
+        from studio.store.plan import write_plan
+
+        plan_path(demo).parent.mkdir(parents=True, exist_ok=True)
+        plan_path(demo).write_text("", encoding="utf-8")
+        write_plan(demo, Plan())  # не должно бросить
+        assert read_plan(demo).patches == []
+
+    def test_битый_план_возвращает_пустой_без_исключения(self, demo):
+        self._corrupt(demo)
+        assert read_plan(demo).patches == []
 
 
 class TestDomain:

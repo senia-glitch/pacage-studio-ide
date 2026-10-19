@@ -60,6 +60,7 @@ def build_core_graph(env: ProjectEnv, index: Index) -> Graph:
                 label=f"{entry.http_method.upper()} {entry.path or '/'}",
                 file_path=entry.file_path,
                 line=entry.line,
+                doc=entry.doc or "",
                 details=EndpointDetails(
                     http_method=entry.http_method,
                     path=entry.path,
@@ -80,6 +81,7 @@ def build_core_graph(env: ProjectEnv, index: Index) -> Graph:
                 label=entry.name,
                 file_path=entry.file_path,
                 line=entry.line,
+                doc=entry.doc or "",
                 details=ScenarioDetails(
                     name=entry.name,
                     class_name=entry.class_name,
@@ -99,6 +101,7 @@ def build_core_graph(env: ProjectEnv, index: Index) -> Graph:
                 label=entry.class_name,
                 file_path=entry.file_path,
                 line=entry.line,
+                doc=entry.doc or "",
                 details=ModelDetails(
                     tablename=entry.tablename,
                     class_name=entry.class_name,

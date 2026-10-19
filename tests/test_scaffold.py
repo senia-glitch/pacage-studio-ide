@@ -7,6 +7,7 @@
 docstring (SyntaxError); OSError при записи пропускается без падения.
 """
 
+import py_compile
 from pathlib import Path
 
 from studio.metamodel import Graph, Node
@@ -62,6 +63,26 @@ class TestScenarioTemplate:
         apply_scaffold(plan_scaffold(graph, demo), graph, demo)
         text = (demo / "app" / "scenarios" / "refund_order.py").read_text(encoding="utf-8")
         assert "RefundOrderDTO" in text and "RefundOrderResponse" in text
+
+
+    def test_спецсимволы_в_описании_и_критериях_не_ломают_файл(self, demo):
+        node = _plan_scenario(demo, name="quotes", class_name="Quotes")
+        node.description = 'Текст "с кавычками"\nвторая строка \\ backslash'
+        node.acceptance = ['первый\nвторой "x"']
+        graph = apply_plan(scan(demo), Plan(patches=[PlanPatch(target_id=node.id, node=node)]))
+        apply_scaffold(plan_scaffold(graph, demo), graph, demo)
+        target = demo / "app" / "scenarios" / "quotes.py"
+        py_compile.compile(str(target), doraise=True)  # не должно бросить SyntaxError
+        text = target.read_text(encoding="utf-8")
+        assert "вторая строка \\\\ backslash" in text
+
+    def test_невалидное_имя_класса_пропускается(self, demo):
+        node = _plan_scenario(demo, name="bad_cls", class_name="Bad Class-Name")
+        graph = apply_plan(scan(demo), Plan(patches=[PlanPatch(target_id=node.id, node=node)]))
+        ops = plan_scaffold(graph, demo)
+        apply_scaffold(ops, graph, demo)
+        assert any(o.action == "skip_invalid_name" for o in ops)
+        assert not (demo / "app" / "scenarios" / "bad_cls.py").exists()
 
 
 class TestApplyScaffold:

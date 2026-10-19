@@ -32,14 +32,34 @@ class ScaffoldOp:
         "skip_io_no_scenario",
         "skip_disabled",
         "skip_outside_root",
+        "skip_invalid_name",
     ]
     path: str
     node_id: str
     reason: str = ""
 
 
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
 def _pascal_case(name: str) -> str:
-    return "".join(part.capitalize() for part in name.split("_") if part)
+    """PascalCase из snake_case; символы вне идентификатора отбрасываются."""
+    return "".join(
+        part[:1].upper() + "".join(ch for ch in part[1:] if ch.isalnum() or ch == "_")
+        for part in name.split("_")
+        if part
+    )
+
+
+def _py_str(value: str) -> str:
+    """Строка как валидный питоновский литерал (кавычки, переводы строк, бэкслеши)."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return f'"{escaped}"'
+
+
+def _comment_block(text: str, pad: str, marker: str = "#") -> list[str]:
+    """Текст построчно в комментариях: многострочное описание не должно ломать файл."""
+    return [f"{pad}{marker} {line}".rstrip() for line in text.split("\n")]
 
 
 def _slug(file_path: str) -> str:
@@ -47,9 +67,13 @@ def _slug(file_path: str) -> str:
 
 
 def _acceptance_lines(acceptance: list[str]) -> list[str]:
-    if not acceptance:
-        return ["# Критерии приёмки:"]
-    return ["# Критерии приёмки:"] + [f"# - {a}" for a in acceptance]
+    """Комментарии с критериями; пустые критерии не дают файлу лишний блок."""
+    items = []
+    for item in acceptance:
+        items.extend(line for line in str(item).split("\n") if line.strip())
+    if not items:
+        return []
+    return ["# Критерии приёмки:"] + [f"# - {line}" for line in items]
 
 
 def _endpoint_template(node: Node) -> str:
@@ -60,15 +84,15 @@ def _endpoint_template(node: Node) -> str:
     function_name = str(details.get("function_name") or "") or slug
     lines = [
         SCAFFOLD_MARKER,
-        f'"""{node.description}"""',
+        _py_str(node.description),
         "",
         "from fastapi import APIRouter",
         "",
-        f'router = APIRouter(tags=["{node.label}"])',
+        f"router = APIRouter(tags=[{_py_str(node.label)}])",
         "",
         *_acceptance_lines(node.acceptance),
         "",
-        f'@router.{http_method}("{path}")',
+        f"@router.{http_method}({_py_str(path)})",
         f"async def {function_name}(...) -> dict:",
         "    raise NotImplementedError",
         "",
@@ -86,6 +110,12 @@ def _scenario_template(node: Node, graph: Graph) -> str:
     base_name = _pascal_case(name)
     dto_name = str(details.get("dto") or "").strip() or (base_name + "DTO")
     response_name = str(details.get("response") or "").strip() or (base_name + "Response")
+    if not _IDENT_RE.match(class_name):
+        raise ValueError(f"class_name {class_name!r} не является допустимым именем Python")
+    if not _IDENT_RE.match(dto_name):
+        raise ValueError(f"dto {dto_name!r} не является допустимым именем Python")
+    if not _IDENT_RE.match(response_name):
+        raise ValueError(f"response {response_name!r} не является допустимым именем Python")
     io_lines: list[str] = []
     for other in graph.nodes:
         if other.kind == "io" and other.details.get("called_from") == node.id:
@@ -124,7 +154,7 @@ def _scenario_template(node: Node, graph: Graph) -> str:
         ]
     lines = [
         SCAFFOLD_MARKER,
-        f'"""{node.description}"""',
+        _py_str(node.description),
         "",
         "from pydantic import BaseModel",
         "from core import BaseScenario, register_scenario",
@@ -132,7 +162,7 @@ def _scenario_template(node: Node, graph: Graph) -> str:
         *type_block,
         *_acceptance_lines(node.acceptance),
         "",
-        f'@register_scenario("{name}", dto={dto_name}, response={response_name})',
+        f"@register_scenario({_py_str(name)}, dto={dto_name}, response={response_name})",
         f"class {class_name}(BaseScenario):",
         f"    async def execute(self, dto: {dto_name}) -> {response_name}:",
         *todo_block,
@@ -146,9 +176,11 @@ def _test_template(node: Node) -> str:
     details = node.details
     test_for = details.get("test_for_scenario") or details.get("test_for_endpoint") or ""
     test_name = str(details.get("test_name") or "") or _slug(node.file_path)
+    if not _IDENT_RE.match(test_name):
+        raise ValueError(f"test_name {test_name!r} не является допустимым именем Python")
     lines = [
         SCAFFOLD_MARKER,
-        f'"""{node.description}"""',
+        _py_str(node.description),
         "",
         "import pytest",
         "",
@@ -170,19 +202,19 @@ def _helper_template(node: Node) -> str:
     if role == "schema":
         lines = [
             SCAFFOLD_MARKER,
-            f'"""{node.description}"""',
+            _py_str(node.description),
             "",
             "from pydantic import BaseModel",
             "",
             f"class {class_name}(BaseModel):",
-            f'    """{node.description}"""',
+            f"    {_py_str(node.description)}",
             "    pass",
             "",
         ]
     else:
         lines = [
             SCAFFOLD_MARKER,
-            f'"""{node.description}"""',
+            _py_str(node.description),
             "",
             f"# Роль: {role}",
             *_acceptance_lines(node.acceptance),
@@ -305,8 +337,15 @@ def apply_scaffold(ops: list[ScaffoldOp], graph: Graph, project_root: Path) -> N
             continue
         if op.action == "create":
             try:
+                content = _template_for(node, graph)
+            except ValueError as exc:
+                # Невалидное имя (class_name/function_name/…) не должно породить сломанный файл.
+                node.scaffolded = False
+                ops.append(ScaffoldOp("skip_invalid_name", node.file_path, node.id, str(exc)))
+                continue
+            try:
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(_template_for(node, graph), encoding="utf-8")
+                target.write_text(content, encoding="utf-8")
             except OSError:
                 continue
             created_files.add(op.path)

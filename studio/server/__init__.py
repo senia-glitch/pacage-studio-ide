@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import datetime as _dt
 import difflib
+import functools
 import json
+import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -29,8 +31,10 @@ from studio.scanner import build_scenario_paths, scan
 from studio.store.plan import (
     Plan,
     PlanPatch,
+    PlanCorruptedError,
     apply_plan,
-    read_plan,
+    load_plan_for_write,
+    remove_node_edges,
     remove_patch,
     rename_node_refs,
     upsert_patch,
@@ -42,6 +46,22 @@ from studio.ui import INDEX
 class Ctx:
     def __init__(self, project_root: Path):
         self.root = Path(project_root)
+
+
+# plan.json читается-изменяется-пишется; сервер многопоточный, поэтому операции
+# с планом сериализуются, иначе параллельные запросы теряли бы патчи.
+_plan_lock = threading.Lock()
+
+
+def _locked(fn):
+    """Сериализовать изменяющую операцию (блокировка снимается и при исключении)."""
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with _plan_lock:
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 
 def load_graph(project_root: Path) -> Graph:
@@ -170,8 +190,13 @@ def _reassign_io(plan: Plan, io_id: str, scenario_id: str) -> None:
     )
 
 
+@_locked
 def _plan_patch(project_root: Path, patch: PlanPatch) -> Graph:
-    plan = read_plan(project_root)
+    try:
+        plan = load_plan_for_write(project_root)
+    except PlanCorruptedError as exc:
+        slog.step(f"plan.json повреждён: {exc}")
+        raise PlanError(str(exc)) from exc
     renamed = patch.node is not None and not patch.is_edge and patch.node.id != patch.target_id
     if renamed:
         rename_node_refs(plan, patch.target_id, patch.node.id)
@@ -193,9 +218,12 @@ def _plan_patch(project_root: Path, patch: PlanPatch) -> Graph:
     return graph
 
 
+@_locked
 def _remove_patch(project_root: Path, target_id: str, is_edge: bool) -> Graph:
-    plan = read_plan(project_root)
+    plan = load_plan_for_write(project_root)
     remove_patch(plan, target_id, is_edge)
+    if not is_edge:
+        remove_node_edges(plan, target_id)
     plan.meta.last_edit = _dt.datetime.now().isoformat(timespec="seconds")
     write_plan(project_root, plan)
     # Пересборка из кода + остатшегося плана: apply_plan только добавляет,
@@ -215,11 +243,14 @@ def _scaffold_preview(project_root: Path) -> dict:
     }
 
 
+@_locked
 def _scaffold_apply(project_root: Path) -> dict:
     graph = reload_graph(project_root)
     ops = plan_scaffold(graph, project_root)
     apply_scaffold(ops, graph, project_root)
-    build_scenario_paths(graph)
+    # Файлы-скелеты теперь в коде — граф пересобирается, иначе свежие скелеты
+    # не видны до ручного rescan (metadata сообщает «кода ещё нет»).
+    graph = scan(project_root)
     save_graph(project_root, graph)
     created = sum(1 for op in ops if op.action == "create")
     updated = sum(1 for op in ops if op.action == "update_docstring")
@@ -272,6 +303,7 @@ def _metadata_preview(project_root: Path) -> dict:
     return {"ops": [_metadata_op_to_dict(op) for op in ops], "diff": diff}
 
 
+@_locked
 def _metadata_apply(project_root: Path) -> dict:
     graph = reload_graph(project_root)
     ops = plan_metadata(graph, project_root)

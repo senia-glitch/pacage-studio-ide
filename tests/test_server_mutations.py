@@ -18,7 +18,7 @@ from studio import store
 from studio.metamodel import Edge, Node
 from studio.scanner import scan
 from studio.server import Ctx, make_handler
-from studio.store.plan import Plan, PlanPatch, read_plan, write_plan
+from studio.store.plan import Plan, PlanPatch, plan_path, read_plan, write_plan
 
 
 def _serve(root: Path):
@@ -229,6 +229,86 @@ class TestPlanPatch:
         finally:
             srv.shutdown()
 
+    def test_удаление_узла_плана_не_оставляет_висячих_рёбер(self, demo):
+        srv, base = _serve(demo)
+        try:
+            scen = _scenario_node("gone2", "Gone2")
+            io = Node(id="io:tmp:create:orders:3", kind="io", layer="io", label="_db.create(orders)",
+                      file_path="", origin="user",
+                      details={"method": "create", "table": "orders", "called_from": scen.id})
+            for node in (scen, io):
+                _request(base, "/api/plan/patch", "PUT", {"target_id": node.id, "is_edge": False, "node": node.model_dump()})
+            edge = Edge(id=f"{scen.id}::port_call::{io.id}", from_node=scen.id, to_node=io.id,
+                        kind="port_call", origin="user")
+            _request(base, "/api/plan/patch", "PUT", {"target_id": edge.id, "is_edge": True, "edge": edge.model_dump()})
+
+            status, body = _request(base, f"/api/plan/patch?target_id={urllib.parse.quote(scen.id)}&is_edge=0", "DELETE")
+            assert status == 200
+            graph = json.loads(body)
+            ids = {n["id"] for n in graph["nodes"]}
+            assert scen.id not in ids
+            assert [e for e in graph["edges"] if e["from_node"] not in ids or e["to_node"] not in ids] == []
+            assert all(p.target_id != edge.id for p in read_plan(demo).patches)
+        finally:
+            srv.shutdown()
+
+    def test_area_сохраняется_в_плане(self, demo):
+        srv, base = _serve(demo)
+        try:
+            ep = Node(id="endpoint:app/api/v1/routes/area_ep.py:area_fn", kind="endpoint", layer="representation",
+                      label="POST /area", file_path="app/api/v1/routes/area_ep.py", origin="user",
+                      details={"http_method": "post", "path": "/area", "function_name": "area_fn",
+                               "router_module": "app.api.v1.routes.area_ep", "tags": []})
+            scen = _scenario_node("in_area", "InArea").model_copy(update={"area": ep.id})
+            for node in (ep, scen):
+                _request(base, "/api/plan/patch", "PUT", {"target_id": node.id, "is_edge": False, "node": node.model_dump()})
+            _, body = _request(base, "/api/graph")
+            found = next(n for n in json.loads(body)["nodes"] if n["id"] == scen.id)
+            assert found["area"] == ep.id
+        finally:
+            srv.shutdown()
+
+    def test_битый_plan_json_409_и_бэкап_вместо_потери(self, demo):
+        srv, base = _serve(demo)
+        try:
+            path = plan_path(demo)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{бито", encoding="utf-8")
+            node = _scenario_node("recovered", "Recovered")
+            payload = {"target_id": node.id, "is_edge": False, "node": node.model_dump()}
+            status, _ = _request(base, "/api/plan/patch", "PUT", payload)
+            assert status == 409
+            # исходный файл не перезаписан: он переименован в бэкап
+            assert not path.exists()
+            backups = list(path.parent.glob("plan.json.corrupt-*"))
+            assert len(backups) == 1
+            assert backups[0].read_text(encoding="utf-8") == "{бито"
+            # после бэкапа план снова записываем
+            status, _ = _request(base, "/api/plan/patch", "PUT", payload)
+            assert status == 200
+        finally:
+            srv.shutdown()
+
+    def test_параллельные_put_не_теряют_патчи(self, demo):
+        srv, base = _serve(demo)
+        try:
+            def put(i: int) -> None:
+                node = _scenario_node(f"par{i}", f"Par{i}")
+                _request(base, "/api/plan/patch", "PUT",
+                         {"target_id": node.id, "is_edge": False, "node": node.model_dump()})
+
+            threads = [threading.Thread(target=put, args=(i,)) for i in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            plan = read_plan(demo)
+            ids = {p.node.id for p in plan.patches if p.node is not None and not p.is_edge}
+            for i in range(8):
+                assert f"scenario:app/scenarios/par{i}.py:Par{i}" in ids, f"патч par{i} потерян"
+        finally:
+            srv.shutdown()
+
     def test_битое_telo_400(self, demo):
         srv, base = _serve(demo)
         try:
@@ -253,6 +333,10 @@ class TestScaffoldApi:
             assert json.loads(body)["created"] >= 1
             text = (demo / "app" / "scenarios" / "scaf_new.py").read_text(encoding="utf-8")
             assert "class ScafNew(" in text and "ScafNewScenario" not in text
+            # сразу после apply скелет виден в графе без ручного rescan
+            _, body = _request(base, "/api/graph")
+            found = next(n for n in json.loads(body)["nodes"] if n["id"] == node.id)
+            assert found["origin"] == "code"
             # после scaffold scan не плодит дубли
             _, body = _request(base, "/api/rescan", "POST")
             assert sum(1 for n in json.loads(body)["nodes"] if n["id"] == node.id) == 1
