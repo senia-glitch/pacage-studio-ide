@@ -84,7 +84,13 @@ class TestApplyPlan:
         code_id = next(n.id for n in graph.nodes if n.kind == "scenario")
         code_file = next(n.file_path for n in graph.nodes if n.id == code_id)
         patch_node = _user_node(
-            code_id, description="из плана", acceptance=["ок"], label="метка", domain="заказы"
+            code_id,
+            description="из плана",
+            acceptance=["ок"],
+            label="метка",
+            domain="заказы",
+            notes="заметка",
+            area="endpoint:x:fn",
         )
         out = apply_plan(graph, Plan(patches=[PlanPatch(target_id=code_id, node=patch_node)]))
         found = next(n for n in out.nodes if n.id == code_id)
@@ -96,6 +102,8 @@ class TestApplyPlan:
             "метка",
             "заказы",
         )
+        assert found.notes == "заметка"
+        assert found.area == "endpoint:x:fn"
 
     def test_ребро_добавляется(self, demo):
         graph = scan(demo)
@@ -353,6 +361,30 @@ class TestCorruptedPlan:
     def test_битый_план_возвращает_пустой_без_исключения(self, demo):
         self._corrupt(demo)
         assert read_plan(demo).patches == []
+
+    def test_write_plan_атомарна_при_oserror(self, demo, monkeypatch):
+        """Краш os.replace не портит старый plan.json (P0-2)."""
+        from studio.store.plan import write_plan
+
+        write_plan(demo, Plan(patches=[PlanPatch(target_id="x", node=_user_node("keep_me"))]))
+        before = plan_path(demo).read_text(encoding="utf-8")
+
+        import os
+
+        def _boom(src, dst):
+            raise OSError("сбой os.replace")
+
+        monkeypatch.setattr(os, "replace", _boom)
+        with pytest.raises(PlanCorruptedError):
+            write_plan(demo, Plan())
+        assert plan_path(demo).read_text(encoding="utf-8") == before
+
+    def test_write_plan_не_оставляет_tmp(self, demo):
+        from studio.store.plan import write_plan
+
+        write_plan(demo, Plan(patches=[PlanPatch(target_id="x", node=_user_node("keep_me"))]))
+        leftovers = [p.name for p in plan_path(demo).parent.iterdir() if p.name.startswith(".studio-tmp-")]
+        assert leftovers == []
 
 
 class TestDomain:

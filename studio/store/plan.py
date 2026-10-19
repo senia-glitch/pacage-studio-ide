@@ -13,6 +13,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from studio._atomic import atomic_write
 from studio.metamodel import Edge, Graph, Node, PlanMeta
 from studio.store import studio_dir
 
@@ -128,10 +129,10 @@ def write_plan(project_root: Path, plan: Plan) -> Path:
                 f"plan.json повреждён — копия сохранена как {PLAN_NAME}.corrupt-*, запись отменена."
             )
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(plan.model_dump(), indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    if not atomic_write(
+        path, json.dumps(plan.model_dump(), indent=2, ensure_ascii=False) + "\n"
+    ):
+        raise PlanCorruptedError("не удалось атомарно записать plan.json — данные не потеряны")
     return path
 
 
@@ -282,6 +283,7 @@ def _sync_plan_data(target: Node, src: Node) -> None:
     target.notes = src.notes
     target.domain = src.domain
     target.area = src.area
+    target.scaffolded = src.scaffolded
 
 
 def rename_node_refs(plan: Plan, old_id: str, new_id: str) -> None:

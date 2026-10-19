@@ -35,11 +35,11 @@ def test_версии_не_разъезжаются():
     assert studio.__version__.startswith("2.")
 
 
-def test_версия_2_6_0():
-    import studio
+def test_версия_имеет_формат_semver():
+    """pyproject.version имеет формат X.Y.Z (без хардкода конкретного номера)."""
+    import re
 
-    assert studio.__version__ == "2.6.0"
-    assert _pyproject()["project"]["version"] == "2.6.0"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", _pyproject()["project"]["version"])
 
 
 def test_ui_html_упакован_в_дистрибутив():

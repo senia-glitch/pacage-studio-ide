@@ -6,14 +6,13 @@
 from __future__ import annotations
 
 import ast
-import os
 import re
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from studio import log as slog
+from studio._atomic import atomic_write as _atomic_write
 from studio.metamodel import Graph, Node
 from studio.scanner.ast_utils import find_method
 
@@ -261,25 +260,6 @@ def _safe_target(root: Path, rel: str) -> Path | None:
     return None
 
 
-def _atomic_write(path: Path, text: str) -> bool:
-    """Атомарная запись: временный файл в том же каталоге + os.replace."""
-    try:
-        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".studio-tmp-", suffix=".py")
-    except OSError:
-        return False
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
-        os.replace(tmp, path)
-        return True
-    except OSError:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        return False
-
-
 def plan_scaffold(graph: Graph, project_root: Path) -> list[ScaffoldOp]:
     """Список ScaffoldOp для всех origin=user узлов."""
     ops: list[ScaffoldOp] = []
@@ -345,8 +325,10 @@ def apply_scaffold(ops: list[ScaffoldOp], graph: Graph, project_root: Path) -> N
                 continue
             try:
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(content, encoding="utf-8")
             except OSError:
+                continue
+            if not _atomic_write(target, content):
+                slog.step(f"scaffold skip: не удалось атомарно записать {op.path}")
                 continue
             created_files.add(op.path)
         elif op.action == "update_docstring":

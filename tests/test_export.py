@@ -22,6 +22,12 @@ class TestMarkdown:
         assert "## 4. Инструкции для AI-агента" in text
         assert "CreateOrderScenario" in text
 
+    def test_url_path_в_экспорте(self, demo):
+        """P1-1: полный URL endpoint'а виден в markdown-экспорте."""
+        graph = scan(demo)
+        text = to_markdown(graph)
+        assert "URL: /api/v1/orders/create" in text
+
     def test_узел_плана_без_label_не_роняет(self, demo):
         graph = scan(demo)
         graph.nodes.append(

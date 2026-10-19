@@ -136,6 +136,7 @@ main{flex:1;display:grid;grid-template-columns:280px 1fr 360px;min-height:0}
 .palette-hint{font-size:10px;color:#6c6d75;padding:2px 8px 6px}
 .edit-status{font-size:11px;color:var(--dim);padding:4px 8px 2px;border-bottom:1px solid var(--line);margin:0 4px 4px}
 .plan-list,.stale-list,.area-list{padding:4px 6px}
+#codeScenList{max-height:190px;overflow:auto;border-bottom:1px solid #000;padding-bottom:6px}
 .pitem{padding:3px 8px;border-radius:5px;cursor:pointer;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pitem:hover{background:var(--panel2)}
 .pitem.sel{background:#4a3a28;outline:1px solid var(--acc)}
@@ -199,6 +200,7 @@ main{flex:1;display:grid;grid-template-columns:280px 1fr 360px;min-height:0}
 <button id="btnSavePlan" style="display:none" title="сохранить несохранённые правки в план (Ctrl+S)">Сохранить</button>
 <button id="btnFiles" style="display:none" title="создать файлы-скелеты по плану (scaffold)">Создать файлы</button>
 <button id="btnSync" style="display:none" title="перенести описание и критерии в код блоками # studio">Перенести в код</button>
+<button id="btnClearPlan" style="display:none" title="удалить .studio/plan.json: узлы плана, связи и пометки на удаление исчезнут (код не меняется)">Очистить план</button>
 <span id="stats">—</span>
 </header>
 <main>
@@ -213,6 +215,8 @@ main{flex:1;display:grid;grid-template-columns:280px 1fr 360px;min-height:0}
 <div class="edit-status" id="editStatus">Редактируется: ничего не выбрано</div>
 <h3>Области плана</h3>
 <div class="area-list" id="areaList"></div>
+<h3>Сценарии из кода</h3>
+<div class="plan-list" id="codeScenList"></div>
 <h3>Добавить</h3>
 <div class="palette" id="palette"></div>
 <div class="palette-hint" id="paletteHint"></div>
@@ -281,6 +285,7 @@ let codeState=null;
 let edgeSrc=null,edgeDraftPath=null,drag=null,panDrag=null,justDragged=false,dragRaf=0;
 const view={x:40,y:40,k:1};
 let boxes={};
+let colAnchors=[];
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -411,11 +416,13 @@ function methodOfScenario(id){
   return methods.size?[...methods]:[NO_METHOD];
 }
 function domainOfScenario(id){const d=(byId[id]?.domain||"").trim();return d||NO_DOMAIN}
-function scenarioGroupsByMethodDomain(){
+function scenarioGroupsByMethodDomain(filterFn){
   const groups=new Map();
   scenList.forEach(id=>{
+    if(!byId[id]||byId[id].origin!=="code")return;
     const methods=methodOfScenario(id),domain=domainOfScenario(id),shared=methods.length>1;
     methods.forEach(m=>{
+      if(filterFn&&!filterFn({id,method:m,domain}))return;
       if(!groups.has(m))groups.set(m,new Map());
       const byDom=groups.get(m);
       if(!byDom.has(domain))byDom.set(domain,[]);
@@ -450,15 +457,12 @@ function renderList(){
   el.querySelectorAll("details[data-key]").forEach(d=>panelState.set(d.dataset.key,d.open));
   el.innerHTML="";
   if(!G)return;
-  const groups=scenarioGroupsByMethodDomain();
+  const groups=scenarioGroupsByMethodDomain(it=>matchesFilter(it.id,it.method,it.domain));
   if(!groups.length){el.innerHTML='<p class="dim" style="padding:6px">Сценариев нет.<br>Запусти <b>studio scan</b>.</p>';return}
   let shown=0;
   groups.forEach(([method,byDom])=>{
     const visible=[];
-    byDom.forEach((items,domain)=>{
-      const f=items.filter(it=>matchesFilter(it.id,method,domain));
-      if(f.length)visible.push([domain,f]);
-    });
+    byDom.forEach((items,domain)=>{if(items.length)visible.push([domain,items])});
     if(!visible.length)return;
     shown+=visible.reduce((s,[,items])=>s+items.length,0);
     const count=visible.reduce((s,[,items])=>s+items.length,0);
@@ -525,6 +529,22 @@ function renderConstructorLists(){
       d.title="область плана: нажми, чтобы выбрать сценарии внутри неё";
       d.onclick=()=>selectArea(a.id);
       al.appendChild(d);
+    });
+  }
+  const cl=$("codeScenList");
+  if(cl){
+    cl.innerHTML="";
+    const code=[...new Set(G.scenarios)].filter(id=>byId[id]&&byId[id].origin==="code")
+      .sort((a,b)=>(String(byId[a].domain||NO_DOMAIN)).localeCompare(String(byId[b].domain||NO_DOMAIN))||byId[a].label.localeCompare(byId[b].label));
+    if(!code.length)cl.innerHTML='<p class="dim">Сценариев в коде нет</p>';
+    code.forEach(id=>{
+      const n=byId[id];
+      const d=document.createElement("div");
+      d.className="pitem"+(selId===id?" sel":"");
+      d.innerHTML=`${esc(n.label)} <small>· ${esc(n.domain||NO_DOMAIN)}</small>`;
+      d.title=n.file_path||n.label;
+      d.onclick=()=>selectNode(id);
+      cl.appendChild(d);
     });
   }
   const st=$("paletteHint");
@@ -614,7 +634,7 @@ function addNode(stage,id,x,y,opts={}){
 }
 function meta(n){
   const d=n.details||{};
-  if(n.kind==="endpoint")return"эндпоинт · "+(d.function_name||"");
+  if(n.kind==="endpoint")return"эндпоинт · "+(d.function_name||"")+(d.url_path||d.path?" · "+(d.url_path||d.path):"");
   if(n.kind==="scenario")return"сценарий · "+(d.class_name||"");
   if(n.kind==="io")return"БД · строка "+n.line;
   if(n.kind==="model")return"модель · "+(d.tablename||"");
@@ -629,9 +649,11 @@ function measure(){boxes={};document.querySelectorAll("#stage .node[data-id],#st
 function renderCanvas(){
   const stage=$("stage"),svg=$("edges");
   clearStage();
+  colAnchors=[];
   if(!G){stage.style.width="100%";stage.style.height="100%";return}
   if(viewMode==="edit")layoutAreas(stage);else if(pathMode==="scenario")layoutScenario(stage);else layoutOverview(stage);
   measure();
+  alignColheads();
   if(viewMode==="edit")areaZoneDivs();else renderZoneDivs();
   drawEdges();sizeStage();applyView();
 }
@@ -652,7 +674,7 @@ function zoneBBoxes(){
   });
   return acc;
 }
-const ZONE_LABELS={rep:"эндпоинт",logic:"сценарий",io:"операции БД",tests:"тесты",helpers:"помощники",plan:"план"};
+const ZONE_LABELS={rep:"эндпоинт",logic:"сценарий",io:"операции БД",tests:"тесты",helpers:"помощники",plan:"план",code:"из кода",orphan:"без области",stale:"помечено на удаление"};
 function renderZoneDivs(){
   const stage=$("stage"),svg=$("edges");
   document.querySelectorAll("#stage .zone").forEach(z=>z.remove());
@@ -677,27 +699,38 @@ function areaZoneDivs(){
     const d=el("div","zone areazone"+(selArea===a.id?" sel":""));
     d.style.left=(x1-PADX)+"px";d.style.top=(y1-PADTOP)+"px";
     d.style.width=(x2-x1+PADX*2)+"px";d.style.height=(y2-y1+PADTOP+PADX)+"px";
-    d.innerHTML=`<span class="zlab" data-area="${esc(a.id)}">${esc(a.label)} <i>· эндпоинт · узлов ${members.length}</i></span>`;
+    d.innerHTML=`<span class="zlab" data-area="${esc(a.id)}">${esc(a.label)} <i>· узлов ${members.length}</i></span>`;
+    stage.insertBefore(d,svg);
+  });
+  const acc=zoneBBoxes();
+  ["code","orphan","stale"].forEach(z=>{
+    const b=acc[z];if(!b)return;
+    const d=el("div","zone ghostzone");
+    d.style.left=(b.x1-PADX)+"px";d.style.top=(b.y1-PADTOP)+"px";
+    d.style.width=Math.max(260,(b.x2-b.x1)+PADX*2)+"px";d.style.height=Math.max(80,(b.y2-b.y1)+PADTOP+PADX)+"px";
+    d.innerHTML=`<span class="zlab">${esc(ZONE_LABELS[z]||z)} <i>· ${b.n}</i></span>`;
     stage.insertBefore(d,svg);
   });
 }
 /* раскладка: путь одного сценария */
 function layoutScenario(stage){
+  if(!selScenario){stage.appendChild(el("div","empty",null,"Сценариев в коде нет. Запусти studio scan в корне проекта."));return}
   const p=G.scenario_paths[selScenario];
   if(!p){stage.appendChild(el("div","empty",null,"У сценария нет записи в пути запроса."));return}
   const cx={rep:40,logic:430,io:960,model:1260,tests:1560};
   const y0=70;
   const h=e=>e?e.offsetHeight:150;
-  if(p.endpoint&&byId[p.endpoint]){addNode(stage,p.endpoint,cx.rep,y0,{zone:"rep"})}
+  const isCode=id=>byId[id]&&byId[id].origin==="code";
+  if(p.endpoint&&isCode(p.endpoint)){addNode(stage,p.endpoint,cx.rep,y0,{zone:"rep"})}
   else{const gh=el("div","node ghost",{left:cx.rep+"px",top:y0+"px"},'<div class="hd" style="--c:#6c6d75">нет эндпоинта</div><div class="mt">сценарий вызывается не из HTTP</div>');gh.dataset.zone="rep";stage.appendChild(gh)}
   const main=addNode(stage,selScenario,cx.logic,y0,{zone:"logic"});
   let logicY=y0+h(main)+GAPY;
-  [...new Set(p.called_scenarios||[])].forEach(id=>{if(!byId[id]||id===selScenario)return;const e=addNode(stage,id,cx.logic,logicY,{nested:true,zone:"logic"});logicY+=h(e)+GAPY});
+  [...new Set(p.called_scenarios||[])].forEach(id=>{if(!isCode(id)||id===selScenario)return;const e=addNode(stage,id,cx.logic,logicY,{nested:true,zone:"logic"});logicY+=h(e)+GAPY});
   const ioY={};let ioT=y0;
-  [...new Set(p.io_calls||[])].forEach(id=>{if(!byId[id])return;const e=addNode(stage,id,cx.io,ioT,{zone:"io"});ioY[id]=ioT;ioT+=h(e)+GAPY});
+  [...new Set(p.io_calls||[])].forEach(id=>{if(!isCode(id))return;const e=addNode(stage,id,cx.io,ioT,{zone:"io"});ioY[id]=ioT;ioT+=h(e)+GAPY});
   const plans=[];const placed=new Set();
   (p.models||[]).forEach(id=>{
-    if(!byId[id]||placed.has(id))return;placed.add(id);
+    if(!isCode(id)||placed.has(id))return;placed.add(id);
     let slot=null;
     for(const ioId of (p.io_calls||[])){
       const io=byId[ioId];
@@ -714,8 +747,8 @@ function layoutScenario(stage){
     mCur=y+h(e)+GAPY;
   });
   let testY=y0;
-  [...new Set(p.tests||[])].forEach(id=>{if(!byId[id])return;const e=addNode(stage,id,cx.tests,testY,{zone:"tests"});testY+=h(e)+GAPY});
-  const helpers=[...new Set((p.helpers||[]).filter(id=>byId[id]))];
+  [...new Set(p.tests||[])].forEach(id=>{if(!isCode(id))return;const e=addNode(stage,id,cx.tests,testY,{zone:"tests"});testY+=h(e)+GAPY});
+  const helpers=[...new Set((p.helpers||[]).filter(isCode))];
   if(helpers.length){
     let maxY=y0;
     document.querySelectorAll("#stage .node").forEach(e=>{maxY=Math.max(maxY,(parseFloat(e.style.top)||0)+e.offsetHeight)});
@@ -726,26 +759,31 @@ function layoutScenario(stage){
       if((i+1)%6===0||i===helpers.length-1){rowTop+=rowMax;rowMax=0}
     });
   }
-  layoutOrphans(stage);
-}
-function layoutOrphans(stage){
-  const drawn=new Set();document.querySelectorAll("#stage .node[data-id]").forEach(e=>drawn.add(e.dataset.id));
-  const orphans=G.nodes.filter(n=>(n.origin==="user"||n.origin==="stale")&&!drawn.has(n.id));
-  if(!orphans.length)return;
-  let maxY=80;document.querySelectorAll("#stage .node").forEach(e=>{maxY=Math.max(maxY,(parseFloat(e.style.top)||0)+e.offsetHeight)});
-  gridZone(stage,orphans.map(n=>n.id),40,maxY+120,"plan");
 }
 /* раскладка: обзор */
+function alignColheads(){
+  colAnchors.forEach(({el,ids})=>{
+    let x1=1e9,y1=1e9;
+    ids.forEach(id=>{const b=boxes[id];if(!b)return;x1=Math.min(x1,b.x);y1=Math.min(y1,b.y)});
+    if(x1===1e9)return;
+    el.style.left=x1+"px";el.style.top=(y1-(parseFloat(el.dataset.off)||28))+"px";
+  });
+}
 function layoutOverview(stage){
-  const groups=scenarioGroupsByMethodDomain();
-  if(!groups.length){stage.appendChild(el("div","empty",null,"Пусто. Запусти studio scan в корне проекта."));return}
+  const groups=scenarioGroupsByMethodDomain(it=>matchesFilter(it.id,it.method,it.domain));
+  if(!groups.length){stage.appendChild(el("div","empty",null,scenFilter?`Ничего не найдено по запросу «${esc(scenFilter)}».`:"Пусто. Запусти studio scan в корне проекта."));return}
   let y=70;
   groups.forEach(([method,byDom])=>{
     let count=0;byDom.forEach(items=>count+=items.length);
-    stage.appendChild(el("div","colhead",{left:"40px",top:y+"px"},`<span class="method-dot" style="background:${METHOD_COLORS[method]||"#9a9aa2"}"></span>${esc(METHOD_LABELS[method]||method.toUpperCase())} <i>· ${count}</i>`));
+    const methodIds=[];byDom.forEach(items=>items.forEach(it=>methodIds.push(it.id)));
+    const mHead=el("div","colhead",{left:"40px",top:y+"px"},`<span class="method-dot" style="background:${METHOD_COLORS[method]||"#9a9aa2"}"></span>${esc(METHOD_LABELS[method]||method.toUpperCase())} <i>· ${count}</i>`);
+    mHead.dataset.off="52";stage.appendChild(mHead);
+    colAnchors.push({el:mHead,ids:methodIds});
     y+=44;
     byDom.forEach((items,domain)=>{
-      stage.appendChild(el("div","colhead",{left:"60px",top:y+"px","font-weight":"400","font-size":"11px"},`${esc(domain)} <i>· ${items.length}</i>`));
+      const dHead=el("div","colhead",{left:"60px",top:y+"px","font-weight":"400","font-size":"11px"},`${esc(domain)} <i>· ${items.length}</i>`);
+      dHead.dataset.off="26";stage.appendChild(dHead);
+      colAnchors.push({el:dHead,ids:items.map(it=>it.id)});
       y+=34;
       const cols=Math.min(3,Math.max(1,items.length));
       let rowTop=y,rowMax=0;
@@ -772,21 +810,17 @@ function layoutOverview(stage){
 }
 function sharedModels(){
   const count={};
-  scenList.forEach(id=>{const p=G.scenario_paths[id];if(!p)return;[...new Set(p.models||[])].forEach(m=>count[m]=(count[m]||0)+1)});
-  return Object.keys(count).filter(m=>count[m]>=2&&byId[m]).sort((a,b)=>byId[a].label.localeCompare(byId[b].label));
+  scenList.forEach(id=>{if(!byId[id]||byId[id].origin!=="code")return;const p=G.scenario_paths[id];if(!p)return;[...new Set(p.models||[])].forEach(m=>count[m]=(count[m]||0)+1)});
+  return Object.keys(count).filter(m=>count[m]>=2&&byId[m]&&byId[m].origin==="code").sort((a,b)=>byId[a].label.localeCompare(byId[b].label));
 }
 /* раскладка: конструктор (области) */
 function layoutAreas(stage){
   const list=areas();
-  let y=70;
+  let y=90;
   if(!list.length){
     stage.appendChild(el("div","empty",null,"Областей плана пока нет.<br>Нажми «Новый сценарий» справа — создашь эндпоинт и первый сценарий области."));
   }
   list.forEach(a=>{
-    const top=y;
-    const headY=y;
-    stage.appendChild(el("div","colhead",{left:"40px",top:headY+"px"},`${esc(a.label)} <i>· область плана</i>`));
-    y=headY+40;
     const members=areaMembers(a.id);
     const ep=members.find(m=>m.id===a.id);
     const scen=members.filter(m=>m.kind==="scenario").sort((p,q)=>orderScenarios(p,q,a.id));
@@ -806,7 +840,7 @@ function layoutAreas(stage){
     let hy=y;
     hy=stack(stage,hy,"1240px","helpers",helpers);
     const bottom=Math.max(sy,iy,my,ty,hy,sy+10);
-    y=bottom+40;
+    y=bottom+50;
   });
   layoutCodeZone(stage,y);
   layoutOrphanZone(stage);
@@ -844,26 +878,21 @@ function layoutCodeZone(stage,fromY){
   const planIds=new Set(G.nodes.filter(n=>n.origin!=="code").map(n=>n.id));
   (G.edges||[]).forEach(e=>{if(planIds.has(e.from_node)&&!planIds.has(e.to_node))linked.add(e.to_node);if(planIds.has(e.to_node)&&!planIds.has(e.from_node))linked.add(e.from_node)});
   const codeIds=[...linked].filter(id=>byId[id]&&byId[id].origin==="code");
+  if(selId&&byId[selId]&&byId[selId].origin==="code"&&!codeIds.includes(selId))codeIds.push(selId);
   if(!codeIds.length)return;
-  const y=fromY+30;
-  stage.appendChild(el("div","colhead",{left:"40px",top:y+"px"},"из кода · связано с планом"));
-  gridZone(stage,codeIds,40,y+50,"code");
+  gridZone(stage,codeIds,40,fromY+20,"code");
 }
 function layoutOrphanZone(stage){
   const orphans=planNodes().filter(n=>!isArea(n.id)&&!areaOfView(n));
   if(!orphans.length)return;
   let maxY=80;document.querySelectorAll("#stage .node").forEach(e=>{maxY=Math.max(maxY,(parseFloat(e.style.top)||0)+e.offsetHeight)});
-  const y=maxY+120;
-  stage.appendChild(el("div","colhead",{left:"40px",top:y+"px"},"без области"));
-  gridZone(stage,orphans.map(n=>n.id),40,y+50,"orphan");
+  gridZone(stage,orphans.map(n=>n.id),40,maxY+80,"orphan");
 }
 function layoutStaleZone(stage){
   const stale=G.nodes.filter(n=>n.origin==="stale");
   if(!stale.length)return;
   let maxY=80;document.querySelectorAll("#stage .node").forEach(e=>{maxY=Math.max(maxY,(parseFloat(e.style.top)||0)+e.offsetHeight)});
-  const y=maxY+120;
-  stage.appendChild(el("div","colhead",{left:"40px",top:y+"px"},"помечено на удаление"));
-  gridZone(stage,stale.map(n=>n.id),40,y+50,"stale");
+  gridZone(stage,stale.map(n=>n.id),40,maxY+80,"stale");
 }
 /* ---------- связи ---------- */
 function edgeList(){
@@ -975,9 +1004,6 @@ async function saveUserNode(n,vals,oldId){
   const details=Object.assign({},n.details||{});
   (DETAIL_FIELDS[n.kind]||[]).forEach(k=>{if(k in vals)details[k]=vals[k]});
   ["dto","response","table","test_for_scenario"].forEach(k=>{if(k in details&&dtoStr(details[k])==="")details[k]=null});
-  if(n.kind==="endpoint")details.router_module="app.api.v1.routes."+String(details.function_name||"").replace(/[^A-Za-z0-9_]/g,"");
-  if(n.kind==="scenario")details.module="app.scenarios."+String(details.name||"").replace(/[^A-Za-z0-9_]/g,"");
-  if(n.kind==="test"&&n.origin==="user")details.module="tests."+String(details.test_name||"").replace(/[^A-Za-z0-9_]/g,"");
   const newId=freeId(nodeIdFor({id:oldId,kind:n.kind,file_path:vals.file_path,details,line:n.line}),oldId);
   const node=Object.assign({},n,{
     id:newId,kind:n.kind,
@@ -991,12 +1017,13 @@ async function saveUserNode(n,vals,oldId){
     domain:vals.domain,area:node.area,file_path:vals.file_path,create_file:vals.create_file,append_model:node.append_model};
   await putNodePatch({target_id:oldId,is_edge:false,node,patch});
   if(newId!==oldId&&selId===oldId)selId=newId;
-  if(n.kind==="io")await syncTableEdges(newId,details.table||null);
+  if(n.kind==="io"){
+    try{await syncTableEdges(newId,details.table||null)}
+    catch(e){toast("операция БД сохранена, но table-связь не перестроена: "+msg(e))}
+  }
 }
 async function syncTableEdges(ioId,table){
-  const want=table&&byId["model:models.py:"+pascal(slug(table))];
-  const wantId=table?Object.keys(byId).find(k=>byId[k].kind==="model"&&String(byId[k].details?.tablename||"")===table):null;
-  const modelId=wantId||null;
+  const modelId=table?Object.keys(byId).find(k=>byId[k].kind==="model"&&String(byId[k].details?.tablename||"")===table):null;
   for(const e of G.edges){
     if(e.kind!=="table"||e.from_node!==ioId)continue;
     if(e.to_node!==modelId&&e.origin==="user"){await deleteEdge(e.id)}
@@ -1033,7 +1060,9 @@ async function deleteNode(n){
 /* ---------- инспектор ---------- */
 function renderAll(){renderHeader();if(viewMode==="edit")renderConstructorLists();else renderList();renderCanvas();renderInspector();renderStats()}
 function renderStats(){
-  $("stats").textContent=G?`узлов ${G.nodes.length} · связей ${G.edges.length} · сценариев ${G.scenarios.length}${viewMode==="edit"?" · областей "+areas().length:""}`:"—";
+  if(!G){$("stats").textContent="—";return}
+  const planScen=G.nodes.filter(n=>n.kind==="scenario"&&n.origin==="user").length;
+  $("stats").textContent=`узлов ${G.nodes.length} · связей ${G.edges.length} · сценариев ${G.scenarios.length}`+(viewMode==="edit"?` · областей ${areas().length}`+(planScen?` · сценариев плана ${planScen}`:""):"");
 }
 function renderHeader(){
   $("mView").classList.toggle("on",viewMode==="view");
@@ -1045,6 +1074,7 @@ function renderHeader(){
   $("canvas").classList.toggle("edit-mode",viewMode==="edit");
   $("btnFiles").style.display=viewMode==="edit"?"":"none";
   $("btnSync").style.display=viewMode==="edit"?"":"none";
+  $("btnClearPlan").style.display=viewMode==="edit"?"":"none";
   $("btnDesc").classList.toggle("on",showDesc);
   $("btnAcc").classList.toggle("on",showAcc);
   $("hint").textContent=viewMode==="edit"
@@ -1076,7 +1106,7 @@ function renderInspector(){
   const rows=(pairs)=>pairs.filter(p=>p&&p[1]!==undefined&&p[1]!==null&&p[1]!=="")
     .map(([k,v])=>`<div class="kv"><span>${esc(k)}</span><b>${esc(Array.isArray(v)?v.join(", "):v)}</b></div>`).join("");
   const det=n.details||{};
-  if(n.kind==="endpoint")html+=rows([["HTTP-метод",METHOD_LABELS[det.http_method]||det.http_method],["путь",det.path],["функция",det.function_name],["модуль",det.router_module],["теги",det.tags]]);
+  if(n.kind==="endpoint")html+=rows([["HTTP-метод",METHOD_LABELS[det.http_method]||det.http_method],["URL",det.url_path||det.path],["путь в декораторе",det.path],["функция",det.function_name],["модуль",det.router_module],["теги",det.tags]]);
   if(n.kind==="scenario")html+=rows([["имя регистрации",det.name],["класс",det.class_name],["модуль",det.module],["вход (dto)",det.dto],["ответ (response)",det.response]]);
   if(n.kind==="io")html+=rows([["метод",det.method],["таблица",det.table],["через",det.via_attr],["сценарий",det.called_from]]);
   if(n.kind==="model")html+=rows([["таблица",det.tablename],["класс",det.class_name],["файл",det.source_file]]);
@@ -1314,6 +1344,7 @@ async function createWizard(){
 }
 async function createScenarioFlow(o){
   let areaId=o.area;
+  const created=[];
   try{
     if(o.http){
       const fn=newSlug(o.path).replace(/^_+/,"")||"new_endpoint";
@@ -1324,6 +1355,7 @@ async function createScenarioFlow(o){
         notes:"",domain:o.domain,area:"",scaffolded:false,create_file:o.withFile,append_model:false};
       ep.id=freeId(nodeIdFor(ep));
       await putNodePatch({target_id:ep.id,is_edge:false,node:ep});
+      created.push({target_id:ep.id,is_edge:false});
       areaId=ep.id;
     }
     const file=`app/scenarios/${slug(o.name)}.py`;
@@ -1333,7 +1365,8 @@ async function createScenarioFlow(o){
       notes:"",domain:o.domain,area:areaId,scaffolded:false,create_file:o.withFile,append_model:false};
     scen.id=freeId(nodeIdFor(scen));
     await putNodePatch({target_id:scen.id,is_edge:false,node:scen});
-    if(areaId)await putEdge({id:`${areaId}::dispatch::${scen.id}`,from_node:areaId,to_node:scen.id,kind:"dispatch",label:`run("${o.name}")`,line:1,origin:"user",description:""});
+    created.push({target_id:scen.id,is_edge:false});
+    if(areaId){await putEdge({id:`${areaId}::dispatch::${scen.id}`,from_node:areaId,to_node:scen.id,kind:"dispatch",label:`run("${o.name}")`,line:1,origin:"user",description:""});created.push({target_id:`${areaId}::dispatch::${scen.id}`,is_edge:true})}
     for(let i=0;i<o.ops.length;i++){
       const op=o.ops[i];const table=String(op.table||"").trim();
       const io={id:"",kind:"io",layer:"io",label:table?`_db.${op.method}(${table})`:`_db.${op.method}()`,file_path:"",line:5+i,
@@ -1341,11 +1374,13 @@ async function createScenarioFlow(o){
         origin:"user",description:"",acceptance:[],notes:"",domain:"",area:areaId,scaffolded:false,create_file:true,append_model:false};
       io.id=freeId(nodeIdFor(io));
       await putNodePatch({target_id:io.id,is_edge:false,node:io});
+      created.push({target_id:io.id,is_edge:false});
       await putEdge({id:`${scen.id}::port_call::${io.id}`,from_node:scen.id,to_node:io.id,kind:"port_call",
         label:io.label,line:io.line,origin:"user",description:""});
+      created.push({target_id:`${scen.id}::port_call::${io.id}`,is_edge:true});
       if(table){
         const modelId=Object.keys(byId).find(k=>byId[k].kind==="model"&&String(byId[k].details.tablename||"")===table);
-        if(modelId)await putEdge({id:`${io.id}::table::${modelId}`,from_node:io.id,to_node:modelId,kind:"table",label:"",line:1,origin:"user",description:""});
+        if(modelId){await putEdge({id:`${io.id}::table::${modelId}`,from_node:io.id,to_node:modelId,kind:"table",label:"",line:1,origin:"user",description:""});created.push({target_id:`${io.id}::table::${modelId}`,is_edge:true})}
         else{
           const cls=pascal(slug(table));
           const model={id:"",kind:"model",layer:"io",label:cls,file_path:"models.py",line:1,
@@ -1353,7 +1388,9 @@ async function createScenarioFlow(o){
             origin:"user",description:"",acceptance:[],notes:"",domain:o.domain,area:areaId,scaffolded:false,create_file:false,append_model:true};
           model.id=freeId(nodeIdFor(model));
           await putNodePatch({target_id:model.id,is_edge:false,node:model});
+          created.push({target_id:model.id,is_edge:false});
           await putEdge({id:`${io.id}::table::${model.id}`,from_node:io.id,to_node:model.id,kind:"table",label:"",line:1,origin:"user",description:""});
+          created.push({target_id:`${io.id}::table::${model.id}`,is_edge:true});
         }
       }
     }
@@ -1361,7 +1398,16 @@ async function createScenarioFlow(o){
     renderAll();fitView();
     return areaId;
   }catch(e){
-    toast("ошибка создания: "+msg(e));return null;
+    for(let i=created.length-1;i>=0;i--){
+      const c=created[i];
+      try{
+        await api("/api/plan/patch?target_id="+encodeURIComponent(c.target_id)+"&is_edge="+(c.is_edge?1:0),"DELETE");
+      }catch(_){}
+    }
+    try{applyGraph(await api("/api/graph"))}catch(_){}
+    renderAll();
+    toast("ошибка создания: "+msg(e)+(created.length?" — созданные узлы откачены":""));
+    return null;
   }
 }
 /* ---------- создание узлов из палитры ---------- */
@@ -1508,6 +1554,18 @@ function modal(title,text,buttons){
 /* ---------- файлы и перенос в код ---------- */
 function diffLineClass(l){if(l.startsWith("+++")||l.startsWith("---"))return"diff-header";if(l.startsWith("@@"))return"diff-hunk";if(l.startsWith("+"))return"diff-add";if(l.startsWith("-"))return"diff-del";return"diff-ctx"}
 function diffToHtml(t){return t.split("\n").map(l=>`<span class="${diffLineClass(l)}">${esc(l)}</span>`).join("\n")}
+async function onClearPlan(){
+  const yes=await modal("Очистить план?","Узлы плана, связи и пометки на удаление будут удалены (.studio/plan.json). Код проекта не меняется, но несохранённые в код правки пропадут.",["Очистить","Отмена"]);
+  if(!yes)return;
+  try{
+    drafts.clear();updateDirtyUI();
+    const g=await api("/api/plan/clear","POST");
+    applyGraph(g);
+    selArea=null;selId=null;wizard=null;selScenario=null;
+    renderAll();fitView();
+    toast("план очищен");
+  }catch(e){toast("ошибка: "+msg(e))}
+}
 async function onFiles(){
   try{
     const data=await api("/api/scaffold/preview","POST");
@@ -1539,9 +1597,10 @@ async function onFiles(){
     $("mCancel").onclick=()=>{$("modal").style.display="none"};
     if(total)$("mApply").onclick=async()=>{
       $("modal").style.display="none";
+      if(!(await guardLeave())){toast("применение отменено");return}
       const res=await api("/api/scaffold/apply","POST");
-      applyGraph(await api("/api/graph"));updateDirtyUI();renderAll();
-      toast(`файлы: создано ${res.created}, обновлено ${res.updated}, пропущено ${res.skipped}`);
+      applyGraph(await api("/api/graph"));updateDirtyUI();renderAll();fitView();
+      toast(`файлы: создано ${res.created}, обновлено ${res.updated}, пропущено ${res.skipped} · план сохранён (очистить — «Очистить план»)`);
     };
   }catch(e){toast("ошибка: "+msg(e))}
 }
@@ -1571,13 +1630,15 @@ async function onSync(){
     $("mCancel").onclick=()=>{$("modal").style.display="none"};
     if(total)$("mApply").onclick=async()=>{
       $("modal").style.display="none";
+      if(!(await guardLeave())){toast("применение отменено");return}
       const res=await api("/api/metadata/apply","POST");
-      applyGraph(await api("/api/graph"));updateDirtyUI();renderAll();
-      toast(`в код: создано ${res.written}, обновлено ${res.updated}, очищено ${res.deleted}`);
+      applyGraph(await api("/api/graph"));updateDirtyUI();renderAll();fitView();
+      toast(`в код: создано ${res.written}, обновлено ${res.updated}, очищено ${res.deleted} · план сохранён (очистить — «Очистить план»)`);
     };
   }catch(e){toast("ошибка: "+msg(e))}
 }
 async function onRescan(){
+  if(!(await guardLeave()))return;
   try{await api("/api/rescan","POST");applyGraph(await api("/api/graph"));updateDirtyUI();renderAll();fitView();toast("граф обновлён из кода")}
   catch(e){toast("ошибка: "+msg(e))}
 }
@@ -1589,21 +1650,34 @@ function saveContentToggles(){try{localStorage.setItem(LS.desc,showDesc?"1":"0")
 async function load(){
   setContentToggles();
   applyGraph(await api("/api/graph"));
-  selScenario=scenList.find(id=>G.scenario_paths[id]&&G.scenario_paths[id].endpoint)||scenList[0]||null;
+  const codeScen=scenList.filter(id=>byId[id]&&byId[id].origin==="code");
+  selScenario=codeScen.find(id=>G.scenario_paths[id]&&G.scenario_paths[id].endpoint)||codeScen[0]||null;
   if(selScenario){selId=selScenario;pathMode="scenario"}
   const hash=location.hash.slice(1);
   if(hash==="overview"){pathMode="overview"}
-  else if(hash.indexOf("s=")===0){const want=decodeURIComponent(hash.slice(2));if(byId[want]){selScenario=want;selId=want;pathMode="scenario"}}
+  else if(hash.indexOf("s=")===0){const want=decodeURIComponent(hash.slice(2));if(byId[want]&&byId[want].origin==="code"){selScenario=want;selId=want;pathMode="scenario"}}
   setModeButtons();renderAll();fitView();
 }
-$("mView").onclick=async()=>{if(!await guardLeave())return;viewMode="view";renderAll();fitView()};
+$("mView").onclick=async()=>{
+  if(!await guardLeave())return;
+  viewMode="view";
+  if(!(selScenario&&byId[selScenario]&&byId[selScenario].origin==="code")){
+    const cs=scenList.filter(id=>byId[id]&&byId[id].origin==="code");
+    selScenario=cs[0]||null;selId=selScenario;codeState=null;
+  }
+  renderAll();fitView();
+};
 $("mEdit").onclick=async()=>{
   if(!await guardLeave())return;
   viewMode="edit";selId=null;wizard=null;renderAll();fitView();
   toast("Конструктор: слева области, справа создание и правка");
 };
 document.querySelectorAll("#pathModeGroup [data-pm]").forEach(b=>b.onclick=()=>{
-  pathMode=b.dataset.pm;if(pathMode==="scenario"&&!selScenario)selScenario=scenList[0]||null;
+  pathMode=b.dataset.pm;
+  if(pathMode==="scenario"&&!(selScenario&&byId[selScenario]&&byId[selScenario].origin==="code")){
+    const cs=scenList.filter(id=>byId[id]&&byId[id].origin==="code");
+    selScenario=cs[0]||null;selId=selScenario;
+  }
   setModeButtons();renderAll();fitView();
 });
 $("btnDesc").onclick=()=>{showDesc=!showDesc;saveContentToggles();renderAll()};
@@ -1614,6 +1688,7 @@ $("zFit").onclick=fitView;
 $("zReset").onclick=()=>{view.k=1;applyView()};
 $("btnFiles").onclick=onFiles;
 $("btnSync").onclick=onSync;
+$("btnClearPlan").onclick=onClearPlan;
 $("btnRescan").onclick=onRescan;
 $("btnSavePlan").onclick=saveDraft;
 $("btnExport").onclick=e=>{e.stopPropagation();const m=$("exportMenu");m.style.display=m.style.display==="none"?"block":"none"};
@@ -1676,6 +1751,7 @@ function scheduleDragRender(){
     if(!drag||!drag.el.parentElement)return;
     boxes[drag.id]={x:parseFloat(drag.el.style.left)||0,y:parseFloat(drag.el.style.top)||0,w:drag.el.offsetWidth,h:drag.el.offsetHeight};
     if(viewMode==="edit")areaZoneDivs();else renderZoneDivs();
+    alignColheads();
     drawEdges();sizeStage();
   });
 }

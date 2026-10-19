@@ -63,6 +63,8 @@ class EndpointEntry:
     function_node: ast.FunctionDef | ast.AsyncFunctionDef
     tags: list[str] = field(default_factory=list)
     doc: str | None = None
+    # Полный URL: FAT_API_PREFIX + router.prefix + path (path остаётся сырым).
+    url_path: str = ""
 
 
 @dataclass
@@ -224,6 +226,39 @@ def _router_tags(tree: ast.Module) -> list[str]:
     return []
 
 
+def _router_prefix(tree: ast.Module) -> str:
+    """prefix="..." из модульного `router = APIRouter(prefix=...)`; "" — нет."""
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if not any(isinstance(t, ast.Name) and t.id == "router" for t in targets):
+            continue
+        value = node.value
+        if not isinstance(value, ast.Call):
+            continue
+        func_name = getattr(value.func, "id", None) or getattr(value.func, "attr", None)
+        if func_name != "APIRouter":
+            continue
+        for kw in value.keywords:
+            if kw.arg == "prefix" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                return kw.value.value
+    return ""
+
+
+def _join_paths(*parts: str) -> str:
+    """Склейка префиксов и пути без двойных слэшей: ('/api/v1', '/orders', '/create') → '/api/v1/orders/create'."""
+    clean: list[str] = []
+    for part in parts:
+        part = str(part or "").strip()
+        if not part or part == "/":
+            continue
+        if not part.startswith("/"):
+            part = "/" + part
+        clean.append(part.rstrip("/"))
+    return "".join(clean) or "/"
+
+
 def _route_path(dec: ast.Call) -> str | None:
     """Путь маршрута: строковый литерал первым аргументом или `path="..."` (как в FastAPI)."""
     path = call_first_str_arg(dec)
@@ -247,6 +282,7 @@ def index_endpoints(env: ProjectEnv) -> list[EndpointEntry]:
         file_path = path.relative_to(root).as_posix()
         router_module = module_name(root, path)
         tags = _router_tags(tree)
+        router_prefix = _router_prefix(tree)
         for node in tree.body:
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -275,6 +311,7 @@ def index_endpoints(env: ProjectEnv) -> list[EndpointEntry]:
                         function_node=node,
                         tags=list(tags),
                         doc=_doc(node),
+                        url_path=_join_paths(env.api_prefix, router_prefix, http_path),
                     )
                 )
     return out

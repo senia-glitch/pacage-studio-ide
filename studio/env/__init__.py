@@ -70,18 +70,29 @@ def read_env_file(path: Path) -> dict[str, str]:
     return parse_env_text(text)
 
 
+def _normalize_prefix(value: str) -> str:
+    """`api/v1/` → `/api/v1`; пустое — «без префикса»; trailing `/` обрезается."""
+    value = value.strip()
+    if not value or value == "/":
+        return ""
+    if not value.startswith("/"):
+        value = "/" + value
+    return value.rstrip("/")
+
+
 def read_env(project_root: Path) -> ProjectEnv:
     root = Path(project_root).resolve()
     raw = read_env_file(root / ENV_FILENAME)
     routes = _dotted_package(raw.get("FAT_ROUTES_PACKAGE"), DEFAULT_ROUTES_PACKAGE, "FAT_ROUTES_PACKAGE")
     core = _dotted_package(raw.get("FAT_CORE_DISCOVER"), DEFAULT_CORE_DISCOVER, "FAT_CORE_DISCOVER")
-    prefix = raw.get("FAT_API_PREFIX") or DEFAULT_API_PREFIX
+    prefix_raw = raw.get("FAT_API_PREFIX")
+    prefix = _normalize_prefix(prefix_raw) if prefix_raw is not None else DEFAULT_API_PREFIX
     models_path = root / "models.py"
     return ProjectEnv(
         project_root=root,
         routes_package=routes.strip(),
         core_discover=core.strip(),
-        api_prefix=prefix.strip(),
+        api_prefix=prefix,
         models_path=models_path,
         has_models=models_path.exists(),
     )

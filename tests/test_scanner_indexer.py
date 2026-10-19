@@ -45,6 +45,16 @@ class TestEnv:
         assert env.core_discover == "pkg.core"
         assert env.api_prefix == "/x"
 
+    def test_api_prefix_пустой_даёт_без_префикса(self, tmp_path):
+        """P1-1: явный FAT_API_PREFIX= означает «без префикса»."""
+        (tmp_path / ".env.fastbase").write_text("FAT_API_PREFIX=\n", encoding="utf-8")
+        assert read_env(tmp_path).api_prefix == ""
+
+    def test_api_prefix_нормализуется(self, tmp_path):
+        """P1-1: `api/v1/` → `/api/v1`."""
+        (tmp_path / ".env.fastbase").write_text("FAT_API_PREFIX=api/v1/\n", encoding="utf-8")
+        assert read_env(tmp_path).api_prefix == "/api/v1"
+
     def test_модели_только_в_корне(self, demo):
         env = read_env(demo)
         assert env.has_models is True
@@ -116,6 +126,30 @@ class TestIndexer:
         )
         assert by_name["root"].path == ""
         assert by_name["root"].doc is None
+
+    def test_url_path_с_router_prefix(self, demo):
+        """P1-1: FAT_API_PREFIX + router.prefix + path."""
+        index = build_index(read_env(demo))
+        by_name = {e.function_name: e for e in index.endpoints}
+        assert by_name["create_order"].url_path == "/api/v1/orders/create"
+        assert by_name["list_orders"].url_path == "/api/v1/orders/list"
+
+    def test_url_path_без_router_prefix(self, demo):
+        index = build_index(read_env(demo))
+        by_name = {e.function_name: e for e in index.endpoints}
+        assert by_name["health"].url_path == "/api/v1/health"
+
+    def test_url_path_пустой_path(self, demo):
+        index = build_index(read_env(demo))
+        by_name = {e.function_name: e for e in index.endpoints}
+        assert by_name["root"].url_path == "/api/v1"
+
+    def test_url_path_сохраняет_сырой_path(self, demo):
+        """P1-1: path из декоратора не меняется — только url_path полный."""
+        index = build_index(read_env(demo))
+        by_name = {e.function_name: e for e in index.endpoints}
+        assert by_name["create_order"].path == "/create"
+        assert by_name["create_order"].url_path == "/api/v1/orders/create"
 
     def test_router_tags(self, demo):
         index = build_index(read_env(demo))

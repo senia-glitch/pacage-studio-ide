@@ -73,6 +73,15 @@ class TestScan:
         assert "старое" not in log
         assert "studio scan" in log.splitlines()[0]
 
+    def test_scan_чистит_ast_кэш(self, demo, monkeypatch):
+        """P2-1: каждый scan начинается с очистки AST-кэша."""
+        from studio import scanner
+
+        calls = []
+        monkeypatch.setattr(scanner, "clear_cache", lambda: calls.append(True))
+        scanner.scan(demo)
+        assert calls == [True]
+
 
 class TestList:
     def test_list_группы(self, demo, capsys):

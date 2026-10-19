@@ -22,6 +22,8 @@ class EndpointDetails(BaseModel):
     function_name: str
     router_module: str
     tags: list[str] = Field(default_factory=list)
+    # Полный URL с FAT_API_PREFIX и router.prefix (path остаётся сырым, из декоратора).
+    url_path: str = ""
 
 
 class ScenarioDetails(BaseModel):
@@ -104,6 +106,7 @@ class ScenarioPath(BaseModel):
 class PlanMeta(BaseModel):
     last_scan: str | None = None
     last_edit: str | None = None
+    # Зарезервировано на будущее: сейчас нигде не пишется и не читается.
     last_scaffold: str | None = None
 
 

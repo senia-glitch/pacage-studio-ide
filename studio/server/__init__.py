@@ -118,10 +118,14 @@ def scenarios_payload(graph: Graph) -> dict:
     return {"scenarios": out}
 
 
+MAX_BODY = 16 * 1024 * 1024  # 16 MB — лимит тела запроса (защита от мусорного Content-Length)
+
+
 def _send_json(handler: BaseHTTPRequestHandler, obj, code: int = 200) -> None:
     body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
     handler.send_response(code)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Cache-Control", "no-store")
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -133,6 +137,7 @@ def _send_text(
     body = text.encode("utf-8")
     handler.send_response(code)
     handler.send_header("Content-Type", ctype)
+    handler.send_header("Cache-Control", "no-store")
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -159,7 +164,7 @@ def _read_file(root: Path, rel: str) -> str:
 
 def _read_body(handler: BaseHTTPRequestHandler) -> dict:
     length = int(handler.headers.get("Content-Length") or 0)
-    if length <= 0:
+    if length <= 0 or length > MAX_BODY:
         return {}
     raw = handler.rfile.read(length)
     try:
@@ -177,14 +182,27 @@ class PlanError(Exception):
     """Операция плана отклонена (понятное пользователю сообщение, ответ 409)."""
 
 
-def _reassign_io(plan: Plan, io_id: str, scenario_id: str) -> None:
-    """Связь «сценарий → io» переносит io-узел плана на этот сценарий (called_from)."""
+def _reassign_io(plan: Plan, io_id: str, new_scenario_id: str) -> str | None:
+    """Переназначить io-узел плана на другой сценарий, пересобрав его id.
+
+    id io-узла кодирует сценарий (`io:<called_from>:<method>:<table>:<line>`) —
+    без пересборки после scaffold+scan появился бы дубль: код создаёт io уже
+    с новым сценарием, а патч плана всё ещё ссылается на старый id.
+    Возвращает новый id или None, если изменений нет (id уже соответствует).
+    """
     for patch in plan.patches:
         node = patch.node
         if patch.is_edge or node is None or node.id != io_id or node.kind != "io":
             continue
-        node.details = {**node.details, "called_from": scenario_id}
-        return
+        details = dict(node.details)
+        if details.get("called_from") == new_scenario_id:
+            return None
+        method = str(details.get("method") or "custom")
+        table = str(details.get("table") or "_")
+        new_io_id = f"io:{new_scenario_id}:{method}:{table}:{node.line}"
+        rename_node_refs(plan, io_id, new_io_id)
+        node.details = {**details, "called_from": new_scenario_id}
+        return new_io_id
     raise PlanError(
         "io-узел создан из кода и привязан к своему сценарию в коде — переназначить нельзя"
     )
@@ -197,17 +215,31 @@ def _plan_patch(project_root: Path, patch: PlanPatch) -> Graph:
     except PlanCorruptedError as exc:
         slog.step(f"plan.json повреждён: {exc}")
         raise PlanError(str(exc)) from exc
-    renamed = patch.node is not None and not patch.is_edge and patch.node.id != patch.target_id
-    if renamed:
+    renamed = False
+    if patch.is_edge and patch.edge is not None and patch.edge.kind == "port_call":
+        new_io_id = _reassign_io(plan, patch.edge.to_node, patch.edge.from_node)
+        if new_io_id is not None:
+            patch = patch.model_copy(
+                update={
+                    "edge": patch.edge.model_copy(
+                        update={
+                            "to_node": new_io_id,
+                            "id": f"{patch.edge.from_node}::port_call::{new_io_id}",
+                        }
+                    ),
+                    "target_id": f"{patch.edge.from_node}::port_call::{new_io_id}",
+                }
+            )
+            renamed = True
+    if patch.node is not None and not patch.is_edge and patch.node.id != patch.target_id:
         rename_node_refs(plan, patch.target_id, patch.node.id)
         patch = patch.model_copy(update={"target_id": patch.node.id})
-    if patch.is_edge and patch.edge is not None and patch.edge.kind == "port_call":
-        _reassign_io(plan, patch.edge.to_node, patch.edge.from_node)
+        renamed = True
     upsert_patch(plan, patch)
     plan.meta.last_edit = _dt.datetime.now().isoformat(timespec="seconds")
     write_plan(project_root, plan)
     if renamed:
-        # Переименование меняет id узлов кода: граф пересобираем из кода + плана,
+        # Переименование меняет id узлов: граф пересобираем из кода + плана,
         # иначе в graph.json остались бы старый узел и рёбра на него.
         graph = scan(project_root)
     else:
@@ -228,6 +260,18 @@ def _remove_patch(project_root: Path, target_id: str, is_edge: bool) -> Graph:
     write_plan(project_root, plan)
     # Пересборка из кода + остатшегося плана: apply_plan только добавляет,
     # поэтому без нового скана удалённый узел/ребро остались бы в graph.json.
+    graph = scan(project_root)
+    save_graph(project_root, graph)
+    return graph
+
+
+@_locked
+def _plan_clear(project_root: Path) -> Graph:
+    """Удалить .studio/plan.json и пересобрать граф из кода: конструктор очищен."""
+    plan_file = store.studio_dir(project_root) / "plan.json"
+    if plan_file.is_file():
+        plan_file.unlink()
+        slog.step("plan.json удалён — план очищен")
     graph = scan(project_root)
     save_graph(project_root, graph)
     return graph
@@ -411,6 +455,9 @@ def make_handler(ctx: Ctx):
                 store.write_graph(root, graph)
                 slog.step(f"граф обновлён: узлов={len(graph.nodes)} связей={len(graph.edges)}")
                 return _send_json(self, graph.model_dump())
+            if url.path == "/api/plan/clear":
+                slog.step("plan clear")
+                return _send_json(self, _plan_clear(root).model_dump())
             if url.path == "/api/scaffold/preview":
                 return _send_json(self, _scaffold_preview(root))
             if url.path == "/api/scaffold/apply":

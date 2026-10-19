@@ -68,7 +68,7 @@ class TestPage:
         srv, base = _serve(demo)
         try:
             _, body = _request(base, "/")
-            for marker in ("btnSave", "mView", "mEdit", "palette", "applyGraph", "nodeIdFor", "layoutOrphans"):
+            for marker in ("btnSave", "mView", "mEdit", "palette", "applyGraph", "nodeIdFor", "layoutScenario", "btnClearPlan"):
                 assert marker in body, f"в странице нет {marker}"
             for marker in ("bValidate", "bDiff", "bConfig", "bScan"):
                 assert marker not in body, f"кнопка {marker} не должна существовать"
@@ -135,6 +135,34 @@ class TestPage:
         finally:
             srv.shutdown()
 
+    def test_применение_не_очищает_план_и_спрашивает_guard(self, demo):
+        """P0-4/P1-2: apply не сносит план; guard спрашивается перед preview/apply/rescan."""
+        srv, base = _serve(demo)
+        try:
+            _, body = _request(base, "/")
+            assert "if(!(await guardLeave()))return;" in body, "guard перед apply отсутствует"
+            # автоочистки плана в onFiles/onSync больше нет
+            i_files = body.index("async function onFiles")
+            i_sync = body.index("async function onSync")
+            segment = body[i_files:i_sync]
+            assert "/api/plan/clear" not in segment, "onFiles сносит план автоматически"
+            assert "drafts.clear()" not in segment, "onFiles теряет черновики"
+            i_rescan = body.index("async function onRescan")
+            rescan_head = body[i_rescan:i_rescan + 200]
+            assert "if(!(await guardLeave()))return;" in rescan_head, "onRescan без guard"
+        finally:
+            srv.shutdown()
+
+    def test_статистика_конструктора_на_месте(self, demo):
+        """P1-3: счётчик областей и сценариев плана присутствует."""
+        srv, base = _serve(demo)
+        try:
+            _, body = _request(base, "/")
+            assert "областей" in body
+            assert "сценариев плана" in body
+        finally:
+            srv.shutdown()
+
 
 class TestApi:
     def test_граф_версии_4(self, demo):
@@ -188,6 +216,31 @@ class TestApi:
             assert create["endpoints"][0]["method"] == "post"
             assert create["endpoints"][0]["path"] == "/create"
             assert create["models"] == ["model:models.py:Order"]
+        finally:
+            srv.shutdown()
+
+    def test_api_отдаёт_no_store(self, demo):
+        """P2-2: API не кэшируется браузером."""
+        srv, base = _serve(demo)
+        try:
+            with urllib.request.urlopen(base + "/api/graph") as r:
+                assert r.headers["Cache-Control"] == "no-store"
+            with urllib.request.urlopen(base + "/api/export?format=md") as r:
+                assert r.headers["Cache-Control"] == "no-store"
+        finally:
+            srv.shutdown()
+
+    def test_url_path_в_графе(self, demo):
+        """P1-1: endpoint в графе несёт полный URL в details.url_path."""
+        srv, base = _serve(demo)
+        try:
+            _, body = _request(base, "/api/graph")
+            nodes = json.loads(body)["nodes"]
+            create = next(n for n in nodes if n["id"].endswith(":create_order") and n["kind"] == "endpoint")
+            assert create["details"]["url_path"] == "/api/v1/orders/create"
+            assert create["details"]["path"] == "/create"  # path сырой
+            health = next(n for n in nodes if n["id"].endswith(":health") and n["kind"] == "endpoint")
+            assert health["details"]["url_path"] == "/api/v1/health"
         finally:
             srv.shutdown()
 

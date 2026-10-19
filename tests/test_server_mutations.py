@@ -199,7 +199,7 @@ class TestPlanPatch:
             scen = _scenario_node("reassign", "Reassign")
             _request(base, "/api/plan/patch", "PUT", {"target_id": scen.id, "is_edge": False, "node": scen.model_dump()})
             io = Node(id="io:tmp:update:orders:9", kind="io", layer="io", label="_db.update(orders)",
-                      file_path="", origin="user",
+                      file_path="", line=9, origin="user",
                       details={"method": "update", "table": "orders", "via_attr": "_db", "called_from": ""})
             _request(base, "/api/plan/patch", "PUT", {"target_id": io.id, "is_edge": False, "node": io.model_dump()})
             edge = Edge(id=f"{scen.id}::port_call::{io.id}", from_node=scen.id, to_node=io.id,
@@ -207,9 +207,94 @@ class TestPlanPatch:
             status, body = _request(base, "/api/plan/patch", "PUT",
                                     {"target_id": edge.id, "is_edge": True, "edge": edge.model_dump()})
             assert status == 200
+            new_io_id = f"io:{scen.id}:update:orders:9"
             graph = json.loads(body)
-            assert io.id in graph["scenario_paths"][scen.id]["io_calls"]
-            assert next(n for n in graph["nodes"] if n["id"] == io.id)["details"]["called_from"] == scen.id
+            assert new_io_id in graph["scenario_paths"][scen.id]["io_calls"]
+            assert next(n for n in graph["nodes"] if n["id"] == new_io_id)["details"]["called_from"] == scen.id
+        finally:
+            srv.shutdown()
+
+    def test_port_call_переназначение_обновляет_id_io(self, demo):
+        """P0-1: переназначение io на другой сценарий пересобирает id io-узла."""
+        srv, base = _serve(demo)
+        try:
+            a = _scenario_node("scen_a", "ScenA")
+            b = _scenario_node("scen_b", "ScenB")
+            for n in (a, b):
+                _request(base, "/api/plan/patch", "PUT", {"target_id": n.id, "is_edge": False, "node": n.model_dump()})
+            io = Node(id=f"io:{a.id}:create:orders:5", kind="io", layer="io", label="_db.create(orders)",
+                      file_path="", line=5, origin="user",
+                      details={"method": "create", "table": "orders", "via_attr": "_db", "called_from": a.id})
+            _request(base, "/api/plan/patch", "PUT", {"target_id": io.id, "is_edge": False, "node": io.model_dump()})
+            edge = Edge(id=f"{b.id}::port_call::{io.id}", from_node=b.id, to_node=io.id,
+                        kind="port_call", origin="user")
+            status, body = _request(base, "/api/plan/patch", "PUT",
+                                    {"target_id": edge.id, "is_edge": True, "edge": edge.model_dump()})
+            assert status == 200
+            graph = json.loads(body)
+            new_io_id = f"io:{b.id}:create:orders:5"
+            ids = {n["id"] for n in graph["nodes"]}
+            assert new_io_id in ids and io.id not in ids
+            found = next(n for n in graph["nodes"] if n["id"] == new_io_id)
+            assert found["details"]["called_from"] == b.id
+            assert new_io_id in graph["scenario_paths"][b.id]["io_calls"]
+            # рёбра не висят
+            dangling = [e["id"] for e in graph["edges"] if e["from_node"] not in ids or e["to_node"] not in ids]
+            assert dangling == []
+            assert f"{b.id}::port_call::{new_io_id}" in {e["id"] for e in graph["edges"]}
+            # план переписан: старый id нигде не остался
+            assert all(p.target_id != io.id for p in read_plan(demo).patches)
+            assert any(p.node is not None and p.node.id == new_io_id for p in read_plan(demo).patches)
+        finally:
+            srv.shutdown()
+
+    def test_переназначение_io_без_дубля_после_scaffold(self, demo):
+        """P0-1: после переназначения + scaffold + rescan io не дублируется."""
+        srv, base = _serve(demo)
+        try:
+            a = _scenario_node("scen_a", "ScenA")
+            b = _scenario_node("scen_b", "ScenB")
+            for n in (a, b):
+                _request(base, "/api/plan/patch", "PUT", {"target_id": n.id, "is_edge": False, "node": n.model_dump()})
+            io = Node(id=f"io:{a.id}:create:orders:5", kind="io", layer="io", label="_db.create(orders)",
+                      file_path="", line=5, origin="user",
+                      details={"method": "create", "table": "orders", "via_attr": "_db", "called_from": a.id})
+            _request(base, "/api/plan/patch", "PUT", {"target_id": io.id, "is_edge": False, "node": io.model_dump()})
+            edge = Edge(id=f"{b.id}::port_call::{io.id}", from_node=b.id, to_node=io.id,
+                        kind="port_call", origin="user")
+            _request(base, "/api/plan/patch", "PUT",
+                     {"target_id": edge.id, "is_edge": True, "edge": edge.model_dump()})
+            status, _ = _request(base, "/api/scaffold/apply", "POST")
+            assert status == 200
+            _, body = _request(base, "/api/rescan", "POST")
+            graph = json.loads(body)
+            ios = [n for n in graph["nodes"] if n["kind"] == "io"
+                   and n["details"].get("method") == "create" and n["details"].get("table") == "orders"
+                   and n["details"].get("called_from") == b.id]
+            assert len(ios) == 1, f"ожидался один io, а получился: {[n['id'] for n in ios]}"
+            assert ios[0]["id"] == f"io:{b.id}:create:orders:5"
+        finally:
+            srv.shutdown()
+
+    def test_port_call_с_тем_же_сценарием_не_меняет_id(self, demo):
+        """Идемпотентность: повторный port_call на тот же сценарий не меняет id."""
+        srv, base = _serve(demo)
+        try:
+            scen = _scenario_node("same_scen", "SameScen")
+            _request(base, "/api/plan/patch", "PUT", {"target_id": scen.id, "is_edge": False, "node": scen.model_dump()})
+            io = Node(id=f"io:{scen.id}:create:orders:5", kind="io", layer="io", label="_db.create(orders)",
+                      file_path="", origin="user",
+                      details={"method": "create", "table": "orders", "via_attr": "_db", "called_from": scen.id})
+            _request(base, "/api/plan/patch", "PUT", {"target_id": io.id, "is_edge": False, "node": io.model_dump()})
+            edge = Edge(id=f"{scen.id}::port_call::{io.id}", from_node=scen.id, to_node=io.id,
+                        kind="port_call", origin="user")
+            for _ in range(2):
+                status, body = _request(base, "/api/plan/patch", "PUT",
+                                        {"target_id": edge.id, "is_edge": True, "edge": edge.model_dump()})
+                assert status == 200
+                graph = json.loads(body)
+                assert io.id in {n["id"] for n in graph["nodes"]}
+            assert all(p.target_id == io.id for p in read_plan(demo).patches if p.node is not None and p.node.kind == "io")
         finally:
             srv.shutdown()
 
@@ -372,6 +457,77 @@ class TestScaffoldApi:
         finally:
             srv.shutdown()
 
+    def test_scaffold_apply_не_очищает_план(self, demo):
+        """P0-4: после scaffold план сохраняется; notes/domain/area переживают scan."""
+        srv, base = _serve(demo)
+        try:
+            node = _scenario_node("keep_plan", "KeepPlan").model_copy(
+                update={"notes": "x", "domain": "d", "area": "ep"}
+            )
+            _request(base, "/api/plan/patch", "PUT", {"target_id": node.id, "is_edge": False, "node": node.model_dump()})
+            status, _ = _request(base, "/api/scaffold/apply", "POST")
+            assert status == 200
+            assert plan_path(demo).is_file()
+            assert any(p.node is not None and p.node.id == node.id for p in read_plan(demo).patches)
+            _, body = _request(base, "/api/graph")
+            found = next(n for n in json.loads(body)["nodes"] if n["id"] == node.id)
+            assert found["origin"] == "code"
+            assert found["notes"] == "x"
+            assert found["domain"] == "d"
+            assert found["area"] == "ep"
+        finally:
+            srv.shutdown()
+
+
+class TestMetadataApi:
+    def test_metadata_apply_не_очищает_план(self, demo):
+        """P0-4: перенос в код не сносит план; заметки остаются в графе."""
+        srv, base = _serve(demo)
+        try:
+            node = _scenario_node("meta_keep", "MetaKeep").model_copy(update={"notes": "n"})
+            _request(base, "/api/plan/patch", "PUT", {"target_id": node.id, "is_edge": False, "node": node.model_dump()})
+            status, _ = _request(base, "/api/metadata/apply", "POST")
+            assert status == 200
+            assert plan_path(demo).is_file()
+            assert any(p.node is not None and p.node.id == node.id for p in read_plan(demo).patches)
+            _, body = _request(base, "/api/graph")
+            found = next(n for n in json.loads(body)["nodes"] if n["id"] == node.id)
+            assert found["origin"] == "user"
+            assert found["notes"] == "n"
+        finally:
+            srv.shutdown()
+
+
+class TestPlanClear:
+    def test_clear_удаляет_план_и_оставляет_код(self, demo):
+        srv, base = _serve(demo)
+        try:
+            node = _scenario_node("temp_plan", "TempPlan")
+            _request(base, "/api/plan/patch", "PUT", {"target_id": node.id, "is_edge": False, "node": node.model_dump()})
+            assert plan_path(demo).is_file()
+            status, body = _request(base, "/api/plan/clear", "POST")
+            assert status == 200
+            assert not plan_path(demo).is_file()
+            assert node.id not in {n["id"] for n in json.loads(body)["nodes"]}
+            # код не пострадал: сценарии кода на месте
+            ids = {n["id"] for n in json.loads(body)["nodes"]}
+            assert any(n.origin == "code" and n.kind == "scenario" for n in scan(demo).nodes if n.id in ids)
+        finally:
+            srv.shutdown()
+
+    def test_clear_снимает_stale_пометки(self, demo):
+        srv, base = _serve(demo)
+        try:
+            code_id = next(n.id for n in scan(demo).nodes if n.kind == "scenario" and n.origin == "code")
+            _request(base, "/api/plan/patch", "PUT", {"target_id": code_id, "is_edge": False, "mark_removed": True})
+            _, body = _request(base, "/api/graph")
+            assert next(n for n in json.loads(body)["nodes"] if n["id"] == code_id)["origin"] == "stale"
+            _, body = _request(base, "/api/plan/clear", "POST")
+            nodes = {n["id"]: n for n in json.loads(body)["nodes"]}
+            assert nodes[code_id]["origin"] == "code"
+        finally:
+            srv.shutdown()
+
 
 class TestExportApi:
     def test_md_и_json(self, demo):
@@ -398,6 +554,23 @@ class TestGuard:
             status, body = _request(base, "/api/plan/patch", "PUT", {"target_id": "x", "is_edge": False})
             assert status == 500
             assert "взрыв" in body
+        finally:
+            srv.shutdown()
+
+    def test_тело_больше_лимита_400(self, demo):
+        """P2-4: Content-Length больше MAX_BODY не читается — 400, без зависаний."""
+        import http.client
+
+        srv, base = _serve(demo)
+        try:
+            host, port = base.replace("http://", "").split(":")
+            conn = http.client.HTTPConnection(host, int(port), timeout=10)
+            conn.putrequest("PUT", "/api/plan/patch")
+            conn.putheader("Content-Length", str(100 * 1024 * 1024))
+            conn.endheaders()
+            resp = conn.getresponse()
+            assert resp.status == 400
+            conn.close()
         finally:
             srv.shutdown()
 

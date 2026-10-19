@@ -156,6 +156,18 @@ class TestApplyScaffold:
         assert 'await self._db.create("invoices", ...)' in text
         assert "# Планируемые IO-вызовы:" in text
 
+    def test_scaffolded_переживает_scan(self, demo):
+        """После scaffold + scan code-узел сохраняет scaffolded=True из плана (P3-3)."""
+        scen = _plan_scenario(demo, name="scanned_mark", class_name="ScannedMark")
+        graph = apply_plan(scan(demo), Plan(patches=[PlanPatch(target_id=scen.id, node=scen)]))
+        apply_scaffold(plan_scaffold(graph, demo), graph, demo)
+        assert (demo / "app" / "scenarios" / "scanned_mark.py").is_file()
+        # сервер после scaffold делает scan: план накладывается на код
+        graph = scan(demo)
+        found = next(n for n in graph.nodes if n.id == scen.id)
+        assert found.origin == "code"
+        assert found.scaffolded is True
+
 
 def _evil_scenario(file_path: str, class_name: str = "Evil") -> Node:
     return Node(
@@ -362,6 +374,24 @@ class TestScaffoldSafety:
         monkeypatch.setattr(os, "replace", _boom)
         apply_scaffold(plan_scaffold(graph, demo), graph, demo)
         assert target.read_text(encoding="utf-8") == before
+
+    def test_scaffold_create_атомарна(self, demo, monkeypatch):
+        """Краш посреди create-записи не оставляет битый файл-скелет (P0-3)."""
+        node = _plan_scenario(demo, name="atomic_create", class_name="AtomicCreate")
+        graph = apply_plan(scan(demo), Plan(patches=[PlanPatch(target_id=node.id, node=node)]))
+        target = demo / "app" / "scenarios" / "atomic_create.py"
+
+        import os
+
+        def _boom(src, dst):
+            raise OSError("сбой os.replace")
+
+        monkeypatch.setattr(os, "replace", _boom)
+        apply_scaffold(plan_scaffold(graph, demo), graph, demo)
+        assert not target.exists()
+        # временный файл убран
+        leftovers = [p.name for p in target.parent.iterdir() if p.name.startswith(".studio-tmp-")]
+        assert leftovers == []
 
     def test_scaffold_create_file_false_пропускает(self, demo):
         node = _plan_scenario(demo, name="no_create", class_name="NoCreate")

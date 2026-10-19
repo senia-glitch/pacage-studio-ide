@@ -22,7 +22,7 @@ from studio.metamodel import (
     ScenarioPath,
     TestDetails,
 )
-from studio.scanner.ast_utils import EXCLUDED_DIRS
+from studio.scanner.ast_utils import EXCLUDED_DIRS, clear_cache
 from studio.scanner.helpers import attach_helpers
 from studio.scanner.indexer import Index, build_index, scenario_node_id
 from studio.scanner.resolver import (
@@ -57,7 +57,7 @@ def build_core_graph(env: ProjectEnv, index: Index) -> Graph:
                 id=entry.id,
                 kind="endpoint",
                 layer="representation",
-                label=f"{entry.http_method.upper()} {entry.path or '/'}",
+                label=f"{entry.http_method.upper()} {entry.url_path or entry.path or '/'}",
                 file_path=entry.file_path,
                 line=entry.line,
                 doc=entry.doc or "",
@@ -67,6 +67,7 @@ def build_core_graph(env: ProjectEnv, index: Index) -> Graph:
                     function_name=entry.function_name,
                     router_module=entry.router_module,
                     tags=list(entry.tags),
+                    url_path=entry.url_path,
                 ).model_dump(),
             )
         )
@@ -235,6 +236,9 @@ def build_scenario_paths(graph: Graph) -> None:
 
 def scan(project_root: Path) -> Graph:
     """Полный проход: env → индекс → связи → helpers → tests → пути → план."""
+    from studio.scaffold import _has_marker  # ленивый импорт: scaffold сам зависит от scanner.ast_utils
+
+    clear_cache()
     env = read_env(project_root)
     index = build_index(env)
     graph = build_core_graph(env, index)
@@ -243,6 +247,12 @@ def scan(project_root: Path) -> Graph:
     build_scenario_paths(graph)
     plan = read_plan(project_root)
     graph = apply_plan(graph, plan)
+    for node in graph.nodes:
+        # scaffolded — факт с диска: файл-скелет с маркером (план может не знать).
+        if node.origin != "code" or not node.file_path:
+            continue
+        target = env.project_root / node.file_path
+        node.scaffolded = target.is_file() and _has_marker(target)
     build_scenario_paths(graph)
     graph.plan_meta.last_scan = _dt.datetime.now().isoformat(timespec="seconds")
     graph.nodes.sort(key=lambda n: n.id)

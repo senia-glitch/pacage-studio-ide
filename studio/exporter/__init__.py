@@ -72,6 +72,7 @@ def _endpoint_section(node: Node, graph: Graph, nodes_by_id: dict[str, Node]) ->
     details = node.details
     method = str(details.get("http_method", "")).upper()
     path = details.get("path") or "/"
+    url_path = details.get("url_path") or ""
     function_name = details.get("function_name") or ""
     tags = details.get("tags") or []
     scenario = next(
@@ -87,6 +88,8 @@ def _endpoint_section(node: Node, graph: Graph, nodes_by_id: dict[str, Node]) ->
         f"#### `{method} {path}` — {function_name}",
         f"Файл: {node.file_path}:{node.line}",
     ]
+    if url_path and url_path != path:
+        lines.append(f"URL: {url_path}")
     if tags:
         lines.append(f"Tags: {', '.join(tags)}")
     lines.append(f"Вызывает сценарий: {scenario_label}")

@@ -15,8 +15,6 @@ EXCLUDED_DIRS = frozenset(
     {"tests", "alembic", "docs", ".venv", "venv", "__pycache__", ".git", ".studio"}
 )
 
-_PORT_METHODS = frozenset({"create", "read", "update", "delete", "query", "custom"})
-
 _SQL_TABLE_RE = re.compile(
     r'\b(?:FROM|INTO|UPDATE)\s+"?([A-Za-z_][A-Za-z0-9_]*)"?', re.IGNORECASE
 )
@@ -164,22 +162,3 @@ def has_base(node: ast.ClassDef, base: str) -> bool:
         if isinstance(base_expr, ast.Attribute) and base_expr.attr == base:
             return True
     return False
-
-
-def iter_project_files(root: Path) -> list[Path]:
-    """Все `.py` проекта вне исключённых директорий, отсортированные."""
-    root = Path(root)
-    out: list[Path] = []
-    try:
-        candidates = sorted(root.rglob("*.py"))
-    except OSError:
-        return out
-    for path in candidates:
-        try:
-            rel = path.relative_to(root)
-        except ValueError:
-            continue
-        if any(part in EXCLUDED_DIRS for part in rel.parts):
-            continue
-        out.append(path)
-    return out
