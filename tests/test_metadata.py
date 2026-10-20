@@ -20,6 +20,7 @@ from studio.metadata import (
     DESC_START,
     apply_metadata,
     plan_metadata,
+    read_markers,
 )
 from studio.metamodel import Node
 from studio.scanner import scan
@@ -282,3 +283,90 @@ class TestMetadataApi:
             assert json.loads(body)["written"] == 0
         finally:
             srv.shutdown()
+
+    def test_node_записывает_описание_в_код(self, demo):
+        """Режим Просмотр: описание узла сохраняется маркером в код и переживает очистку плана."""
+        srv, base = _serve(demo)
+        try:
+            code_id = _scenario_id(scan(demo))
+            status, body = _request(base, "/api/metadata/node", "POST",
+                                    {"node_id": code_id, "description": "Описание из Просмотра."})
+            assert status == 200
+            graph = json.loads(body)
+            found = next(n for n in graph["nodes"] if n["id"] == code_id)
+            assert found["description"] == "Описание из Просмотра."
+            text = (demo / "app" / "scenarios" / "orders.py").read_text(encoding="utf-8")
+            assert DESC_START in text and "Описание из Просмотра." in text
+            # план очищен — описание остаётся (читается из маркеров)
+            _request(base, "/api/plan/clear", "POST")
+            _, body = _request(base, "/api/graph")
+            found = next(n for n in json.loads(body)["nodes"] if n["id"] == code_id)
+            assert found["description"] == "Описание из Просмотра."
+        finally:
+            srv.shutdown()
+
+    def test_node_стирает_блок_при_пустом_описании(self, demo):
+        srv, base = _serve(demo)
+        try:
+            code_id = _scenario_id(scan(demo))
+            _request(base, "/api/metadata/node", "POST", {"node_id": code_id, "description": "Временное."})
+            assert DESC_START in (demo / "app" / "scenarios" / "orders.py").read_text(encoding="utf-8")
+            status, body = _request(base, "/api/metadata/node", "POST", {"node_id": code_id, "description": ""})
+            assert status == 200
+            assert DESC_START not in (demo / "app" / "scenarios" / "orders.py").read_text(encoding="utf-8")
+            found = next(n for n in json.loads(body)["nodes"] if n["id"] == code_id)
+            assert found["description"] == ""
+        finally:
+            srv.shutdown()
+
+    def test_node_без_описания_409(self, demo):
+        srv, base = _serve(demo)
+        try:
+            code_id = _scenario_id(scan(demo))
+            status, _ = _request(base, "/api/metadata/node", "POST", {"node_id": code_id})
+            assert status == 409
+        finally:
+            srv.shutdown()
+
+
+class TestReadMarkers:
+    def test_читает_описание_и_критерии(self, demo):
+        graph = scan(demo)
+        sid = _scenario_id(graph)
+        node = next(n for n in graph.nodes if n.id == sid)
+        graph = _with_meta(graph, sid, description="Маркер-описание.", acceptance=["к1", "к2"])
+        apply_metadata(plan_metadata(graph, demo), graph, demo)
+        text = (demo / "app" / "scenarios" / "orders.py").read_text(encoding="utf-8")
+        desc, acc = read_markers(node, text)
+        assert desc == "Маркер-описание."
+        assert acc == ["к1", "к2"]
+
+    def test_нет_блоков_возвращает_none(self, demo):
+        graph = scan(demo)
+        sid = _scenario_id(graph)
+        node = next(n for n in graph.nodes if n.id == sid)
+        text = (demo / "app" / "scenarios" / "orders.py").read_text(encoding="utf-8")
+        assert read_markers(node, text) == (None, None)
+
+    def test_битый_файл_возвращает_none(self, demo):
+        node = Node(
+            id="scenario:app/scenarios/broken.py:Broken",
+            kind="scenario",
+            layer="logic",
+            label="broken",
+            file_path="app/scenarios/broken.py",
+            details={"name": "broken", "class_name": "Broken", "module": "m"},
+        )
+        assert read_markers(node, "class Broken(:\n") == (None, None)
+
+    def test_скан_читает_маркеры_без_плана(self, demo):
+        """Описание из маркеров попадает в граф даже после очистки плана."""
+        graph = scan(demo)
+        sid = _scenario_id(graph)
+        graph = _with_meta(graph, sid, description="Переживёт очистку.")
+        apply_metadata(plan_metadata(graph, demo), graph, demo)
+        (demo / ".studio").mkdir(exist_ok=True)
+        (demo / ".studio" / "plan.json").unlink(missing_ok=True)
+        graph = scan(demo)
+        found = next(n for n in graph.nodes if n.id == sid)
+        assert found.description == "Переживёт очистку."

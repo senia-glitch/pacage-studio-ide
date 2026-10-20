@@ -68,7 +68,8 @@ class TestPage:
         srv, base = _serve(demo)
         try:
             _, body = _request(base, "/")
-            for marker in ("btnSave", "mView", "mEdit", "palette", "applyGraph", "nodeIdFor", "layoutScenario", "btnClearPlan"):
+            for marker in ("btnSavePlan", "mView", "mEdit", "applyGraph", "nodeIdFor", "layoutScenario",
+                           "btnClearPlan", "setViewDraft"):
                 assert marker in body, f"в странице нет {marker}"
             for marker in ("bValidate", "bDiff", "bConfig", "bScan"):
                 assert marker not in body, f"кнопка {marker} не должна существовать"
@@ -98,17 +99,19 @@ class TestPage:
                            "METHOD_ORDER", "METHOD_COLORS", "METHOD_LABELS",
                            "NO_METHOD", "NO_DOMAIN",
                            "tag-stale", "method-plate", "domain-plate",
-                           "fDomain", "matchesFilter"):
+                           "vDomain", "matchesFilter"):
                 assert marker in body, f"в странице нет {marker}"
         finally:
             srv.shutdown()
 
-    def test_кнопка_синхронизации_на_месте(self, demo):
+    def test_перенос_в_код_заменён_точечным_редактированием(self, demo):
+        """«Перенести в код» убран; описание сохраняется через /api/metadata/node."""
         srv, base = _serve(demo)
         try:
             _, body = _request(base, "/")
-            for marker in ("btnSync", "onSync", "/api/metadata/preview",
-                           "/api/metadata/apply", "diff-add", "diff-del"):
+            assert "btnSync" not in body, "кнопка «Перенести в код» должна быть убрана"
+            assert "async function onSync" not in body
+            for marker in ("/api/metadata/node", "vDesc", "vDomain", "setViewDraft", "saveDraft"):
                 assert marker in body, f"в странице нет {marker}"
         finally:
             srv.shutdown()
@@ -117,21 +120,19 @@ class TestPage:
         srv, base = _serve(demo)
         try:
             _, body = _request(base, "/")
-            for marker in ("panelState", "panel-legend", "Добавить", "palette-hint", "PAL",
-                           "toast", "insp-heading", "renderWizard", "createWizard",
-                           "data-kind", "bCreateNode", "Редактируется"):
+            for marker in ("panelState", "panel-legend", "toast", "insp-heading", "renderWizard",
+                           "createWizard", "bCreateNode", "wizardDetailHtml", "edit-only"):
                 assert marker in body, f"в странице нет {marker}"
         finally:
             srv.shutdown()
 
-    def test_связи_перетаскиванием_на_месте(self, demo):
+    def test_связи_и_палитра_убраны(self, demo):
+        """Конструктор — только мастер: палитра и drag-связи удалены."""
         srv, base = _serve(demo)
         try:
             _, body = _request(base, "/")
-            for marker in ("startEdgeDraft", "finishEdgeDraft", "createEdgeFromPorts",
-                           "edge-drafting", "portCenter"):
-                assert marker in body, f"в странице нет {marker}"
-            assert "onPortClick" not in body, "двухкликовый механизм заменён на drag"
+            for marker in ("startEdgeDraft", "paletteCreate", "createEdgeFromPorts", "VALID_EDGES", "runCreate"):
+                assert marker not in body, f"устаревший механизм {marker} должен быть удалён"
         finally:
             srv.shutdown()
 
@@ -141,14 +142,12 @@ class TestPage:
         try:
             _, body = _request(base, "/")
             assert "if(!(await guardLeave()))return;" in body, "guard перед apply отсутствует"
-            # автоочистки плана в onFiles/onSync больше нет
             i_files = body.index("async function onFiles")
-            i_sync = body.index("async function onSync")
-            segment = body[i_files:i_sync]
+            i_next = body.index("async function onRescan")
+            segment = body[i_files:i_next]
             assert "/api/plan/clear" not in segment, "onFiles сносит план автоматически"
             assert "drafts.clear()" not in segment, "onFiles теряет черновики"
-            i_rescan = body.index("async function onRescan")
-            rescan_head = body[i_rescan:i_rescan + 200]
+            rescan_head = body[i_next:i_next + 200]
             assert "if(!(await guardLeave()))return;" in rescan_head, "onRescan без guard"
         finally:
             srv.shutdown()

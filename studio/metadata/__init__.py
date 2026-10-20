@@ -137,6 +137,49 @@ def _find_block(lines: list[str], start_marker: str, end_marker: str, lo: int, h
     return None
 
 
+def _unindent_block(lines: list[str], indent: int) -> list[str]:
+    """Снять отступ и `# ` с закомментированного блока (обратное к _desc_content/_acc_content)."""
+    pad = " " * indent
+    out: list[str] = []
+    for line in lines:
+        if not line.strip():
+            out.append("")
+            continue
+        if line.startswith(pad + "# "):
+            out.append(line[indent + 2 :])
+        else:
+            out.append(line.lstrip())
+    return out
+
+
+def read_markers(node: Node, text: str) -> tuple[str | None, list[str] | None]:
+    """Прочитать блоки `# studio: description/acceptance` узла из текста файла.
+
+    (None, None) — блоков нет (или файл не парсится/owner не найден): сканер
+    оставляет значения из плана/docstring. Пустой блок → описание ""/[].
+    """
+    lines = text.splitlines()
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return None, None
+    owner = _find_owner(tree, node)
+    if owner is None:
+        return None, None
+    lo, hi, indent = _owner_bounds(owner, node)
+    description: str | None = None
+    acceptance: list[str] | None = None
+    desc_block = _find_block(lines, DESC_START, DESC_END, lo, hi)
+    if desc_block is not None:
+        s, e = desc_block
+        description = "\n".join(_unindent_block(lines[s + 1 : e], indent))
+    acc_block = _find_block(lines, ACC_START, ACC_END, lo, hi)
+    if acc_block is not None:
+        s, e = acc_block
+        acceptance = [item for item in _unindent_block(lines[s + 1 : e], indent) if item.strip()]
+    return description, acceptance
+
+
 def _analyze_node_text(node: Node, text: str) -> _Analysis:
     analysis = _Analysis()
     lines = text.splitlines()
@@ -252,7 +295,7 @@ def render_after(nodes: list[Node], text: str) -> str:
         elif e.action.startswith("update"):
             lines[e.start + 1 : e.end] = e.block_lines[1:-1]
         elif e.action.startswith("delete"):
-            lines[e.start + 1 : e.end] = []
+            del lines[e.start : e.end + 1]
     return "\n".join(lines)
 
 

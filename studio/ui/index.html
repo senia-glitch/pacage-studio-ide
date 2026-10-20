@@ -131,28 +131,8 @@ main{flex:1;display:grid;grid-template-columns:280px 1fr 360px;min-height:0}
 .modal-box .msec b{color:var(--dim)}
 .modal-box .item{padding:2px 0;font-size:12px}
 .modal-btns{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
-.palette{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:6px 8px;border-bottom:1px solid #000}
-.palette button{font-size:11px;padding:4px 6px;text-align:left}
-.palette-hint{font-size:10px;color:#6c6d75;padding:2px 8px 6px}
-.edit-status{font-size:11px;color:var(--dim);padding:4px 8px 2px;border-bottom:1px solid var(--line);margin:0 4px 4px}
-.plan-list,.stale-list,.area-list{padding:4px 6px}
-#codeScenList{max-height:190px;overflow:auto;border-bottom:1px solid #000;padding-bottom:6px}
-.pitem{padding:3px 8px;border-radius:5px;cursor:pointer;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pitem:hover{background:var(--panel2)}
-.pitem.sel{background:#4a3a28;outline:1px solid var(--acc)}
-.pitem small{color:var(--dim)}
-.edit-status{font-size:11px;color:var(--dim);padding:4px 8px}
-.port{position:absolute;width:11px;height:11px;border-radius:50%;background:var(--acc);border:2px solid #111;cursor:crosshair;z-index:5;opacity:0;transition:opacity .15s}
-#canvas.edit-mode .port{opacity:.85}
-.node:hover .port{opacity:1}
-.port:hover{opacity:1!important;transform:scale(1.3)}
-.port-t{top:-6px;left:50%;margin-left:-5px}
-.port-r{top:50%;right:-7px;margin-top:-5px}
-.port-b{bottom:-6px;left:50%;margin-left:-5px}
-.port-l{top:50%;left:-7px;margin-top:-5px}
-.edge-src{outline:2px solid var(--acc)!important}
-.edge-draft{stroke:var(--acc);stroke-width:2;stroke-dasharray:6,4;fill:none;pointer-events:none}
-#stage.edge-drafting .node .port{opacity:1!important}
+main.edit-only{grid-template-columns:1fr 380px}
+main.edit-only #left{display:none}
 .diff-file{margin:8px 0}
 .diff-path{font-size:11px;color:var(--dim);padding:2px 0}
 .diff-body{margin:0;padding:8px;background:#1e1f22;font:11px/15px Consolas,monospace;max-height:320px;overflow:auto;white-space:pre}
@@ -170,7 +150,7 @@ main{flex:1;display:grid;grid-template-columns:280px 1fr 360px;min-height:0}
 <span class="logo">⬢ studio</span>
 <span class="hgroup"><span class="hcat">Режим</span><span class="seg">
 <button id="mView" class="on" title="просмотр карты: только чтение">Просмотр</button>
-<button id="mEdit" title="конструктор: создание областей, сценариев и связей">Конструктор</button>
+<button id="mEdit" title="конструктор: мастер создания нового сценария">Конструктор</button>
 </span></span>
 <span class="hgroup" id="pathModeGroup"><span class="hcat">Вид</span><span class="seg">
 <button data-pm="scenario" class="on" title="путь одного запроса: HTTP → сценарий → база → модель">Сценарий</button>
@@ -197,38 +177,21 @@ main{flex:1;display:grid;grid-template-columns:280px 1fr 360px;min-height:0}
 </div>
 </span></span>
 <button id="btnRescan" title="пересканировать код проекта (план сохранится)">Обновить из кода</button>
-<button id="btnSavePlan" style="display:none" title="сохранить несохранённые правки в план (Ctrl+S)">Сохранить</button>
+<button id="btnSavePlan" style="display:none" title="сохранить несохранённые правки (Ctrl+S)">Сохранить</button>
 <button id="btnFiles" style="display:none" title="создать файлы-скелеты по плану (scaffold)">Создать файлы</button>
-<button id="btnSync" style="display:none" title="перенести описание и критерии в код блоками # studio">Перенести в код</button>
-<button id="btnClearPlan" style="display:none" title="удалить .studio/plan.json: узлы плана, связи и пометки на удаление исчезнут (код не меняется)">Очистить план</button>
+<button id="btnClearPlan" style="display:none" title="удалить .studio/plan.json — созданные сценарии и их связи исчезнут (код не меняется)">Очистить план</button>
 <span id="stats">—</span>
 </header>
-<main>
+<main id="main">
 <div id="left">
-<div id="viewLeft">
 <h3>Сценарии</h3>
 <input id="scenSearch" type="search" placeholder="поиск сценариев…" autocomplete="off" title="фильтр по названию, классу, домену и HTTP-методу">
 <div class="panel-legend">группировка: HTTP-метод → домен</div>
 <div id="slist"></div>
 </div>
-<div id="editLeft" style="display:none">
-<div class="edit-status" id="editStatus">Редактируется: ничего не выбрано</div>
-<h3>Области плана</h3>
-<div class="area-list" id="areaList"></div>
-<h3>Сценарии из кода</h3>
-<div class="plan-list" id="codeScenList"></div>
-<h3>Добавить</h3>
-<div class="palette" id="palette"></div>
-<div class="palette-hint" id="paletteHint"></div>
-<h3>Узлы плана</h3>
-<div class="plan-list" id="planList"></div>
-<h3>Помечено на удаление</h3>
-<div class="stale-list" id="staleList"></div>
-</div>
-</div>
 <div id="center">
 <div id="canvas"><div id="view"><div id="stage"><svg id="edges"></svg></div></div>
-<div id="hint">фон — панорама · колесо — зум · тяни за заголовок узла — перетащить · клик — выделить · тяни от порта к порту — связь · Delete — удалить узел плана · Esc — снять выделение</div>
+<div id="hint">фон — панорама · колесо — зум · клик по узлу — инспектор · Esc — снять выделение</div>
 </div>
 </div>
 <div id="right">
@@ -262,27 +225,19 @@ const EDGE_STYLE={
   depends:{c:"#9a9aa2",m:"ar-plain",dash:"6,5"},
   shared:{c:"#4c4e56",m:"ar-shared",dash:"4,6"}
 };
-const VALID_EDGES={
-  endpoint:{scenario:"dispatch"},
-  scenario:{scenario:"scenario_call",io:"port_call",helper:"uses"},
-  io:{model:"table"},
-  model:{},helper:{},
-  test:{scenario:"tests",endpoint:"tests"}
-};
 const MARKERS=[["ar-dispatch","#5aa0ff"],["ar-scenario","#e8833a"],["ar-port","#7fc97f"],["ar-table","#bb9af7"],["ar-tests","#c9a86a"],["ar-plain","#9a9aa2"],["ar-shared","#4c4e56"]];
-const PAL={scenario:{hint:"бизнес-сценарий (ядро запроса)"},io:{hint:"операция с базой (_db.метод)"},model:{hint:"модель / таблица данных"},test:{hint:"тест сценария или эндпоинта"},helper:{hint:"вспомогательный модуль"}};
 const LS={desc:"studio.showDescription",acc:"studio.showAcceptance"};
 const COLW=300,GAPX=66,GAPY=26,PADX=26,PADTOP=30;
 
 let G=null,byId={},scenList=[];
-let viewMode="view",pathMode="scenario",selScenario=null,selId=null,selArea=null;
+let viewMode="view",pathMode="scenario",selScenario=null,selId=null;
 let showDesc=true,showAcc=true,scenFilter="";
 const nodePos=new Map();
 function posKey(){return viewMode==="edit"?"edit":(pathMode==="scenario"?"sc:"+(selScenario||""):"overview")}
 const drafts=new Map();
 let wizard=null;
 let codeState=null;
-let edgeSrc=null,edgeDraftPath=null,drag=null,panDrag=null,justDragged=false,dragRaf=0;
+let drag=null,panDrag=null,justDragged=false,dragRaf=0;
 const view={x:40,y:40,k:1};
 let boxes={};
 let colAnchors=[];
@@ -298,7 +253,6 @@ function applyGraph(g){
   scenList=(G.scenarios||[]).filter(id=>byId[id]);
   if(selId&&!byId[selId])selId=null;
   if(selScenario&&!byId[selScenario])selScenario=null;
-  if(selArea&&!isArea(selArea))selArea=null;
 }
 function isArea(id){const n=byId[id];return !!n&&n.kind==="endpoint"&&n.origin==="user"}
 function areaOfView(n){return n&&n.area&&byId[n.area]?n.area:""}
@@ -306,51 +260,17 @@ function nodeDisplay(n){const d=drafts.get(n.id);return d?Object.assign({},n,d):
 function viewNode(id){const n=byId[id];return n?nodeDisplay(n):null}
 function draftDirty(id){return drafts.has(id)}
 function anyDirty(){return drafts.size>0}
-
-function setDraft(id,vals){
-  const n=byId[id];if(!n)return;
-  const base=formValuesFromNode(n);
-  const same=JSON.stringify(base)===JSON.stringify(vals);
-  if(same)drafts.delete(id);else drafts.set(id,vals);
-  updateDirtyUI();
-  if(!same)updateNodePreview(n.id);
-}
-function clearDraft(id){if(drafts.delete(id)){updateDirtyUI();updateNodePreview(id)}}
-function formValuesFromNode(n){
-  const d=n.details||{};const v={
-    label:String(n.label||""),description:String(n.description||""),
-    acceptance:(n.acceptance||[]).map(String),notes:String(n.notes||""),
-    domain:String(n.domain||""),area:String(n.area||""),
-    file_path:String(n.file_path||""),create_file:!!n.create_file,append_model:!!n.append_model
-  };
-  if(n.kind==="endpoint"){v.http_method=String(d.http_method||"get");v.path=String(d.path||"");v.function_name=String(d.function_name||"");v.router_module=String(d.router_module||"")}
-  if(n.kind==="scenario"){v.name=String(d.name||"");v.class_name=String(d.class_name||"");v.dto=dtoStr(d.dto);v.response=dtoStr(d.response)}
-  if(n.kind==="io"){v.method=String(d.method||"create");v.table=dtoStr(d.table);v.called_from=String(d.called_from||"")}
-  if(n.kind==="model"){v.tablename=String(d.tablename||"");v.class_name=String(d.class_name||"")}
-  if(n.kind==="test"){v.test_name=String(d.test_name||"");v.module=String(d.module||"");v.test_for_scenario=dtoStr(d.test_for_scenario)}
-  if(n.kind==="helper"){v.role=String(d.role||"other");v.module=String(d.module||"")}
-  return v;
+function viewForm(n){
+  return {description:String(n.description||""),domain:String(n.domain||"")};
 }
 const dtoStr=v=>v===null||v===undefined||String(v).trim()===""?"":String(v);
-const asStr=v=>v===null||v===undefined?"":String(v);
-
-const FIELD_BY_ID={
-  fLabel:"label",fDesc:"description",fNotes:"notes",fDomain:"domain",fArea:"area",fPath:"file_path",
-  fCreateFile:"create_file",fAppendModel:"append_model",
-  fMethod:"http_method",fPath2:"path",fFuncName:"function_name",
-  fName:"name",fScenClass:"class_name",fDto:"dto",fResp:"response",
-  fIoMethod:"method",fTable:"table",fTablename:"tablename",fClassName:"class_name",
-  fTestName:"test_name",fTestScen:"test_for_scenario",fRole:"role",fModule:"module"
-};
-function readForm(){
-  const vals={};
-  document.querySelectorAll("#inspBody input[id],#inspBody textarea[id],#inspBody select[id]").forEach(el=>{
-    const key=FIELD_BY_ID[el.id]||el.id;
-    vals[key]=el.type==="checkbox"?el.checked:el.value;
-  });
-  vals.acceptance=[...document.querySelectorAll("#inspBody #fAcc input[data-acc]")].map(el=>el.value);
-  return vals;
+function setViewDraft(id,vals){
+  const n=byId[id];if(!n)return;
+  if(JSON.stringify(viewForm(n))===JSON.stringify(vals))drafts.delete(id);
+  else drafts.set(id,vals);
+  updateDirtyUI();updateNodePreview(id);
 }
+function clearDraft(id){if(drafts.delete(id)){updateDirtyUI();updateNodePreview(id)}}
 
 /* ---------- API ---------- */
 async function api(path,method="GET",body){
@@ -369,12 +289,6 @@ async function putNodePatch(payload){
 }
 async function putEdge(edge){
   const g=await api("/api/plan/patch","PUT",{target_id:edge.id,is_edge:true,edge});await setGraphFrom(g);return g;
-}
-async function deleteEdge(edgeId){
-  const g=await api("/api/plan/patch?target_id="+encodeURIComponent(edgeId)+"&is_edge=1","DELETE");await setGraphFrom(g);
-}
-async function removeNodePatch(nodeId){
-  const g=await api("/api/plan/patch?target_id="+encodeURIComponent(nodeId)+"&is_edge=0","DELETE");await setGraphFrom(g);
 }
 
 /* ---------- id узлов (как в сканере) ---------- */
@@ -395,12 +309,6 @@ function freeId(id,except){
   while(byId[base+":"+i]&&base+":"+i!==except)i++;
   return base+":"+i;
 }
-function uniqueName(base,kind){
-  const taken=new Set(Object.values(byId).map(n=>n.details&&n.details[kind]?String(n.details[kind]):""));
-  if(!taken.has(base))return base;
-  let i=2;while(taken.has(base+"_"+i))i++;
-  return base+"_"+i;
-}
 function slug(s){return String(s||"").trim().toLowerCase().replace(/[^a-z0-9а-яё]+/gi,"_").replace(/^_+|_+$/g,"")||"node"}
 function pascal(s){return String(s||"").split(/[^A-Za-z0-9А-Яа-яЁё]+/).filter(Boolean).map(p=>p[0].toUpperCase()+p.slice(1)).join("")||"Node"}
 
@@ -419,7 +327,7 @@ function domainOfScenario(id){const d=(byId[id]?.domain||"").trim();return d||NO
 function scenarioGroupsByMethodDomain(filterFn){
   const groups=new Map();
   scenList.forEach(id=>{
-    if(!byId[id]||byId[id].origin!=="code")return;
+    if(!byId[id]||byId[id].origin==="stale")return;
     const methods=methodOfScenario(id),domain=domainOfScenario(id),shared=methods.length>1;
     methods.forEach(m=>{
       if(filterFn&&!filterFn({id,method:m,domain}))return;
@@ -476,7 +384,7 @@ function renderList(){
       const dDet=document.createElement("details");
       dDet.dataset.key="d:"+method+":"+domain;dDet.open=panelState.has(dDet.dataset.key)?panelState.get(dDet.dataset.key):true;
       const dSum=document.createElement("summary");dSum.className="domain-summary";
-      dSum.title=domain===NO_DOMAIN?"сценарии без заданного домена (домен задаётся в Конструкторе)":"домен — логическая группа сценариев";
+      dSum.title=domain===NO_DOMAIN?"сценарии без заданного домена (домен задаётся в инспекторе справа)":"домен — логическая группа сценариев";
       dSum.innerHTML=`${esc(domain)} <small>· ${items.length}</small>`;
       dDet.appendChild(dSum);
       items.forEach(({id,shared})=>{
@@ -501,7 +409,7 @@ async function selectScenario(id){
   selScenario=id;selId=id;codeState=null;pathMode="scenario";setModeButtons();renderAll();fitView();
 }
 
-/* ---------- левая панель: конструктор ---------- */
+/* ---------- конструктор: области плана (визуальный контекст) ---------- */
 function planNodes(){return G.nodes.filter(n=>n.origin==="user")}
 function areas(){return G.nodes.filter(n=>n.kind==="endpoint"&&n.origin==="user")}
 function areaMembers(id){
@@ -509,86 +417,14 @@ function areaMembers(id){
   if(!members.some(n=>n.id===id))members.push(byId[id]);
   return members;
 }
-function renderConstructorLists(){
-  const es=$("editStatus");
-  if(es){
-    const sn=selScenario&&byId[selScenario]?byId[selScenario].label:null;
-    const an=selArea?areas().find(a=>a.id===selArea):null;
-    es.textContent="Редактируется: "+(sn||"(сценарий не выбран)")+(an?` · область: ${an.label}`:"");
-  }
-  const al=$("areaList");
-  const list=areas();
-  if(!list.length){
-    al.innerHTML='<p class="dim" style="padding:2px 8px 6px">Областей нет.<br>Нажми «Новый сценарий» в инспекторе или добавь эндпоинт ниже.</p>';
-  }else{
-    al.innerHTML="";
-    list.forEach(a=>{
-      const d=document.createElement("div");
-      d.className="pitem"+(selArea===a.id?" sel":"");
-      d.innerHTML=`${esc(a.label)} <small>· узлов ${areaMembers(a.id).length}</small>`;
-      d.title="область плана: нажми, чтобы выбрать сценарии внутри неё";
-      d.onclick=()=>selectArea(a.id);
-      al.appendChild(d);
-    });
-  }
-  const cl=$("codeScenList");
-  if(cl){
-    cl.innerHTML="";
-    const code=[...new Set(G.scenarios)].filter(id=>byId[id]&&byId[id].origin==="code")
-      .sort((a,b)=>(String(byId[a].domain||NO_DOMAIN)).localeCompare(String(byId[b].domain||NO_DOMAIN))||byId[a].label.localeCompare(byId[b].label));
-    if(!code.length)cl.innerHTML='<p class="dim">Сценариев в коде нет</p>';
-    code.forEach(id=>{
-      const n=byId[id];
-      const d=document.createElement("div");
-      d.className="pitem"+(selId===id?" sel":"");
-      d.innerHTML=`${esc(n.label)} <small>· ${esc(n.domain||NO_DOMAIN)}</small>`;
-      d.title=n.file_path||n.label;
-      d.onclick=()=>selectNode(id);
-      cl.appendChild(d);
-    });
-  }
-  const st=$("paletteHint");
-  const n=selId?viewNode(selId):null;
-  st.textContent=!selId?"выбери область или узел — и добавляй узлы кнопками выше"
-    :n?`выбран: ${n.label} (${KIND_NAMES[n.kind]}) — новые узлы привяжутся к нему`
-    :"выбери область или узел";
-  $("palette").querySelectorAll("button").forEach(b=>b.disabled=!selId);
-
-  const pl=$("planList");pl.innerHTML="";
-  const pn=planNodes();
-  if(!pn.length)pl.innerHTML='<p class="dim">Узлов плана нет</p>';
-  pn.forEach(n=>{
-    const d=document.createElement("div");d.className="pitem";
-    d.textContent=`${KIND_NAMES[n.kind]} · ${n.label}`;
-    d.onclick=()=>selectNode(n.id);pl.appendChild(d);
-  });
-  const sl=$("staleList");sl.innerHTML="";
-  const st_nodes=G.nodes.filter(n=>n.origin==="stale");
-  if(!st_nodes.length)sl.innerHTML='<p class="dim">Нет расхождений</p>';
-  st_nodes.forEach(n=>{
-    const d=document.createElement("div");d.className="pitem";
-    d.textContent="⊘ "+n.label;
-    d.onclick=()=>selectNode(n.id);sl.appendChild(d);
-  });
-}
-function selectArea(id){selectNode(id)}
 function selectNode(id){doSelectNode(id)}
 function doSelectNode(id){
   selId=id;codeState=null;
-  const n=byId[id];
-  if(n&&n.kind==="endpoint"&&n.origin==="user")selArea=id;
   renderAll();
-  if(viewMode==="edit"){
-    const b=boxes[id];
-    if(!b){fitView();return}
-    const r=$("canvas").getBoundingClientRect();
-    const wx=b.x*view.k+view.x,wy=b.y*view.k+view.y,ww=b.w*view.k,wh=b.h*view.k;
-    if(wx+ww<20||wy+wh<20||wx>r.width-40||wy>r.height-40)fitView();
-  }
 }
 
 /* ---------- канвас ---------- */
-function clearStage(){const stage=$("stage"),svg=$("edges");[...stage.children].forEach(ch=>{if(ch!==svg)ch.remove()});svg.innerHTML="";boxes={};edgeSrc=null;edgeDraftPath=null}
+function clearStage(){const stage=$("stage"),svg=$("edges");[...stage.children].forEach(ch=>{if(ch!==svg)ch.remove()});svg.innerHTML="";boxes={}}
 function el(tag,cls,style,html){const e=document.createElement(tag);if(cls)e.className=cls;if(style)Object.assign(e.style,style);if(html!==undefined)e.innerHTML=html;return e}
 function addNode(stage,id,x,y,opts={}){
   const n=viewNode(id);if(!n)return null;
@@ -621,13 +457,6 @@ function addNode(stage,id,x,y,opts={}){
   }
   if(pathMode==="scenario"&&n.kind==="scenario"){
     const mt=e.querySelector(".mt");if(mt)mt.insertAdjacentHTML("beforeend",domainPlate(n.id));
-  }
-  if(viewMode==="edit"&&n.origin!=="stale"){
-    ["t","r","b","l"].forEach(pos=>{
-      const p=el("div","port port-"+pos);p.dataset.node=id;p.dataset.pos=pos;
-      p.addEventListener("mousedown",ev=>{ev.preventDefault();ev.stopPropagation();startEdgeDraft(id,pos,ev)});
-      e.appendChild(p);
-    });
   }
   e.querySelectorAll(".node-sec-body").forEach(b=>b.addEventListener("wheel",ev=>ev.stopPropagation()));
   stage.appendChild(e);return e;
@@ -674,14 +503,14 @@ function zoneBBoxes(){
   });
   return acc;
 }
-const ZONE_LABELS={rep:"эндпоинт",logic:"сценарий",io:"операции БД",tests:"тесты",helpers:"помощники",plan:"план",code:"из кода",orphan:"без области",stale:"помечено на удаление"};
+const ZONE_LABELS={rep:"эндпоинт",logic:"сценарий",io:"операции БД",tests:"тесты",helpers:"помощники",code:"из кода",orphan:"без области"};
 function renderZoneDivs(){
   const stage=$("stage"),svg=$("edges");
   document.querySelectorAll("#stage .zone").forEach(z=>z.remove());
   const acc=zoneBBoxes();
   for(const z in acc){
     const b=acc[z];
-    const d=el("div","zone"+(z==="orphan"||z==="stale"?" ghostzone":""));
+    const d=el("div","zone");
     d.style.left=(b.x1-PADX)+"px";d.style.top=(b.y1-PADTOP)+"px";
     d.style.width=Math.max(260,(b.x2-b.x1)+PADX*2)+"px";d.style.height=Math.max(80,(b.y2-b.y1)+PADTOP+PADX)+"px";
     d.innerHTML=`<span class="zlab">${esc(ZONE_LABELS[z]||z)} <i>· ${b.n}</i></span>`;
@@ -696,14 +525,14 @@ function areaZoneDivs(){
     let x1=1e9,y1=1e9,x2=-1e9,y2=-1e9;
     members.forEach(m=>{const b=boxes[m.id];if(!b)return;x1=Math.min(x1,b.x);y1=Math.min(y1,b.y);x2=Math.max(x2,b.x+b.w);y2=Math.max(y2,b.y+b.h)});
     if(x2<0)return;
-    const d=el("div","zone areazone"+(selArea===a.id?" sel":""));
+    const d=el("div","zone areazone");
     d.style.left=(x1-PADX)+"px";d.style.top=(y1-PADTOP)+"px";
     d.style.width=(x2-x1+PADX*2)+"px";d.style.height=(y2-y1+PADTOP+PADX)+"px";
-    d.innerHTML=`<span class="zlab" data-area="${esc(a.id)}">${esc(a.label)} <i>· узлов ${members.length}</i></span>`;
+    d.innerHTML=`<span class="zlab">${esc(a.label)} <i>· узлов ${members.length}</i></span>`;
     stage.insertBefore(d,svg);
   });
   const acc=zoneBBoxes();
-  ["code","orphan","stale"].forEach(z=>{
+  ["code","orphan"].forEach(z=>{
     const b=acc[z];if(!b)return;
     const d=el("div","zone ghostzone");
     d.style.left=(b.x1-PADX)+"px";d.style.top=(b.y1-PADTOP)+"px";
@@ -720,17 +549,17 @@ function layoutScenario(stage){
   const cx={rep:40,logic:430,io:960,model:1260,tests:1560};
   const y0=70;
   const h=e=>e?e.offsetHeight:150;
-  const isCode=id=>byId[id]&&byId[id].origin==="code";
-  if(p.endpoint&&isCode(p.endpoint)){addNode(stage,p.endpoint,cx.rep,y0,{zone:"rep"})}
+  const isVis=id=>byId[id]&&byId[id].origin!=="stale";
+  if(p.endpoint&&isVis(p.endpoint)){addNode(stage,p.endpoint,cx.rep,y0,{zone:"rep"})}
   else{const gh=el("div","node ghost",{left:cx.rep+"px",top:y0+"px"},'<div class="hd" style="--c:#6c6d75">нет эндпоинта</div><div class="mt">сценарий вызывается не из HTTP</div>');gh.dataset.zone="rep";stage.appendChild(gh)}
   const main=addNode(stage,selScenario,cx.logic,y0,{zone:"logic"});
   let logicY=y0+h(main)+GAPY;
-  [...new Set(p.called_scenarios||[])].forEach(id=>{if(!isCode(id)||id===selScenario)return;const e=addNode(stage,id,cx.logic,logicY,{nested:true,zone:"logic"});logicY+=h(e)+GAPY});
+  [...new Set(p.called_scenarios||[])].forEach(id=>{if(!isVis(id)||id===selScenario)return;const e=addNode(stage,id,cx.logic,logicY,{nested:true,zone:"logic"});logicY+=h(e)+GAPY});
   const ioY={};let ioT=y0;
-  [...new Set(p.io_calls||[])].forEach(id=>{if(!isCode(id))return;const e=addNode(stage,id,cx.io,ioT,{zone:"io"});ioY[id]=ioT;ioT+=h(e)+GAPY});
+  [...new Set(p.io_calls||[])].forEach(id=>{if(!isVis(id))return;const e=addNode(stage,id,cx.io,ioT,{zone:"io"});ioY[id]=ioT;ioT+=h(e)+GAPY});
   const plans=[];const placed=new Set();
   (p.models||[]).forEach(id=>{
-    if(!isCode(id)||placed.has(id))return;placed.add(id);
+    if(!isVis(id)||placed.has(id))return;placed.add(id);
     let slot=null;
     for(const ioId of (p.io_calls||[])){
       const io=byId[ioId];
@@ -747,8 +576,8 @@ function layoutScenario(stage){
     mCur=y+h(e)+GAPY;
   });
   let testY=y0;
-  [...new Set(p.tests||[])].forEach(id=>{if(!isCode(id))return;const e=addNode(stage,id,cx.tests,testY,{zone:"tests"});testY+=h(e)+GAPY});
-  const helpers=[...new Set((p.helpers||[]).filter(isCode))];
+  [...new Set(p.tests||[])].forEach(id=>{if(!isVis(id))return;const e=addNode(stage,id,cx.tests,testY,{zone:"tests"});testY+=h(e)+GAPY});
+  const helpers=[...new Set((p.helpers||[]).filter(isVis))];
   if(helpers.length){
     let maxY=y0;
     document.querySelectorAll("#stage .node").forEach(e=>{maxY=Math.max(maxY,(parseFloat(e.style.top)||0)+e.offsetHeight)});
@@ -810,8 +639,8 @@ function layoutOverview(stage){
 }
 function sharedModels(){
   const count={};
-  scenList.forEach(id=>{if(!byId[id]||byId[id].origin!=="code")return;const p=G.scenario_paths[id];if(!p)return;[...new Set(p.models||[])].forEach(m=>count[m]=(count[m]||0)+1)});
-  return Object.keys(count).filter(m=>count[m]>=2&&byId[m]&&byId[m].origin==="code").sort((a,b)=>byId[a].label.localeCompare(byId[b].label));
+  scenList.forEach(id=>{if(!byId[id]||byId[id].origin==="stale")return;const p=G.scenario_paths[id];if(!p)return;[...new Set(p.models||[])].forEach(m=>count[m]=(count[m]||0)+1)});
+  return Object.keys(count).filter(m=>count[m]>=2&&byId[m]&&byId[m].origin!=="stale").sort((a,b)=>byId[a].label.localeCompare(byId[b].label));
 }
 /* раскладка: конструктор (области) */
 function layoutAreas(stage){
@@ -844,7 +673,6 @@ function layoutAreas(stage){
   });
   layoutCodeZone(stage,y);
   layoutOrphanZone(stage);
-  layoutStaleZone(stage);
 }
 function orderScenarios(a,b,areaId){
   const edge=id=>G.edges.find(e=>e.from_node===areaId&&e.to_node===id);
@@ -878,7 +706,6 @@ function layoutCodeZone(stage,fromY){
   const planIds=new Set(G.nodes.filter(n=>n.origin!=="code").map(n=>n.id));
   (G.edges||[]).forEach(e=>{if(planIds.has(e.from_node)&&!planIds.has(e.to_node))linked.add(e.to_node);if(planIds.has(e.to_node)&&!planIds.has(e.from_node))linked.add(e.from_node)});
   const codeIds=[...linked].filter(id=>byId[id]&&byId[id].origin==="code");
-  if(selId&&byId[selId]&&byId[selId].origin==="code"&&!codeIds.includes(selId))codeIds.push(selId);
   if(!codeIds.length)return;
   gridZone(stage,codeIds,40,fromY+20,"code");
 }
@@ -887,12 +714,6 @@ function layoutOrphanZone(stage){
   if(!orphans.length)return;
   let maxY=80;document.querySelectorAll("#stage .node").forEach(e=>{maxY=Math.max(maxY,(parseFloat(e.style.top)||0)+e.offsetHeight)});
   gridZone(stage,orphans.map(n=>n.id),40,maxY+80,"orphan");
-}
-function layoutStaleZone(stage){
-  const stale=G.nodes.filter(n=>n.origin==="stale");
-  if(!stale.length)return;
-  let maxY=80;document.querySelectorAll("#stage .node").forEach(e=>{maxY=Math.max(maxY,(parseFloat(e.style.top)||0)+e.offsetHeight)});
-  gridZone(stage,stale.map(n=>n.id),40,maxY+80,"stale");
 }
 /* ---------- связи ---------- */
 function edgeList(){
@@ -972,93 +793,24 @@ function updateNodePreview(id){
   if(viewMode==="edit")areaZoneDivs();else renderZoneDivs();
   drawEdges();sizeStage();
 }
-/* ---------- сохранение черновика ---------- */
+/* ---------- сохранение правок (режим Просмотр) ---------- */
 async function saveDraft(){
-  const snapshot=[...drafts.entries()];
-  if(!snapshot.length)return;
+  const id=selId;
+  const v=drafts.get(id);
+  if(!id||!v)return;
+  const n=byId[id];if(!n)return;
+  const descChanged=v.description!==String(n.description||"");
+  const domChanged=v.domain!==String(n.domain||"");
   try{
-    for(const [id,vals] of snapshot){
-      const n=byId[id];
-      if(!n||!drafts.has(id))continue;
-      if(n.origin==="user")await saveUserNode(n,vals,id);
-      else await savePlanData(n,vals,id);
-      drafts.delete(id);
-    }
-    updateDirtyUI();renderAll();
-    toast("сохранено");
+    if(domChanged)await putNodePatch({target_id:id,is_edge:false,patch:{domain:v.domain}});
+    if(descChanged)applyGraph(await api("/api/metadata/node","POST",{node_id:id,description:v.description}));
+    else if(domChanged)applyGraph(await api("/api/graph"));
+    drafts.delete(id);updateDirtyUI();renderAll();
+    toast(descChanged?"описание сохранено в код":"сохранено");
   }catch(e){toast("ошибка сохранения: "+msg(e))}
 }
-async function savePlanData(n,vals,id){
-  const patch={label:vals.label,description:vals.description,acceptance:vals.acceptance,notes:vals.notes,domain:vals.domain};
-  await putNodePatch({target_id:id,is_edge:false,patch});
-}
-const DETAIL_FIELDS={
-  endpoint:["http_method","path","function_name","router_module"],
-  scenario:["name","class_name","dto","response"],
-  io:["method","table"],
-  model:["tablename","class_name"],
-  test:["test_name","test_for_scenario"],
-  helper:["role","module"]
-};
-async function saveUserNode(n,vals,oldId){
-  const details=Object.assign({},n.details||{});
-  (DETAIL_FIELDS[n.kind]||[]).forEach(k=>{if(k in vals)details[k]=vals[k]});
-  ["dto","response","table","test_for_scenario"].forEach(k=>{if(k in details&&dtoStr(details[k])==="")details[k]=null});
-  const newId=freeId(nodeIdFor({id:oldId,kind:n.kind,file_path:vals.file_path,details,line:n.line}),oldId);
-  const node=Object.assign({},n,{
-    id:newId,kind:n.kind,
-    layer:n.kind==="endpoint"||n.kind==="model"?"representation":n.kind==="scenario"?"logic":n.kind==="io"?"io":"",
-    label:vals.label,file_path:vals.file_path,line:n.line,details,origin:"user",
-    description:vals.description,acceptance:vals.acceptance,notes:vals.notes,domain:vals.domain,
-    area:n.kind==="endpoint"?"":vals.area,scaffolded:n.scaffolded,create_file:vals.create_file,
-    append_model:n.kind==="model"?vals.append_model:n.append_model
-  });
-  const patch={label:vals.label,description:vals.description,acceptance:vals.acceptance,notes:vals.notes,
-    domain:vals.domain,area:node.area,file_path:vals.file_path,create_file:vals.create_file,append_model:node.append_model};
-  await putNodePatch({target_id:oldId,is_edge:false,node,patch});
-  if(newId!==oldId&&selId===oldId)selId=newId;
-  if(n.kind==="io"){
-    try{await syncTableEdges(newId,details.table||null)}
-    catch(e){toast("операция БД сохранена, но table-связь не перестроена: "+msg(e))}
-  }
-}
-async function syncTableEdges(ioId,table){
-  const modelId=table?Object.keys(byId).find(k=>byId[k].kind==="model"&&String(byId[k].details?.tablename||"")===table):null;
-  for(const e of G.edges){
-    if(e.kind!=="table"||e.from_node!==ioId)continue;
-    if(e.to_node!==modelId&&e.origin==="user"){await deleteEdge(e.id)}
-  }
-  if(modelId&&!G.edges.some(e=>e.kind==="table"&&e.from_node===ioId&&e.to_node===modelId)){
-    await putEdge({id:`${ioId}::table::${modelId}`,from_node:ioId,to_node:modelId,kind:"table",label:"",line:1,origin:"user",description:""});
-  }
-}
-async function deleteNode(n){
-  if(n.origin==="user"){
-    const yes=await modal("Удалить узел?","Будет удалён узел плана "+n.label+" и связи, которые на него ссылаются. Код проекта не меняется.",["Удалить","Отмена"]);
-    if(!yes)return;
-    try{
-      await removeNodePatch(n.id);
-      drafts.delete(n.id);updateDirtyUI();
-      selId=null;renderAll();toast("узел удалён");
-    }catch(e){toast("ошибка удаления: "+msg(e))}
-  }else if(n.origin==="code"){
-    const yes=await modal("Пометить на удаление?","Узел "+n.label+" создан из кода — файл не удаляется, узел попадёт в «Помечено на удаление».",["Пометить","Отмена"]);
-    if(!yes)return;
-    try{
-      await putNodePatch({target_id:n.id,is_edge:false,mark_removed:true});
-      drafts.delete(n.id);updateDirtyUI();
-      toast("помечен на удаление");
-    }catch(e){toast("ошибка: "+msg(e))}
-  }else{
-    try{
-      await putNodePatch({target_id:n.id,is_edge:false,mark_removed:false});
-      drafts.delete(n.id);updateDirtyUI();
-      toast("восстановлен");
-    }catch(e){toast("ошибка: "+msg(e))}
-  }
-}
 /* ---------- инспектор ---------- */
-function renderAll(){renderHeader();if(viewMode==="edit")renderConstructorLists();else renderList();renderCanvas();renderInspector();renderStats()}
+function renderAll(){renderHeader();if(viewMode!=="edit")renderList();renderCanvas();renderInspector();renderStats()}
 function renderStats(){
   if(!G){$("stats").textContent="—";return}
   const planScen=G.nodes.filter(n=>n.kind==="scenario"&&n.origin==="user").length;
@@ -1069,39 +821,34 @@ function renderHeader(){
   $("mEdit").classList.toggle("on",viewMode==="edit");
   document.querySelectorAll("#pathModeGroup [data-pm]").forEach(b=>b.classList.toggle("on",b.dataset.pm===pathMode));
   $("pathModeGroup").style.display=viewMode==="view"?"":"none";
-  $("viewLeft").style.display=viewMode==="view"?"":"none";
-  $("editLeft").style.display=viewMode==="edit"?"":"none";
-  $("canvas").classList.toggle("edit-mode",viewMode==="edit");
+  document.querySelector("main").classList.toggle("edit-only",viewMode==="edit");
   $("btnFiles").style.display=viewMode==="edit"?"":"none";
-  $("btnSync").style.display=viewMode==="edit"?"":"none";
   $("btnClearPlan").style.display=viewMode==="edit"?"":"none";
   $("btnDesc").classList.toggle("on",showDesc);
   $("btnAcc").classList.toggle("on",showAcc);
   $("hint").textContent=viewMode==="edit"
-    ?"тяни за заголовок узла — перетащить · тяни от порта к порту — связь · Esc — отмена/снять выделение · Delete — удалить узел плана"
-    :"фон — панорама (средняя кнопка — тоже) · колесо — зум · двойной клик по фону — вписать · Esc — снять выделение";
+    ?"Конструктор: создай новый сценарий в мастере справа · кнопки «Создать файлы» и «Очистить план» — в шапке"
+    :"клик по узлу — инспектор: правь описание и домен · фон — панорама · колесо — зум · двойной клик — вписать · Esc — снять выделение";
   const d=$("btnSavePlan");
-  d.style.display=viewMode==="edit"&&anyDirty()?"":"none";
+  d.style.display=anyDirty()?"":"none";
   d.textContent="Сохранить"+(drafts.size>1?" ("+drafts.size+")":"");
 }
 function setModeButtons(){
   $("mView").classList.toggle("on",viewMode==="view");
   $("mEdit").classList.toggle("on",viewMode==="edit");
   $("pathModeGroup").style.display=viewMode==="view"?"":"none";
-  $("viewLeft").style.display=viewMode==="view"?"":"none";
-  $("editLeft").style.display=viewMode==="edit"?"":"none";
+  document.querySelector("main").classList.toggle("edit-only",viewMode==="edit");
 }
 function renderInspector(){
   const chips=$("inspChips"),body=$("inspBody"),foot=$("inspFoot");
   chips.innerHTML="";body.innerHTML="";foot.innerHTML="";
   if(!G){body.innerHTML='<p class="dim">Загрузка…</p>';return}
-  if(viewMode==="edit"&&!selId){renderWizard();return}
+  if(viewMode==="edit"){renderWizard();return}
   if(!selId||!byId[selId]){
-    body.innerHTML='<p class="dim">Выбери узел на канвасе или в списке слева.</p>';return;
+    body.innerHTML='<p class="dim">Выбери узел на канвасе или в списке слева.<br>Справа можно править описание узла и домен сценария.</p>';return;
   }
   const n=viewNode(selId),orig=byId[selId];
   chips.innerHTML=`<span class="chip acc">${esc(KIND_NAMES[orig.kind])}</span><span class="chip">${esc(ORIGIN_NAMES[orig.origin])}</span>${draftDirty(orig.id)?'<span class="chip acc">не сохранено</span>':""}`;
-  const editable=viewMode==="edit"&&orig.origin!=="stale";
   let html="";
   const rows=(pairs)=>pairs.filter(p=>p&&p[1]!==undefined&&p[1]!==null&&p[1]!=="")
     .map(([k,v])=>`<div class="kv"><span>${esc(k)}</span><b>${esc(Array.isArray(v)?v.join(", "):v)}</b></div>`).join("");
@@ -1114,98 +861,43 @@ function renderInspector(){
   if(n.kind==="helper")html+=rows([["роль",ROLE_NAMES[det.role]||det.role],["модуль",det.module]]);
   const desc=n.description||n.doc;
   if(desc)html+=`<div class="docblock${n.description?"":" code"}"><div class="dhdr">${n.description?"описание":"документация из кода"}</div>${esc(desc)}</div>`;
-  if(editable){
-    const v=formValuesFromNode(n);
+  const canDesc=orig.kind!=="io";
+  const canDomain=orig.kind==="scenario";
+  if(canDesc||canDomain){
+    const v=viewForm(n);
     html+=`<div class="edit-form">`;
-    html+=`<label>Название</label><input id="fLabel" value="${esc(v.label)}">`;
-    html+=`<label>Описание</label><textarea id="fDesc" rows="4">${esc(v.description)}</textarea>`;
-    html+=`<label>Критерии приёмки (пункт на строку)</label><div id="fAcc">`;
-    (v.acceptance.length?v.acceptance:[""]).forEach(a=>{html+=`<div class="acc-row"><input data-acc value="${esc(a)}" placeholder="критерий…"><button type="button" data-delacc title="удалить">×</button></div>`});
-    html+=`</div><button id="bAddAcc" type="button" class="btn-ghost" style="margin-top:4px;font-size:11px;padding:2px 6px">+ добавить критерий</button>`;
-    html+=`<label>Заметки</label><input id="fNotes" value="${esc(v.notes)}">`;
-    html+=`<label>Домен (логическая группа)</label><input id="fDomain" value="${esc(v.domain)}" placeholder="например, заказы">`;
-    if(orig.origin==="user"){
-      html+=`<label>Область плана</label><select id="fArea"><option value="">— без области —</option>`;
-      areas().forEach(a=>{html+=`<option value="${esc(a.id)}" ${v.area===a.id?"selected":""}>${esc(a.label)}</option>`});
-      html+=`</select>`;
-      html+=`<label>Путь файла</label><input id="fPath" value="${esc(v.file_path)}">`;
-      html+=`<label><input type="checkbox" id="fCreateFile" ${v.create_file?"checked":""}> создавать файл по кнопке «Создать файлы»</label>`;
-      if(orig.kind==="model")html+=`<label><input type="checkbox" id="fAppendModel" ${v.append_model?"checked":""}> дописать модель в models.py</label>`;
-      if(orig.kind==="endpoint"){
-        html+=`<label>HTTP-метод</label><select id="fMethod">${HTTP_METHODS.map(m=>`<option ${v.http_method===m?"selected":""}>${m}</option>`).join("")}</select>`;
-        html+=`<label>Путь маршрута</label><input id="fPath2" value="${esc(v.path)}">`;
-        html+=`<label>Имя функции (входит в id)</label><input id="fFuncName" value="${esc(v.function_name)}">`;
-      }
-      if(orig.kind==="scenario"){
-        html+=`<label>Имя регистрации (@register_scenario)</label><input id="fName" value="${esc(v.name)}">`;
-        html+=`<label>Имя класса (входит в id)</label><input id="fScenClass" value="${esc(v.class_name)}">`;
-        html+=`<label>Вход (dto)</label><input id="fDto" value="${esc(v.dto)}">`;
-        html+=`<label>Ответ (response)</label><input id="fResp" value="${esc(v.response)}">`;
-      }
-      if(orig.kind==="io"){
-        html+=`<label>Метод БД</label><select id="fIoMethod">${IO_METHODS.map(m=>`<option ${v.method===m?"selected":""}>${m}</option>`).join("")}</select>`;
-        html+=`<label>Таблица (из моделей проекта)</label><input id="fTable" list="tableList" value="${esc(v.table)}" placeholder="например, orders">`;
-        html+=`<datalist id="tableList">${G.nodes.filter(x=>x.kind==="model").map(x=>`<option value="${esc(x.details.tablename||"")}">${esc(x.label)}</option>`).join("")}</datalist>`;
-        if(orig.origin==="user"&&orig.details&&!orig.details.called_from)html+=`<div class="hintline">Операция пока не привязана к сценарию: перетащи связь от порта сценария к её порту.</div>`;
-      }
-      if(orig.kind==="model"){
-        html+=`<label>Имя таблицы</label><input id="fTablename" value="${esc(v.tablename)}">`;
-        html+=`<label>Имя класса (входит в id)</label><input id="fClassName" value="${esc(v.class_name)}">`;
-      }
-      if(orig.kind==="test"){
-        const names=[...new Set(Object.values(byId).filter(x=>x.kind==="scenario").map(x=>x.details.name).filter(Boolean))];
-        html+=`<label>Тестирует сценарий (имя регистрации)</label><select id="fTestScen"><option value="">—</option>${names.map(nm=>`<option ${v.test_for_scenario===nm?"selected":""}>${esc(nm)}</option>`).join("")}</select>`;
-        html+=`<label>Имя теста (входит в id)</label><input id="fTestName" value="${esc(v.test_name)}">`;
-      }
-      if(orig.kind==="helper"){
-        html+=`<label>Роль</label><select id="fRole">${Object.keys(ROLE_NAMES).map(r=>`<option ${v.role===r?"selected":""} value="${r}">${ROLE_NAMES[r]}</option>`).join("")}</select>`;
-        html+=`<label>Модуль (входит в id)</label><input id="fModule" value="${esc(v.module)}">`;
-      }
-      html+=`</div>`;
-    }else if(orig.origin==="code"){
-      html+=`<div class="hintline" style="margin-top:8px">Узел создан из кода. Описание, критерии, заметки, домен и название можно задать в плане — код не меняется.</div>`;
+    if(canDesc){
+      html+=`<label>Описание</label><textarea id="vDesc" rows="4">${esc(v.description)}</textarea>`;
+      html+=`<div class="hintline">${orig.origin==="user"?"пока файла нет — описание хранится в плане; в код попадёт маркером после «Создать файлы»":"сохраняется в код блоком # studio: description start/end"}</div>`;
     }
-    html+=`<div class="docblock" style="border-left-color:#4c4e56"><div class="dhdr">Связи</div><div id="links"></div></div>`;
-    body.innerHTML=html;
-    bindInspectorEvents(orig,v);
-    renderLinks(orig.id);
-  }else{
-    body.innerHTML=rows([["тип",KIND_NAMES[orig.kind]],["статус",ORIGIN_NAMES[orig.origin]],["файл",orig.file_path],["строка",orig.line],["домен",orig.domain||""],["область",areaOfView(n)?byId[areaOfView(n)].label:""]])+html;
-    const links=el("div");links.innerHTML=`<div class="docblock" style="border-left-color:#4c4e56"><div class="dhdr">Связи</div><div id="links"></div></div>`;
-    body.appendChild(links);renderLinks(orig.id);
+    if(canDomain){
+      html+=`<label>Домен</label><input id="vDomain" value="${esc(v.domain)}" placeholder="например, заказы">`;
+      html+=`<div class="hintline">домен хранится в плане (.studio/plan.json)</div>`;
+    }
+    html+=`</div>`;
+  }else if(orig.kind==="io"){
+    html+=`<div class="hintline" style="margin-top:8px">Описание операции БД задаётся в сценарии-родителе.</div>`;
   }
+  html+=`<div class="docblock" style="border-left-color:#4c4e56"><div class="dhdr">Связи</div><div id="links"></div></div>`;
+  body.innerHTML=html;
+  const descEl=$("vDesc"),domEl=$("vDomain");
+  const readView=()=>{const v=viewForm(orig);if(descEl)v.description=descEl.value;if(domEl)v.domain=domEl.value;setViewDraft(orig.id,v)};
+  if(descEl)descEl.addEventListener("input",readView);
+  if(domEl)domEl.addEventListener("input",readView);
+  renderLinks(orig.id);
   if(codeState)body.insertAdjacentHTML("beforeend",codeBlockHtml(codeState));
   foot.innerHTML="";
-  if(editable){
+  if(canDesc||canDomain){
     const save=document.createElement("button");save.id="bSaveDesc";save.className="btn-primary";save.style.marginTop="0";
     save.textContent="Сохранить изменения"+(drafts.size>1?" ("+drafts.size+")":"");
     save.onclick=saveDraft;foot.appendChild(save);
     if(draftDirty(orig.id)){const dis=document.createElement("button");dis.className="btn-ghost";dis.textContent="Отменить правки";dis.onclick=()=>{clearDraft(orig.id);renderInspector()};foot.appendChild(dis)}
-    const del=document.createElement("button");del.className="btn-danger";del.textContent=orig.origin==="user"?"Удалить узел":"Пометить на удаление";
-    del.onclick=()=>deleteNode(orig);foot.appendChild(del);
-  }else if(orig.origin==="stale"){
-    const b=document.createElement("button");b.textContent="Восстановить узел";b.onclick=()=>deleteNode(orig);foot.appendChild(b);
   }
   const code=document.createElement("button");code.textContent=orig.file_path?"Открыть исходник":"Путь кода";code.onclick=()=>openCode(orig);foot.appendChild(code);
   if(codeState){const c=document.createElement("button");c.textContent="Закрыть код";c.onclick=()=>{codeState=null;renderInspector()};foot.appendChild(c)}
   if(codeState){const pre=$("codePre");if(pre&&codeState.line)pre.scrollTop=Math.max(0,(codeState.line-5)*15)}
 }
 function codeBlockHtml(st){return`<div class="codewrap"><div class="codehd"><span>${esc(st.path)}${st.line?": "+st.line:""}</span><button id="bCloseCode">закрыть</button></div><pre id="codePre">${esc(st.code)}</pre></div>`}
-function bindInspectorEvents(n,v){
-  const inp=id=>{const elx=$(id);if(elx)elx.addEventListener(elx.tagName==="SELECT"?"change":"input",()=>setDraft(n.id,normalize(readForm())))};
-  ["fLabel","fDesc","fNotes","fDomain","fPath","fArea","fMethod","fPath2","fFuncName","fName","fScenClass",
-   "fDto","fResp","fIoMethod","fTable","fTablename","fClassName","fTestName","fTestScen","fRole","fModule"].forEach(inp);
-  const cf=$("fCreateFile");if(cf)cf.addEventListener("change",()=>setDraft(n.id,Object.assign(readForm(),{create_file:cf.checked})));
-  const af=$("fAppendModel");if(af)af.addEventListener("change",()=>setDraft(n.id,Object.assign(readForm(),{append_model:af.checked})));
-  $("bAddAcc").onclick=()=>{const vals=readForm();vals.acceptance.push("");setDraft(n.id,vals);const rows=document.querySelectorAll("#fAcc input[data-acc]");if(rows.length)rows[rows.length-1].focus()};
-  $("fAcc").onclick=e=>{const b=e.target.closest("[data-delacc]");if(b){const vals=readForm();vals.acceptance.splice([...document.querySelectorAll("#fAcc input[data-acc]")].findIndex(x=>x===b.parentElement.querySelector("input")),1);setDraft(n.id,vals)}};
-  document.querySelectorAll("#fAcc input[data-acc]").forEach(i=>i.addEventListener("input",()=>setDraft(n.id,readForm())));
-}
-function normalize(vals){
-  ["dto","response","table","test_for_scenario"].forEach(k=>{if(vals[k]!==undefined&&String(vals[k]).trim()==="")vals[k]=null});
-  vals.acceptance=vals.acceptance.map(String);
-  return vals;
-}
 function renderLinks(id){
   const box=$("links");if(!box)return;
   const rel=(G.edges||[]).filter(e=>e.from_node===id||e.to_node===id);
@@ -1239,7 +931,7 @@ function renderWizard(){
     wizard={
       label:"",http:true,method:"post",path:"",desc:"",acc:"",domain:"",
       ops:[{method:"create",table:""}],withFile:true,
-      area:selArea||"",name:"",class_name:"",nameTouched:false,classTouched:false
+      area:"",name:"",class_name:"",nameTouched:false,classTouched:false
     };
     if(!areaOpts.length)wizard.area="";
   }
@@ -1340,7 +1032,7 @@ async function createWizard(){
   if(!/^[a-z_][a-z0-9_]*$/.test(name)){toast("имя регистрации недопустимо: "+name);return}
   const area=await createScenarioFlow({label,name,className,method:w.method,path:w.path.trim(),desc:w.desc,
     acc:w.acc,domain:w.domain,ops:w.ops,withFile:w.withFile,http:w.http,area:w.area});
-  if(area){wizard=null;toast("создан сценарий "+name)}
+  if(area){wizard=null;toast("создан сценарий "+name+" — режим Просмотр")}
 }
 async function createScenarioFlow(o){
   let areaId=o.area;
@@ -1394,8 +1086,9 @@ async function createScenarioFlow(o){
         }
       }
     }
-    selArea=areaId;selScenario=scen.id;selId=scen.id;codeState=null;
-    renderAll();fitView();
+    selScenario=scen.id;selId=scen.id;codeState=null;
+    viewMode="view";pathMode="scenario";
+    setModeButtons();renderAll();fitView();
     return areaId;
   }catch(e){
     for(let i=created.length-1;i>=0;i--){
@@ -1410,95 +1103,6 @@ async function createScenarioFlow(o){
     return null;
   }
 }
-/* ---------- создание узлов из палитры ---------- */
-function paletteCreate(kind){
-  if(!selId)return;
-  const n=byId[selId];
-  const area=areaOfView(n)||selArea||"";
-  if(kind==="scenario"){
-    const base="new_scenario";const name=uniqueName(base,"name");
-    const node={id:"",kind:"scenario",layer:"logic",label:"Новый сценарий",
-      file_path:`app/scenarios/${name}.py`,line:1,details:{name,class_name:pascal(name)+"Scenario",module:"app.scenarios."+name,dto:null,response:null},
-      origin:"user",description:"",acceptance:[],notes:"",domain:"",area,scaffolded:false,create_file:true,append_model:false};
-    node.id=freeId(nodeIdFor(node));
-    runCreate(node,[{type:"dispatch",from:selId,kind:"dispatch",label:`run("${name}")`}]);
-  }else if(kind==="io"){
-    if(n.kind!=="scenario"){toast("операцию БД можно добавить к сценарию — выбери сценарий");return}
-    const io={id:"",kind:"io",layer:"io",label:"_db.create()",file_path:"",line:6,
-      details:{method:"create",table:null,via_attr:"_db",called_from:selId},
-      origin:"user",description:"",acceptance:[],notes:"",domain:"",area,scaffolded:false,create_file:true,append_model:false};
-    io.id=freeId(nodeIdFor(io));
-    runCreate(io,[{type:"port_call",from:selId,kind:"port_call",label:"_db.create()"}]);
-  }else if(kind==="model"){
-    const table="new_table";const cls=pascal(table);
-    const model={id:"",kind:"model",layer:"io",label:cls,file_path:"models.py",line:1,
-      details:{tablename:table,class_name:cls,source_file:"models.py"},
-      origin:"user",description:"",acceptance:[],notes:"",domain:"",area,scaffolded:false,create_file:false,append_model:true};
-    model.id=freeId(nodeIdFor(model));
-    const links=n.kind==="io"?[{type:"table",from:model.id,kind:"table",label:"",to:selId}]:[];
-    runCreate(model,links);
-  }else if(kind==="test"){
-    const name=uniqueName("test_new","test_name");
-    const test={id:"",kind:"test",layer:"",label:name,file_path:`tests/${name}.py`,line:1,
-      details:{test_name:name,test_for_scenario:n.kind==="scenario"?String(n.details.name||""):null,test_for_endpoint:null,module:"tests."+name},
-      origin:"user",description:"",acceptance:[],notes:"",domain:"",area:"",scaffolded:false,create_file:true,append_model:false};
-    test.id=freeId(nodeIdFor(test));
-    const links=n.kind==="scenario"?[{type:"tests",from:test.id,kind:"tests",label:"тест",to:selId}]
-      :n.kind==="endpoint"?[{type:"tests",from:test.id,kind:"tests",label:"тест",to:selId}]:[];
-    runCreate(test,links);
-  }else if(kind==="helper"){
-    const module=uniqueName("app.utils.new","module");
-    const node={id:"",kind:"helper",layer:"",label:"Новый помощник",file_path:`app/utils/${module.split(".").pop()}.py`,line:1,
-      details:{role:"other",module},origin:"user",description:"",acceptance:[],notes:"",domain:"",area:"",
-      scaffolded:false,create_file:true,append_model:false};
-    node.id=freeId(nodeIdFor(node));
-    const links=n.kind==="scenario"?[{type:"uses",from:selId,kind:"uses",label:"",to:node.id}]:[];
-    runCreate(node,links);
-  }
-}
-async function runCreate(node,links){
-  try{
-    await putNodePatch({target_id:node.id,is_edge:false,node});
-    for(const l of links){
-      const from=l.from||node.id,to=l.to||node.id;
-      await putEdge({id:`${from}::${l.kind}::${to}`,from_node:from,to_node:to,kind:l.kind,label:l.label||"",line:1,origin:"user",description:""});
-    }
-    selId=node.id;codeState=null;renderAll();fitView();toast("создано: "+node.label);
-  }catch(e){toast("ошибка создания: "+msg(e))}
-}
-/* ---------- связи: протягивание ---------- */
-function startEdgeDraft(nodeId,pos,e){
-  if(edgeSrc){finishEdgeDraft(nodeId);return}
-  edgeSrc={id:nodeId,pos,portEl:e.currentTarget};
-  document.querySelectorAll("#stage .node").forEach(x=>{if(x.dataset.id===nodeId)x.classList.add("edge-src")});
-  $("stage").classList.add("edge-drafting");
-  edgeDraftPath=document.createElementNS("http://www.w3.org/2000/svg","path");
-  edgeDraftPath.setAttribute("class","edge-draft");$("edges").appendChild(edgeDraftPath);
-  toast("тяни к порту целевого узла · Esc — отмена");
-}
-function portCenter(elx){const r=elx.getBoundingClientRect(),c=$("canvas").getBoundingClientRect();return{x:(r.left+r.width/2-c.left-view.x)/view.k,y:(r.top+r.height/2-c.top-view.y)/view.k}}
-function finishEdgeDraft(nodeId){const src=edgeSrc;clearEdgeSrc();if(!src||src.id===nodeId)return;createEdgeFromPorts(src.id,nodeId)}
-async function createEdgeFromPorts(fromId,toId){
-  const fromNode=byId[fromId],toNode=byId[toId];
-  if(!fromNode||!toNode){toast("цель не найдена");return}
-  const valid=VALID_EDGES[fromNode.kind];
-  if(!valid||!valid[toNode.kind]){toast("недопустимая связь: "+KIND_NAMES[fromNode.kind]+" → "+KIND_NAMES[toNode.kind]);return}
-  const kind=valid[toNode.kind];
-  let label="";
-  if(kind==="dispatch"||kind==="scenario_call")label=`run("${toNode.details?.name||toNode.label}")`;
-  else if(kind==="port_call")label=`_db.${toNode.details?.method||""}(${toNode.details?.table||""})`;
-  else if(kind==="tests")label="тест";
-  const edge={id:`${fromId}::${kind}::${toId}`,from_node:fromId,to_node:toId,kind,label,line:1,origin:"user",description:""};
-  try{
-    await putEdge(edge);
-    if(kind==="tests"&&toNode.kind==="scenario"){
-      const d=Object.assign({},toNode.details,{test_for_scenario:String(toNode.details.name||"")});
-      await putNodePatch({target_id:toId,is_edge:false,node:Object.assign({},toNode,{details:d}),patch:{}});
-    }
-    toast(kind==="port_call"?"операция БД привязана к сценарию "+fromNode.label:"связь создана");
-  }catch(e){toast("ошибка связи: "+msg(e))}
-}
-function clearEdgeSrc(){edgeSrc=null;if(edgeDraftPath){edgeDraftPath.remove();edgeDraftPath=null}$("stage").classList.remove("edge-drafting");document.querySelectorAll("#stage .node").forEach(x=>x.classList.remove("edge-src"))}
 /* ---------- несохранённые изменения ---------- */
 async function guardLeave(){
   if(!anyDirty())return true;
@@ -1510,7 +1114,7 @@ async function guardLeave(){
 }
 function updateDirtyUI(){
   const d=$("btnSavePlan");
-  d.style.display=viewMode==="edit"&&anyDirty()?"":"none";
+  d.style.display=anyDirty()?"":"none";
   if(anyDirty())d.textContent="Сохранить"+(drafts.size>1?" ("+drafts.size+")":"");
   document.querySelectorAll("#stage .node").forEach(e=>{
     e.classList.toggle("dirty",drafts.has(e.dataset.id));
@@ -1555,13 +1159,13 @@ function modal(title,text,buttons){
 function diffLineClass(l){if(l.startsWith("+++")||l.startsWith("---"))return"diff-header";if(l.startsWith("@@"))return"diff-hunk";if(l.startsWith("+"))return"diff-add";if(l.startsWith("-"))return"diff-del";return"diff-ctx"}
 function diffToHtml(t){return t.split("\n").map(l=>`<span class="${diffLineClass(l)}">${esc(l)}</span>`).join("\n")}
 async function onClearPlan(){
-  const yes=await modal("Очистить план?","Узлы плана, связи и пометки на удаление будут удалены (.studio/plan.json). Код проекта не меняется, но несохранённые в код правки пропадут.",["Очистить","Отмена"]);
+  const yes=await modal("Очистить план?","Созданные в Конструкторе сценарии и их связи будут удалены (.studio/plan.json). Код проекта не меняется.",["Очистить","Отмена"]);
   if(!yes)return;
   try{
     drafts.clear();updateDirtyUI();
     const g=await api("/api/plan/clear","POST");
     applyGraph(g);
-    selArea=null;selId=null;wizard=null;selScenario=null;
+    selId=null;wizard=null;selScenario=null;
     renderAll();fitView();
     toast("план очищен");
   }catch(e){toast("ошибка: "+msg(e))}
@@ -1604,39 +1208,6 @@ async function onFiles(){
     };
   }catch(e){toast("ошибка: "+msg(e))}
 }
-async function onSync(){
-  try{
-    const data=await api("/api/metadata/preview","POST");
-    const ops=data.ops||[],diff=data.diff||{};
-    const grp=p=>ops.filter(o=>o.action.startsWith(p));
-    const wOps=grp("write"),uOps=grp("update"),dOps=grp("delete"),sOps=grp("skip");
-    let html=`<h3>Перенос описаний и критериев в код</h3>`;
-    [["Будут созданы",wOps],["Будут обновлены",uOps],["Будут очищены",dOps]].forEach(([title,items])=>{
-      if(!items.length)return;
-      html+=`<div class="msec"><b>${title} (${items.length}):</b></div>`;
-      items.forEach(o=>{html+=`<div class="item">${esc(o.path)}</div>`});
-    });
-    if(sOps.length){
-      html+=`<div class="msec"><b>Пропущено (${sOps.length}):</b></div>`;
-      sOps.forEach(o=>{html+=`<div class="item">${esc(o.path)} — ${esc(o.reason)}</div>`});
-    }
-    Object.keys(diff).forEach(p=>{html+=`<div class="diff-file"><div class="diff-path">${esc(p)}</div><pre class="diff-body">${diffToHtml(diff[p])}</pre></div>`});
-    const total=wOps.length+uOps.length+dOps.length;
-    html+=`<div class="modal-btns"><button id="mCancel" class="btn-ghost">${total?"Отмена":"Закрыть"}</button>`;
-    if(total)html+=`<button id="mApply" class="btn-primary" style="width:auto;margin:0">Применить</button>`;
-    else html+=`<span class="dim" style="align-self:center">Изменений нет — всё уже в коде</span>`;
-    html+=`</div>`;
-    $("modalBox").innerHTML=html;$("modal").style.display="flex";
-    $("mCancel").onclick=()=>{$("modal").style.display="none"};
-    if(total)$("mApply").onclick=async()=>{
-      $("modal").style.display="none";
-      if(!(await guardLeave())){toast("применение отменено");return}
-      const res=await api("/api/metadata/apply","POST");
-      applyGraph(await api("/api/graph"));updateDirtyUI();renderAll();fitView();
-      toast(`в код: создано ${res.written}, обновлено ${res.updated}, очищено ${res.deleted} · план сохранён (очистить — «Очистить план»)`);
-    };
-  }catch(e){toast("ошибка: "+msg(e))}
-}
 async function onRescan(){
   if(!(await guardLeave()))return;
   try{await api("/api/rescan","POST");applyGraph(await api("/api/graph"));updateDirtyUI();renderAll();fitView();toast("граф обновлён из кода")}
@@ -1650,19 +1221,19 @@ function saveContentToggles(){try{localStorage.setItem(LS.desc,showDesc?"1":"0")
 async function load(){
   setContentToggles();
   applyGraph(await api("/api/graph"));
-  const codeScen=scenList.filter(id=>byId[id]&&byId[id].origin==="code");
-  selScenario=codeScen.find(id=>G.scenario_paths[id]&&G.scenario_paths[id].endpoint)||codeScen[0]||null;
+  const visScen=scenList.filter(id=>byId[id]&&byId[id].origin!=="stale");
+  selScenario=visScen.find(id=>G.scenario_paths[id]&&G.scenario_paths[id].endpoint)||visScen[0]||null;
   if(selScenario){selId=selScenario;pathMode="scenario"}
   const hash=location.hash.slice(1);
   if(hash==="overview"){pathMode="overview"}
-  else if(hash.indexOf("s=")===0){const want=decodeURIComponent(hash.slice(2));if(byId[want]&&byId[want].origin==="code"){selScenario=want;selId=want;pathMode="scenario"}}
+  else if(hash.indexOf("s=")===0){const want=decodeURIComponent(hash.slice(2));if(byId[want]&&byId[want].origin!=="stale"){selScenario=want;selId=want;pathMode="scenario"}}
   setModeButtons();renderAll();fitView();
 }
 $("mView").onclick=async()=>{
   if(!await guardLeave())return;
   viewMode="view";
-  if(!(selScenario&&byId[selScenario]&&byId[selScenario].origin==="code")){
-    const cs=scenList.filter(id=>byId[id]&&byId[id].origin==="code");
+  if(!(selScenario&&byId[selScenario]&&byId[selScenario].origin!=="stale")){
+    const cs=scenList.filter(id=>byId[id]&&byId[id].origin!=="stale");
     selScenario=cs[0]||null;selId=selScenario;codeState=null;
   }
   renderAll();fitView();
@@ -1670,12 +1241,12 @@ $("mView").onclick=async()=>{
 $("mEdit").onclick=async()=>{
   if(!await guardLeave())return;
   viewMode="edit";selId=null;wizard=null;renderAll();fitView();
-  toast("Конструктор: слева области, справа создание и правка");
+  toast("Конструктор: создай новый сценарий в мастере справа");
 };
 document.querySelectorAll("#pathModeGroup [data-pm]").forEach(b=>b.onclick=()=>{
   pathMode=b.dataset.pm;
-  if(pathMode==="scenario"&&!(selScenario&&byId[selScenario]&&byId[selScenario].origin==="code")){
-    const cs=scenList.filter(id=>byId[id]&&byId[id].origin==="code");
+  if(pathMode==="scenario"&&!(selScenario&&byId[selScenario]&&byId[selScenario].origin!=="stale")){
+    const cs=scenList.filter(id=>byId[id]&&byId[id].origin!=="stale");
     selScenario=cs[0]||null;selId=selScenario;
   }
   setModeButtons();renderAll();fitView();
@@ -1687,7 +1258,6 @@ $("zOut").onclick=()=>zoomCenter(1/1.2);
 $("zFit").onclick=fitView;
 $("zReset").onclick=()=>{view.k=1;applyView()};
 $("btnFiles").onclick=onFiles;
-$("btnSync").onclick=onSync;
 $("btnClearPlan").onclick=onClearPlan;
 $("btnRescan").onclick=onRescan;
 $("btnSavePlan").onclick=saveDraft;
@@ -1702,11 +1272,9 @@ $("scenSearch").addEventListener("keydown",e=>{
   if(e.key==="Enter"){const f=$("slist").querySelector(".sitem");if(f)f.click();return}
   if(e.key==="Escape"){$("scenSearch").value="";scenFilter="";renderList();return}
 });
-$("palette").innerHTML=Object.keys(PAL).map(k=>`<button data-kind="${k}" title="${esc(PAL[k].hint)}">+ ${esc(KIND_NAMES[k])}</button>`).join("");
-$("palette").querySelectorAll("button").forEach(b=>b.onclick=()=>paletteCreate(b.dataset.kind));
 $("canvas").addEventListener("mousedown",e=>{
   if(e.button===1){e.preventDefault();panDrag={sx:e.clientX,sy:e.clientY,ox:view.x,oy:view.y};$("canvas").classList.add("grabbing");return}
-  if(e.button!==0||edgeSrc)return;
+  if(e.button!==0)return;
   const hd=e.target.closest(".node[data-id] .hd");
   if(hd&&!hd.parentElement.classList.contains("ghost")){
     const nodeEl=hd.parentElement,id=nodeEl.dataset.id;
@@ -1717,11 +1285,6 @@ $("canvas").addEventListener("mousedown",e=>{
   panDrag={sx:e.clientX,sy:e.clientY,ox:view.x,oy:view.y};$("canvas").classList.add("grabbing");e.preventDefault();
 });
 document.addEventListener("mousemove",e=>{
-  if(edgeSrc&&edgeDraftPath){
-    const p=portCenter(edgeSrc.portEl),r=$("canvas").getBoundingClientRect();
-    const mx=(e.clientX-r.left-view.x)/view.k,my=(e.clientY-r.top-view.y)/view.k;
-    edgeDraftPath.setAttribute("d",`M${p.x},${p.y} C${(p.x+mx)/2},${p.y} ${(p.x+mx)/2},${my} ${mx},${my}`);return;
-  }
   if(drag){
     const dx=(e.clientX-drag.sx)/view.k,dy=(e.clientY-drag.sy)/view.k;
     if(!drag.moved&&Math.hypot(e.clientX-drag.sx,e.clientY-drag.sy)<4)return;
@@ -1733,11 +1296,6 @@ document.addEventListener("mousemove",e=>{
   view.x=panDrag.ox+e.clientX-panDrag.sx;view.y=panDrag.oy+e.clientY-panDrag.sy;applyView();
 });
 document.addEventListener("mouseup",e=>{
-  if(edgeSrc){
-    const t=document.elementFromPoint(e.clientX,e.clientY),port=t&&t.closest?t.closest(".port"):null;
-    if(port&&port.dataset.node)finishEdgeDraft(port.dataset.node);else clearEdgeSrc();
-    return;
-  }
   if(drag){
     if(drag.moved){justDragged=true;drag.el.classList.remove("dragging");renderCanvas()}
     drag=null;return;
@@ -1761,12 +1319,10 @@ $("canvas").addEventListener("dblclick",e=>{if(!e.target.closest(".node"))fitVie
 $("zoomLabel").onclick=fitView;
 $("canvas").addEventListener("click",e=>{
   if(justDragged){justDragged=false;return}
-  const zone=e.target.closest(".zone .zlab[data-area]");
-  if(zone){selectArea(zone.dataset.area);return}
+  if(viewMode==="edit")return;
   const elx=e.target.closest(".node[data-id]");
   if(!elx){selectNode(null);return}
   const n=byId[elx.dataset.id];if(!n)return;
-  if(viewMode==="edit"){selectNode(n.id);return}
   if(pathMode==="overview"){if(n.kind==="scenario")selectScenario(n.id);else selectNode(n.id);return}
   if(n.kind==="scenario"&&n.id!==selScenario){selectScenario(n.id);return}
   selectNode(n.id);
@@ -1778,11 +1334,9 @@ document.addEventListener("keydown",e=>{
   if(!inField&&(e.key==="+"||e.key==="=")){e.preventDefault();zoomCenter(1.2);return}
   if(!inField&&e.key==="-"){e.preventDefault();zoomCenter(1/1.2);return}
   if(!inField&&e.key==="0"){e.preventDefault();view.k=1;applyView();return}
-  if(e.key==="Delete"&&viewMode==="edit"&&selId&&!inField){e.preventDefault();deleteNode(byId[selId]);return}
   if(e.key==="Escape"){
     if($("modal").style.display==="flex"){$("modal").style.display="none";return}
     if(codeState){codeState=null;renderInspector();return}
-    if(edgeSrc){clearEdgeSrc();return}
     if(inField)return;
     selectNode(null);
   }

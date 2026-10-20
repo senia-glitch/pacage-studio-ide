@@ -361,6 +361,29 @@ def _metadata_apply(project_root: Path) -> dict:
     return {"written": written, "updated": updated, "deleted": deleted, "skipped": skipped}
 
 
+@_locked
+def _metadata_node(project_root: Path, data: dict) -> Graph:
+    """Точечная синхронизация описания узла: план + маркеры в коде (режим Просмотр)."""
+    node_id = str(data.get("node_id") or "")
+    description = data.get("description")
+    if not node_id or description is None or not isinstance(description, str):
+        raise PlanError("нужны node_id и description")
+    try:
+        plan = load_plan_for_write(project_root)
+    except PlanCorruptedError as exc:
+        raise PlanError(str(exc)) from exc
+    upsert_patch(plan, PlanPatch(target_id=node_id, is_edge=False, patch={"description": description}))
+    plan.meta.last_edit = _dt.datetime.now().isoformat(timespec="seconds")
+    write_plan(project_root, plan)
+    graph = reload_graph(project_root)
+    graph = apply_plan(graph, plan)
+    ops = [op for op in plan_metadata(graph, project_root) if op.node_id == node_id]
+    apply_metadata(ops, graph, project_root)
+    graph = scan(project_root)
+    save_graph(project_root, graph)
+    return graph
+
+
 def make_handler(ctx: Ctx):
     class H(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args) -> None:
@@ -467,6 +490,13 @@ def make_handler(ctx: Ctx):
                 return _send_json(self, _metadata_preview(root))
             if url.path == "/api/metadata/apply":
                 return _send_json(self, _metadata_apply(root))
+            if url.path == "/api/metadata/node":
+                data = _read_body(self)
+                try:
+                    graph = _metadata_node(root, data)
+                except PlanError as exc:
+                    return _send_text(self, str(exc), code=409)
+                return _send_json(self, graph.model_dump())
             self._not_found()
 
         def _not_found(self) -> None:

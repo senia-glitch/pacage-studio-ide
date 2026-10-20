@@ -234,6 +234,31 @@ def build_scenario_paths(graph: Graph) -> None:
     graph.scenario_paths = paths
 
 
+def _apply_code_markers(graph: Graph, env: ProjectEnv) -> None:
+    """Блоки `# studio: description/acceptance` из кода — приоритет над планом.
+
+    Правки описаний в режиме Просмотр пишутся маркерами в код; на скане они —
+    источник правды (если блок удалён вручную, остаётся значение из плана).
+    """
+    from studio.metadata import read_markers  # ленивый импорт: metadata зависит от scaffold
+
+    for node in graph.nodes:
+        if node.origin != "code" or node.kind == "io" or not node.file_path:
+            continue
+        target = env.project_root / node.file_path
+        if not target.is_file():
+            continue
+        try:
+            text = target.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        description, acceptance = read_markers(node, text)
+        if description is not None:
+            node.description = description
+        if acceptance is not None:
+            node.acceptance = acceptance
+
+
 def scan(project_root: Path) -> Graph:
     """Полный проход: env → индекс → связи → helpers → tests → пути → план."""
     from studio.scaffold import _has_marker  # ленивый импорт: scaffold сам зависит от scanner.ast_utils
@@ -247,6 +272,7 @@ def scan(project_root: Path) -> Graph:
     build_scenario_paths(graph)
     plan = read_plan(project_root)
     graph = apply_plan(graph, plan)
+    _apply_code_markers(graph, env)
     for node in graph.nodes:
         # scaffolded — факт с диска: файл-скелет с маркером (план может не знать).
         if node.origin != "code" or not node.file_path:
