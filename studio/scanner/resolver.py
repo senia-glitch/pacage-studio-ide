@@ -1,6 +1,5 @@
-"""Pass 2 — разрешение связей: dispatch, вызовы сценариев, порт и таблицы.
+"""Pass 2 — разрешение связей из AST.
 
-Строит узлы endpoint/scenario/model (см. build_core_graph) и рёбра:
 endpoint --dispatch--> scenario --scenario_call--> scenario,
 scenario --port_call--> io --table--> model.
 """
@@ -20,7 +19,14 @@ from studio.scanner.ast_utils import (
 )
 from studio.scanner.indexer import Index, ScenarioEntry, scenario_node_id
 
-IO_METHODS = frozenset({"create", "read", "update", "delete", "query", "custom"})
+
+def io_node_id(rel_path: str, scenario_class: str, method: str, line: int) -> str:
+    """Идентичность io-узла: kind:file:anchor (§4.4)."""
+    return f"io:{rel_path}:{scenario_class}._db.{method}:{line}"
+
+
+def io_anchor(scenario_class: str, method: str, line: int) -> str:
+    return f"{scenario_class}._db.{method}:{line}"
 
 
 def _add_edge(graph: Graph, edge: Edge) -> None:
@@ -63,7 +69,6 @@ def resolve_dispatch(graph: Graph, index: Index, env: ProjectEnv) -> None:
 
 
 def _scenario_bodies(entry: ScenarioEntry) -> list[ast.AST]:
-    """Тело execute, а если его нет — все методы класса."""
     execute = find_method(entry.class_node, "execute")
     if execute is not None:
         return [execute]
@@ -101,16 +106,12 @@ def resolve_scenario_calls(graph: Graph, index: Index, env: ProjectEnv) -> None:
                 )
 
 
-def _io_node_id(scenario_id: str, method: str, table: str | None, line: int) -> str:
-    return f"io:{scenario_id}:{method}:{table or '_'}:{line}"
-
-
 def _io_label(method: str, table: str | None) -> str:
     return f"_db.{method}({table})" if table else f"_db.{method}()"
 
 
 def resolve_io_and_tables(graph: Graph, index: Index, env: ProjectEnv) -> None:
-    """self._db.<method>(...) в execute → io-узел, ребро port_call и table к модели."""
+    """`self._db.<method>(...)` в execute → io-узел, port_call и table."""
     for entry in index.scenarios.values():
         source = scenario_node_id(entry)
         if not any(n.id == source for n in graph.nodes):
@@ -120,7 +121,7 @@ def resolve_io_and_tables(graph: Graph, index: Index, env: ProjectEnv) -> None:
             continue
         for call in find_port_calls(execute, "_db"):
             func = call.func
-            if not isinstance(func, ast.Attribute) or func.attr not in IO_METHODS:
+            if not isinstance(func, ast.Attribute):
                 continue
             method = func.attr
             if method in ("query", "custom"):
@@ -128,13 +129,12 @@ def resolve_io_and_tables(graph: Graph, index: Index, env: ProjectEnv) -> None:
             else:
                 table = call_first_str_arg(call)
             line = call.lineno
-            io_id = _io_node_id(source, method, table, line)
+            node_id = io_node_id(entry.file_path, entry.class_name, method, line)
             _add_node(
                 graph,
                 Node(
-                    id=io_id,
+                    id=node_id,
                     kind="io",
-                    layer="io",
                     label=_io_label(method, table),
                     file_path=entry.file_path,
                     line=line,
@@ -142,16 +142,17 @@ def resolve_io_and_tables(graph: Graph, index: Index, env: ProjectEnv) -> None:
                         method=method,
                         table=table,
                         via_attr="_db",
-                        called_from=source,
+                        scenario_class=entry.class_name,
+                        scenario_id=source,
                     ).model_dump(),
                 ),
             )
             _add_edge(
                 graph,
                 Edge(
-                    id=f"{source}::port_call::{io_id}",
+                    id=f"{source}::port_call::{node_id}",
                     from_node=source,
-                    to_node=io_id,
+                    to_node=node_id,
                     kind="port_call",
                     label=_io_label(method, table),
                     line=line,
@@ -166,8 +167,8 @@ def resolve_io_and_tables(graph: Graph, index: Index, env: ProjectEnv) -> None:
             _add_edge(
                 graph,
                 Edge(
-                    id=f"{io_id}::table::{model_id}",
-                    from_node=io_id,
+                    id=f"{node_id}::table::{model_id}",
+                    from_node=node_id,
                     to_node=model_id,
                     kind="table",
                     label="",

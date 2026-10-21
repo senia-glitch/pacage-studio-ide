@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+HTML = (Path(__file__).resolve().parent.parent / "studio/ui/index.html").read_text(encoding="utf-8")
+
+
+def test_три_вкладки_одного_окна():
+    assert 'data-tab="map"' in HTML
+    assert 'data-tab="scenario"' in HTML
+    assert 'data-tab="create"' in HTML
+    assert "Карта" in HTML
+    assert "Сценарий" in HTML
+    assert "Создание" in HTML
+
+
+def test_интерфейс_на_русском():
+    for text in ("без домена", "эндпоинт", "сценарий", "модель", "критерии"):
+        assert text in HTML
+
+
+def test_карта_только_fastbase():
+    assert "fastbase" in HTML
+    assert "показаны только эндпоинты" in HTML
+
+
+def test_скрытие_метаданных():
+    assert "скрыть метаданные" in HTML
+    assert 'id="hideMeta"' in HTML
+
+
+def test_автосейв_при_потере_фокуса():
+    assert "потере фокуса" in HTML
+    assert 'addEventListener("blur"' in HTML
+    assert "/api/metadata/node" in HTML
+
+
+def test_создание_только_метаданных():
+    assert "только метаданные" in HTML
+    assert "Таблицы БД не выбираются" in HTML
+
+
+def test_старые_режимы_убраны():
+    for text in ("plan.json", "scaffold", "helper", "Конструктор областей"):
+        assert text not in HTML

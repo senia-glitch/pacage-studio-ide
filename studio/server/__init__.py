@@ -1,13 +1,11 @@
 """Сервер интерфейса студии: stdlib http.server.
 
-GET — просмотр графа. PUT/DELETE — патчи плана. POST — rescan, scaffold.
-Изменяющие эндпоинты пишут только в `.studio/*` и файлы-скелеты (с маркером).
+При старте — автоматический скан проекта, затем интерфейс (§2).
+Изменяющие операции пишут только метаданные (комментарии `# studio: ...`).
 """
 
 from __future__ import annotations
 
-import datetime as _dt
-import difflib
 import functools
 import json
 import threading
@@ -17,30 +15,14 @@ from pathlib import Path
 
 from studio import log as slog
 from studio import store
-from studio.exporter import to_json, to_markdown
-from studio.metadata import MetadataOp, apply_metadata, plan_metadata, render_after
+from studio.creator import CreateError, create_metadata_files
+from studio.env import read_env
+from studio.metadata import MetadataError, save_node_metadata
 from studio.metamodel import Graph
-from studio.scaffold import (
-    ScaffoldOp,
-    _safe_target,
-    apply_scaffold,
-    collect_model_appends,
-    plan_scaffold,
-)
-from studio.scanner import build_scenario_paths, scan
-from studio.store.plan import (
-    Plan,
-    PlanPatch,
-    PlanCorruptedError,
-    apply_plan,
-    load_plan_for_write,
-    remove_node_edges,
-    remove_patch,
-    rename_node_refs,
-    upsert_patch,
-    write_plan,
-)
+from studio.scanner import scan
 from studio.ui import INDEX
+
+MAX_BODY = 16 * 1024 * 1024
 
 
 class Ctx:
@@ -48,77 +30,31 @@ class Ctx:
         self.root = Path(project_root)
 
 
-# plan.json читается-изменяется-пишется; сервер многопоточный, поэтому операции
-# с планом сериализуются, иначе параллельные запросы теряли бы патчи.
-_plan_lock = threading.Lock()
+_write_lock = threading.Lock()
 
 
 def _locked(fn):
-    """Сериализовать изменяющую операцию (блокировка снимается и при исключении)."""
-
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        with _plan_lock:
+        with _write_lock:
             return fn(*args, **kwargs)
 
     return wrapper
 
 
 def load_graph(project_root: Path) -> Graph:
-    """Граф из .studio/graph.json; если файла нет или версия старая — scan на месте."""
     graph = store.read_graph(project_root)
     if graph is not None:
         return graph
-    slog.step("graph.json отсутствует или версия != 4 — сканирую проект")
     graph = scan(project_root)
     store.write_graph(project_root, graph)
-    slog.step(f"граф построен: узлов={len(graph.nodes)} связей={len(graph.edges)}")
     return graph
 
 
-def reload_graph(project_root: Path) -> Graph:
-    """Перечитать graph.json; если нет — scan."""
-    graph = store.read_graph(project_root)
-    if graph is None:
-        return load_graph(project_root)
-    return graph
-
-
-def save_graph(project_root: Path, graph: Graph) -> None:
+def _scan_and_save(project_root: Path) -> Graph:
+    graph = scan(project_root)
     store.write_graph(project_root, graph)
-
-
-def scenarios_payload(graph: Graph) -> dict:
-    """Сокращённый список сценариев для левой панели UI."""
-    nodes = graph.by_id()
-    out = []
-    for scenario_id in graph.scenarios:
-        path = graph.scenario_paths.get(scenario_id)
-        if path is None:
-            continue
-        endpoints = []
-        if path.endpoint and path.endpoint in nodes:
-            details = nodes[path.endpoint].details
-            endpoints.append(
-                {
-                    "id": path.endpoint,
-                    "method": details.get("http_method", ""),
-                    "path": details.get("path", ""),
-                    "label": nodes[path.endpoint].label,
-                }
-            )
-        out.append(
-            {
-                "id": scenario_id,
-                "name": nodes[scenario_id].label if scenario_id in nodes else scenario_id,
-                "endpoints": endpoints,
-                "models": list(path.models),
-            }
-        )
-    return {"scenarios": out}
-
-
-MAX_BODY = 16 * 1024 * 1024  # 16 MB — лимит тела запроса (защита от мусорного Content-Length)
+    return graph
 
 
 def _send_json(handler: BaseHTTPRequestHandler, obj, code: int = 200) -> None:
@@ -132,7 +68,10 @@ def _send_json(handler: BaseHTTPRequestHandler, obj, code: int = 200) -> None:
 
 
 def _send_text(
-    handler: BaseHTTPRequestHandler, text: str, ctype: str = "text/plain; charset=utf-8", code: int = 200
+    handler: BaseHTTPRequestHandler,
+    text: str,
+    ctype: str = "text/plain; charset=utf-8",
+    code: int = 200,
 ) -> None:
     body = text.encode("utf-8")
     handler.send_response(code)
@@ -141,25 +80,6 @@ def _send_text(
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
-
-
-def _read_file(root: Path, rel: str) -> str:
-    """Содержимое файла внутри проекта; выход за границы и мусор — пустая строка."""
-    if not rel:
-        return ""
-    try:
-        target = (root / rel).resolve()
-        root_resolved = root.resolve()
-    except (OSError, ValueError):
-        return ""
-    if target != root_resolved and root_resolved not in target.parents:
-        return ""
-    if not target.is_file():
-        return ""
-    try:
-        return target.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
 
 
 def _read_body(handler: BaseHTTPRequestHandler) -> dict:
@@ -174,223 +94,87 @@ def _read_body(handler: BaseHTTPRequestHandler) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _op_to_dict(op: ScaffoldOp) -> dict:
-    return {"action": op.action, "path": op.path, "node_id": op.node_id, "reason": op.reason}
-
-
-class PlanError(Exception):
-    """Операция плана отклонена (понятное пользователю сообщение, ответ 409)."""
-
-
-def _reassign_io(plan: Plan, io_id: str, new_scenario_id: str) -> str | None:
-    """Переназначить io-узел плана на другой сценарий, пересобрав его id.
-
-    id io-узла кодирует сценарий (`io:<called_from>:<method>:<table>:<line>`) —
-    без пересборки после scaffold+scan появился бы дубль: код создаёт io уже
-    с новым сценарием, а патч плана всё ещё ссылается на старый id.
-    Возвращает новый id или None, если изменений нет (id уже соответствует).
-    """
-    for patch in plan.patches:
-        node = patch.node
-        if patch.is_edge or node is None or node.id != io_id or node.kind != "io":
-            continue
-        details = dict(node.details)
-        if details.get("called_from") == new_scenario_id:
-            return None
-        method = str(details.get("method") or "custom")
-        table = str(details.get("table") or "_")
-        new_io_id = f"io:{new_scenario_id}:{method}:{table}:{node.line}"
-        rename_node_refs(plan, io_id, new_io_id)
-        node.details = {**details, "called_from": new_scenario_id}
-        return new_io_id
-    raise PlanError(
-        "io-узел создан из кода и привязан к своему сценарию в коде — переназначить нельзя"
-    )
-
-
-@_locked
-def _plan_patch(project_root: Path, patch: PlanPatch) -> Graph:
+def _resolve_node(graph: Graph, node_id: str):
+    node = graph.by_id().get(node_id)
+    if node is not None:
+        return node
+    if not node_id.startswith("io:") or "._db." not in node_id:
+        return None
     try:
-        plan = load_plan_for_write(project_root)
-    except PlanCorruptedError as exc:
-        slog.step(f"plan.json повреждён: {exc}")
-        raise PlanError(str(exc)) from exc
-    renamed = False
-    if patch.is_edge and patch.edge is not None and patch.edge.kind == "port_call":
-        new_io_id = _reassign_io(plan, patch.edge.to_node, patch.edge.from_node)
-        if new_io_id is not None:
-            patch = patch.model_copy(
-                update={
-                    "edge": patch.edge.model_copy(
-                        update={
-                            "to_node": new_io_id,
-                            "id": f"{patch.edge.from_node}::port_call::{new_io_id}",
-                        }
-                    ),
-                    "target_id": f"{patch.edge.from_node}::port_call::{new_io_id}",
-                }
-            )
-            renamed = True
-    if patch.node is not None and not patch.is_edge and patch.node.id != patch.target_id:
-        rename_node_refs(plan, patch.target_id, patch.node.id)
-        patch = patch.model_copy(update={"target_id": patch.node.id})
-        renamed = True
-    upsert_patch(plan, patch)
-    plan.meta.last_edit = _dt.datetime.now().isoformat(timespec="seconds")
-    write_plan(project_root, plan)
-    if renamed:
-        # Переименование меняет id узлов: граф пересобираем из кода + плана,
-        # иначе в graph.json остались бы старый узел и рёбра на него.
-        graph = scan(project_root)
+        payload = node_id[len("io:"):]
+        file_path, anchor = payload.split(":", 1)
+        prefix, line_text = anchor.rsplit(":", 1)
+        scenario_class, method = prefix.split("._db.", 1)
+        wanted_line = int(line_text)
+    except (ValueError, IndexError):
+        return None
+    candidates = [
+        n
+        for n in graph.nodes
+        if n.kind == "io"
+        and n.file_path == file_path
+        and (n.details or {}).get("scenario_class") == scenario_class
+        and (n.details or {}).get("method") == method
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda n: abs(n.line - wanted_line))
+
+
+@_locked
+def _save_metadata(project_root: Path, data: dict) -> Graph:
+    node_id = str(data.get("node_id") or "")
+    if not node_id:
+        raise MetadataError("нужен node_id")
+    # Маркеры в коде — истина на момент открытия формы и сохранения (§9).
+    graph = scan(project_root)
+    node = _resolve_node(graph, node_id)
+    if node is None:
+        raise MetadataError("узел не найден — обновите карту из кода")
+    description = data.get("description")
+    acceptance = data.get("acceptance")
+    domain = data.get("domain")
+    if description is None:
+        description = node.description
+    if acceptance is None:
+        acceptance = list(node.acceptance)
+    if domain is None:
+        domain = node.domain
+    if not isinstance(description, str):
+        raise MetadataError("описание должно быть строкой")
+    if isinstance(acceptance, str):
+        acceptance_list = [line.strip() for line in acceptance.splitlines() if line.strip()]
+    elif isinstance(acceptance, list):
+        acceptance_list = [str(item) for item in acceptance if str(item).strip()]
     else:
-        graph = reload_graph(project_root)
-        graph = apply_plan(graph, plan)
-    build_scenario_paths(graph)
-    save_graph(project_root, graph)
-    return graph
+        raise MetadataError("критерии приёмки должны быть списком строк")
+    if not isinstance(domain, str):
+        raise MetadataError("домен должен быть строкой")
+    if node.kind != "endpoint":
+        domain = ""
+    save_node_metadata(project_root, node, description, acceptance_list, domain)
+    return _scan_and_save(project_root)
 
 
 @_locked
-def _remove_patch(project_root: Path, target_id: str, is_edge: bool) -> Graph:
-    plan = load_plan_for_write(project_root)
-    remove_patch(plan, target_id, is_edge)
-    if not is_edge:
-        remove_node_edges(plan, target_id)
-    plan.meta.last_edit = _dt.datetime.now().isoformat(timespec="seconds")
-    write_plan(project_root, plan)
-    # Пересборка из кода + остатшегося плана: apply_plan только добавляет,
-    # поэтому без нового скана удалённый узел/ребро остались бы в graph.json.
-    graph = scan(project_root)
-    save_graph(project_root, graph)
-    return graph
-
-
-@_locked
-def _plan_clear(project_root: Path) -> Graph:
-    """Удалить .studio/plan.json и пересобрать граф из кода: конструктор очищен."""
-    plan_file = store.studio_dir(project_root) / "plan.json"
-    if plan_file.is_file():
-        plan_file.unlink()
-        slog.step("plan.json удалён — план очищен")
-    graph = scan(project_root)
-    save_graph(project_root, graph)
-    return graph
-
-
-def _scaffold_preview(project_root: Path) -> dict:
-    graph = reload_graph(project_root)
-    ops = plan_scaffold(graph, project_root)
-    models = collect_model_appends(graph)
+def _create(project_root: Path, data: dict) -> dict:
+    env = read_env(project_root)
+    created = create_metadata_files(data, env)
+    graph = _scan_and_save(project_root)
     return {
-        "ops": [_op_to_dict(op) for op in ops],
-        "models": [{"node_id": m[0], "class_name": m[1], "tablename": m[2]} for m in models],
+        "created": [
+            {"path": item.path, "kind": item.kind, "name": item.name} for item in created
+        ],
+        "graph": graph.model_dump(),
     }
 
 
-@_locked
-def _scaffold_apply(project_root: Path) -> dict:
-    graph = reload_graph(project_root)
-    ops = plan_scaffold(graph, project_root)
-    apply_scaffold(ops, graph, project_root)
-    # Файлы-скелеты теперь в коде — граф пересобирается, иначе свежие скелеты
-    # не видны до ручного rescan (metadata сообщает «кода ещё нет»).
-    graph = scan(project_root)
-    save_graph(project_root, graph)
-    created = sum(1 for op in ops if op.action == "create")
-    updated = sum(1 for op in ops if op.action == "update_docstring")
-    skipped = sum(1 for op in ops if op.action.startswith("skip"))
-    return {"created": created, "updated": updated, "skipped": skipped}
-
-
-def _metadata_op_to_dict(op: MetadataOp) -> dict:
-    return {"action": op.action, "path": op.path, "node_id": op.node_id, "reason": op.reason}
-
-
-def _simulate_apply(file_ops: list[MetadataOp], graph: Graph, root: Path, before: str) -> str:
-    nodes_by_id = graph.by_id()
-    nodes = [nodes_by_id[op.node_id] for op in file_ops if op.node_id in nodes_by_id]
-    return render_after(nodes, before)
-
-
-def _build_preview_diff(ops: list[MetadataOp], graph: Graph, root: Path) -> dict[str, str]:
-    by_file: dict[str, list[MetadataOp]] = {}
-    for op in ops:
-        if op.action.startswith("skip"):
-            continue
-        by_file.setdefault(op.path, []).append(op)
-    result: dict[str, str] = {}
-    for path, file_ops in by_file.items():
-        target = _safe_target(root, path)
-        if target is None or not target.is_file():
-            continue
-        try:
-            before = target.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        after = _simulate_apply(file_ops, graph, root, before)
-        if after == before:
-            continue
-        diff_lines = difflib.unified_diff(
-            before.splitlines(keepends=True),
-            after.splitlines(keepends=True),
-            fromfile=f"{path} (до)",
-            tofile=f"{path} (после)",
-        )
-        result[path] = "".join(diff_lines)
-    return result
-
-
-def _metadata_preview(project_root: Path) -> dict:
-    graph = reload_graph(project_root)
-    ops = plan_metadata(graph, project_root)
-    diff = _build_preview_diff(ops, graph, project_root)
-    return {"ops": [_metadata_op_to_dict(op) for op in ops], "diff": diff}
-
-
-@_locked
-def _metadata_apply(project_root: Path) -> dict:
-    graph = reload_graph(project_root)
-    ops = plan_metadata(graph, project_root)
-    apply_metadata(ops, graph, project_root)
-    graph = scan(project_root)
-    store.write_graph(project_root, graph)
-    written = sum(1 for op in ops if op.action.startswith("write"))
-    updated = sum(1 for op in ops if op.action.startswith("update"))
-    deleted = sum(1 for op in ops if op.action.startswith("delete"))
-    skipped = sum(1 for op in ops if op.action.startswith("skip"))
-    return {"written": written, "updated": updated, "deleted": deleted, "skipped": skipped}
-
-
-@_locked
-def _metadata_node(project_root: Path, data: dict) -> Graph:
-    """Точечная синхронизация описания узла: план + маркеры в коде (режим Просмотр)."""
-    node_id = str(data.get("node_id") or "")
-    description = data.get("description")
-    if not node_id or description is None or not isinstance(description, str):
-        raise PlanError("нужны node_id и description")
-    try:
-        plan = load_plan_for_write(project_root)
-    except PlanCorruptedError as exc:
-        raise PlanError(str(exc)) from exc
-    upsert_patch(plan, PlanPatch(target_id=node_id, is_edge=False, patch={"description": description}))
-    plan.meta.last_edit = _dt.datetime.now().isoformat(timespec="seconds")
-    write_plan(project_root, plan)
-    graph = reload_graph(project_root)
-    graph = apply_plan(graph, plan)
-    ops = [op for op in plan_metadata(graph, project_root) if op.node_id == node_id]
-    apply_metadata(ops, graph, project_root)
-    graph = scan(project_root)
-    save_graph(project_root, graph)
-    return graph
-
-
 def make_handler(ctx: Ctx):
-    class H(BaseHTTPRequestHandler):
+    class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args) -> None:
             slog.step("HTTP " + fmt % args)
 
         def _guard(self, action) -> None:
-            """Исключение в обработчике → ответ 500, а не обрыв соединения."""
             try:
                 action()
             except Exception as exc:  # noqa: BLE001 — граница HTTP-запроса
@@ -398,19 +182,19 @@ def make_handler(ctx: Ctx):
                 try:
                     _send_text(self, f"internal error: {type(exc).__name__}: {exc}", code=500)
                 except OSError:
-                    pass  # клиент уже отключился, ответить некому
+                    pass
 
         def do_GET(self) -> None:
             self._guard(self._get)
 
-        def do_PUT(self) -> None:
-            self._guard(self._put)
-
-        def do_DELETE(self) -> None:
-            self._guard(self._delete)
-
         def do_POST(self) -> None:
             self._guard(self._post)
+
+        def do_PUT(self) -> None:
+            self._not_found()
+
+        def do_DELETE(self) -> None:
+            self._not_found()
 
         def do_PATCH(self) -> None:
             self._not_found()
@@ -418,7 +202,6 @@ def make_handler(ctx: Ctx):
         def _get(self) -> None:
             root = ctx.root
             url = urllib.parse.urlsplit(self.path)
-            query = urllib.parse.parse_qs(url.query)
             if url.path in ("/", "/index.html"):
                 try:
                     html = INDEX.read_text(encoding="utf-8")
@@ -427,93 +210,48 @@ def make_handler(ctx: Ctx):
                 return _send_text(self, html, "text/html; charset=utf-8")
             if url.path == "/api/graph":
                 return _send_json(self, load_graph(root).model_dump())
-            if url.path == "/api/scenarios":
-                return _send_json(self, scenarios_payload(load_graph(root)))
-            if url.path == "/api/file":
-                rel = (query.get("path") or [""])[0]
-                return _send_json(self, {"path": rel, "code": _read_file(root, rel)})
-            if url.path == "/api/export":
-                fmt = (query.get("format") or ["md"])[0]
-                graph = load_graph(root)
-                if fmt == "json":
-                    return _send_text(self, to_json(graph), "application/json; charset=utf-8")
-                return _send_text(self, to_markdown(graph), "text/markdown; charset=utf-8")
             return _send_text(self, "not found", code=404)
-
-        def _put(self) -> None:
-            root = ctx.root
-            url = urllib.parse.urlsplit(self.path)
-            if url.path == "/api/plan/patch":
-                data = _read_body(self)
-                try:
-                    patch = PlanPatch.model_validate(data)
-                except Exception:
-                    return _send_text(self, "invalid patch", code=400)
-                try:
-                    graph = _plan_patch(root, patch)
-                except PlanError as exc:
-                    return _send_text(self, str(exc), code=409)
-                return _send_json(self, graph.model_dump())
-            self._not_found()
-
-        def _delete(self) -> None:
-            root = ctx.root
-            url = urllib.parse.urlsplit(self.path)
-            query = urllib.parse.parse_qs(url.query)
-            if url.path == "/api/plan/patch":
-                target_id = (query.get("target_id") or [""])[0]
-                is_edge = (query.get("is_edge") or ["0"])[0] == "1"
-                if not target_id:
-                    return _send_text(self, "target_id required", code=400)
-                graph = _remove_patch(root, target_id, is_edge)
-                return _send_json(self, graph.model_dump())
-            self._not_found()
 
         def _post(self) -> None:
             root = ctx.root
             url = urllib.parse.urlsplit(self.path)
             if url.path == "/api/rescan":
                 slog.step("rescan")
-                graph = scan(root)
-                store.write_graph(root, graph)
-                slog.step(f"граф обновлён: узлов={len(graph.nodes)} связей={len(graph.edges)}")
+                graph = _scan_and_save(root)
                 return _send_json(self, graph.model_dump())
-            if url.path == "/api/plan/clear":
-                slog.step("plan clear")
-                return _send_json(self, _plan_clear(root).model_dump())
-            if url.path == "/api/scaffold/preview":
-                return _send_json(self, _scaffold_preview(root))
-            if url.path == "/api/scaffold/apply":
-                result = _scaffold_apply(root)
-                return _send_json(self, result)
-            if url.path == "/api/metadata/preview":
-                return _send_json(self, _metadata_preview(root))
-            if url.path == "/api/metadata/apply":
-                return _send_json(self, _metadata_apply(root))
             if url.path == "/api/metadata/node":
                 data = _read_body(self)
                 try:
-                    graph = _metadata_node(root, data)
-                except PlanError as exc:
+                    graph = _save_metadata(root, data)
+                except MetadataError as exc:
                     return _send_text(self, str(exc), code=409)
                 return _send_json(self, graph.model_dump())
+            if url.path == "/api/create":
+                data = _read_body(self)
+                try:
+                    return _send_json(self, _create(root, data))
+                except CreateError as exc:
+                    return _send_text(self, str(exc), code=409)
             self._not_found()
 
         def _not_found(self) -> None:
             _send_text(self, "not found", code=404)
 
-    return H
+    return Handler
 
 
 def serve(project_root: Path, host: str = "127.0.0.1", port: int = 8777) -> None:
-    store.ensure_layout(project_root)
-    if not slog.is_active(project_root):
-        # cmd_dev уже открыл лог — не затираем его шаги (авто-scan, проект).
-        slog.start_run(project_root, f"dev {host}:{port}")
-    slog.step(f"сервер слушает http://{host}:{port}")
-    server = ThreadingHTTPServer((host, port), make_handler(Ctx(project_root)))
-    print(f"studio dev -> http://{host}:{port}  (project: {project_root})")
-    print("Studio: карта проекта для AI-разработки.")
+    root = Path(project_root).resolve()
+    store.ensure_layout(root)
+    if not slog.is_active(root):
+        slog.start_run(root, f"dev {host}:{port}")
+    # §2: при запуске пакет автоматически проводит скан и только потом UI.
+    slog.step("автоматический скан перед запуском интерфейса")
+    graph = _scan_and_save(root)
+    slog.step(f"скан завершён: узлов={len(graph.nodes)} связей={len(graph.edges)}")
+    server = ThreadingHTTPServer((host, port), make_handler(Ctx(root)))
+    print(f"studio dev -> http://{host}:{port}  (project: {root})")
+    print("Studio: карта пути HTTP-запроса.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

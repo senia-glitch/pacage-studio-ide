@@ -3,1347 +3,614 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>studio — карта проекта</title>
+<title>studio — карта пути запроса</title>
 <style>
 :root{
   --bg:#232428;--panel:#2e2f33;--panel2:#38393e;--hdr:#1b1c1f;--line:#45464c;--txt:#d7d7db;--dim:#9a9aa2;
-  --acc:#e8833a;--blue:#5aa0ff;--red:#ff5d5d;--green:#7fc97f;--purple:#bb9af7;--test:#c9a86a;
-  --w:270px;
+  --acc:#e8833a;--blue:#5aa0ff;--green:#7fc97f;--purple:#bb9af7;--test:#c9a86a;
+  --w:280px;
 }
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--txt);font:13px/1.45 "Segoe UI",Roboto,Arial,sans-serif;display:flex;flex-direction:column;overflow:hidden}
-header{background:var(--hdr);display:flex;align-items:center;gap:10px;padding:6px 10px;border-bottom:1px solid #000;flex-wrap:wrap}
-header .logo{font-weight:700;color:var(--acc);letter-spacing:.5px}
-.hgroup{display:inline-flex;align-items:center;gap:5px}
-.hcat{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
-.seg{display:inline-flex;gap:4px;align-items:center}
-button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer;transition:border-color .12s,background-color .12s,color .12s}
+header{background:var(--hdr);display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid #000;flex-wrap:wrap}
+.logo{font-weight:700;color:var(--acc);letter-spacing:.5px}
+.tabs{display:inline-flex;gap:4px;margin-left:8px}
+.tabbtn{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:5px 14px;font-size:13px;cursor:pointer}
+.tabbtn.on{background:var(--acc);border-color:var(--acc);color:#171510;font-weight:700}
+button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:4px 9px;font-size:12px;cursor:pointer;font-family:inherit}
 button:hover{border-color:var(--acc)}
 button:disabled{opacity:.45;cursor:default}
-button.on{background:var(--acc);border-color:var(--acc);color:#141310;font-weight:700}
-#zoomLabel{min-width:46px;text-align:center;font-size:11px;color:var(--dim);cursor:pointer;user-select:none}
-#zoomLabel:hover{color:var(--txt)}
-#stats{color:var(--dim);font-size:11px}
-::-webkit-scrollbar{width:10px;height:10px}
-::-webkit-scrollbar-thumb{background:#3f4046;border-radius:6px;border:2px solid transparent;background-clip:content-box}
-::-webkit-scrollbar-thumb:hover{background-color:#55565c}
-::-webkit-scrollbar-corner{background:transparent}
-button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:1px solid var(--acc);outline-offset:1px}
-#exportSeg{position:relative}
-main{flex:1;display:grid;grid-template-columns:280px 1fr 360px;min-height:0}
-#left{background:var(--panel);border-right:1px solid #000;display:flex;flex-direction:column;min-height:0}
-#left h3,#right h3{margin:8px 10px 4px;font-size:11px;text-transform:uppercase;color:var(--dim);letter-spacing:.6px}
-.panel-legend{font-size:10px;color:var(--dim);padding:0 6px 4px}
-#slist{flex:1;overflow:auto;border-top:1px solid #000;padding:4px 6px}
-#slist details{margin:3px 0}
-#slist summary{cursor:pointer;color:var(--dim);font-size:11px;padding:2px 4px}
-.sitem{padding:3px 8px;border-radius:5px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
-.sitem:hover{background:var(--panel2)}
-.sitem.sel{background:#4a3a28;outline:1px solid var(--acc)}
-.sitem small{color:var(--dim)}
-.tag-plan{color:var(--acc);font-size:10px}
-.tag-stale{color:var(--dim);font-size:10px}
-.method-summary{cursor:pointer;font-weight:600;font-size:11px;color:var(--txt);padding:4px;margin-top:4px}
-.domain-summary{cursor:pointer;color:var(--dim);font-size:11px;padding:2px 4px 2px 14px}
-.method-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}
-#scenSearch{width:calc(100% - 12px);margin:4px 6px 6px;background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--txt);padding:4px 8px;font-size:12px;font-family:inherit}
-#scenSearch:focus{outline:none;border-color:var(--acc)}
-#center{position:relative;display:flex;flex-direction:column;min-width:0}
-#canvas{flex:1;position:relative;overflow:hidden;cursor:grab;min-height:0;background:#232428}
-#canvas.grabbing{cursor:grabbing}
-#view{transform-origin:0 0;position:absolute;left:0;top:0}
-#stage{position:relative;background:radial-gradient(circle at 1px 1px,#34353b 1px,transparent 1px);background-size:22px 22px}
-#edges{position:absolute;inset:0;pointer-events:none;overflow:visible}
-.elab{font-size:10px;fill:#d7d7db;paint-order:stroke;stroke:#232428;stroke-width:3px;stroke-linejoin:round}
-.node{position:absolute;width:var(--w);background:#313236;border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 14px #0008;user-select:none;cursor:pointer;transition:border-color .15s,box-shadow .15s}
-.node:hover{border-color:var(--acc);box-shadow:0 6px 20px #000c}
-.node.linked{border-color:#5a6478}
-.node.linked:hover{border-color:var(--acc)}
-.node.sel{outline:2px solid var(--acc)}
-.node.dirty{border-style:dashed;border-color:var(--acc)}
-.node.nested{opacity:.55;filter:saturate(.6)}
-.node.ghost{opacity:.5;border-style:dashed;cursor:default}
-.node .hd{padding:6px 8px;font-weight:700;color:var(--c,#888);border-bottom:2px solid var(--c,#888);background:rgba(255,255,255,.03);border-radius:10px 10px 0 0;display:flex;gap:6px;align-items:center;min-width:0}
-.node .hd .hdt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
-.node .hd .hdchip{flex:none;font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:#c9c9d0;background:#3a3b40;border-radius:3px;padding:0 4px}
-.node .mt{padding:5px 8px 6px;font-size:10.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.node .node-sec{padding:3px 8px 5px}
-.node-sec-label{font-size:9px;text-transform:uppercase;letter-spacing:.4px;color:#6c6d75;margin-bottom:2px}
-.node-sec-body{font-size:10.5px;color:#c2c2ca;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.35}
-.ds-full{max-height:6em;overflow-y:auto}
-.acc-full{max-height:5em;overflow-y:auto}
-.acc-full div{position:relative;padding-left:11px}
-.acc-full div:before{content:"•";position:absolute;left:2px;color:#6c6d75}
-.node-sec-divider{height:1px;background:#3a3b40;margin:2px 8px}
-.node .ds-more,.node .acc-more{font-size:9.5px;color:#7c7d85;font-style:italic}
-.node .origtag{position:absolute;top:4px;right:6px;font-size:9px;color:#8a8b93}
-.node.dragging{cursor:grabbing;box-shadow:0 8px 22px #000a;opacity:.95}
-.colhead{position:absolute;font-weight:700;font-size:12px;padding:2px 12px;border-radius:6px;background:#1e1f22;border:1px solid var(--line);white-space:nowrap;color:var(--txt)}
-.colhead i{font-style:normal;color:var(--dim);font-weight:400}
-.zone{position:absolute;border:1px dashed #51525a;border-radius:14px;background:rgba(120,130,160,.045);pointer-events:none}
-.zone .zlab{position:absolute;top:-11px;left:14px;font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--dim);background:var(--bg);padding:1px 10px;border-radius:6px;border:1px solid var(--line);white-space:nowrap}
-.zone .zlab i{font-style:normal;font-weight:400;color:#7c7d85}
-.zone.areazone .zlab{color:var(--acc);cursor:pointer;pointer-events:auto}
-.zone.areazone.sel{outline:2px solid var(--acc);outline-offset:1px}
-.zone.ghostzone{border-style:dotted}
-.badge{position:absolute;background:#2a2b30;border:1px dashed #55565e;border-radius:16px;padding:4px 12px;font-size:11px;color:var(--dim);white-space:nowrap}
-.empty{position:absolute;left:40px;top:70px;color:var(--dim);font-size:13px}
-#hint{position:absolute;left:8px;bottom:6px;font-size:11px;color:#6c6d75;pointer-events:none}
-#right{background:var(--panel);border-left:1px solid #000;display:flex;flex-direction:column;min-height:0}
-#inspHead{padding:10px 10px 6px;border-bottom:1px solid #000}
+.spacer{flex:1}
+.hint{font-size:11px;color:var(--dim)}
+main{flex:1;min-height:0;position:relative}
+.tab{position:absolute;inset:0;display:none;min-height:0}
+.tab.on{display:flex}
+.canvas{flex:1;position:relative;overflow:hidden;cursor:grab;background:#232428;min-width:0}
+.canvas.grabbing{cursor:grabbing}
+.view{position:absolute;left:0;top:0;transform-origin:0 0}
+.stage{position:relative;background-image:radial-gradient(circle at 1px 1px,#34353b 1px,transparent 1px);background-size:22px 22px}
+svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.elab{font-size:10px;fill:#c9c9d0;paint-order:stroke;stroke:#232428;stroke-width:3px;stroke-linejoin:round}
+.colhead{position:absolute;font-weight:700;font-size:12px;padding:3px 12px;border-radius:6px;background:#1e1f22;border:1px solid var(--line);white-space:nowrap}
+.zone{position:absolute;border:1px dashed #4c4e56;border-radius:14px;background:rgba(120,130,160,.04);pointer-events:none}
+.zone .zlab{position:absolute;top:-11px;left:14px;font-size:11px;font-weight:700;letter-spacing:.4px;color:var(--dim);background:var(--bg);padding:1px 10px;border-radius:6px;border:1px solid var(--line);white-space:nowrap}
+.card{position:absolute;width:var(--w);background:#313236;border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 14px #0008;user-select:none;cursor:pointer;transition:border-color .12s,box-shadow .12s}
+.card:hover{border-color:var(--acc);box-shadow:0 6px 20px #000c}
+.card.sel{outline:2px solid var(--acc)}
+.card .hd{padding:6px 9px;font-weight:700;border-bottom:2px solid var(--c,#888);background:rgba(255,255,255,.03);border-radius:10px 10px 0 0;display:flex;gap:6px;align-items:center;min-width:0}
+.card .hd .chip{flex:none;font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:#c9c9d0;background:#3a3b40;border-radius:3px;padding:0 4px}
+.card .hd .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.card .mt{padding:5px 9px 6px;font-size:10.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .sec{padding:3px 9px 5px;border-top:1px solid #3a3b40}
+.card .sec .lbl{font-size:9px;text-transform:uppercase;letter-spacing:.4px;color:#6c6d75;margin-bottom:2px}
+.card .sec .body{font-size:10.5px;color:#c2c2ca;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.35;max-height:6em;overflow:auto}
+.card.nested{margin-left:26px;opacity:.75;border-style:dashed}
+.card.method-get{--c:#5aa0ff}.card.method-post{--c:#7fc97f}.card.method-put{--c:#e8833a}.card.method-patch{--c:#bb9af7}.card.method-delete{--c:#ff5d5d}
+.card.k-endpoint{--c:#5aa0ff}.card.k-scenario{--c:#e8833a}.card.k-io{--c:#7fc97f}.card.k-model{--c:#bb9af7}.card.k-test{--c:#c9a86a}
+.empty{position:absolute;left:40px;top:70px;color:var(--dim);font-size:13px;line-height:1.7}
+.mapbar{padding:6px 12px;border-bottom:1px solid #000;display:flex;gap:12px;align-items:center;background:var(--panel)}
+.mapbar b{color:var(--acc)}
+#mapPane,#scenPane{display:flex;flex-direction:column;flex:1;min-height:0}
+#scenWrap{flex:1;display:grid;grid-template-columns:230px 1fr 350px;min-height:0}
+#scenList{background:var(--panel);border-right:1px solid #000;overflow:auto;padding:6px;min-height:0}
+#scenList .sitem{padding:4px 8px;border-radius:5px;cursor:pointer;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#scenList .sitem:hover{background:var(--panel2)}
+#scenList .sitem.on{background:#4a3a28;outline:1px solid var(--acc)}
+#scenMain{display:flex;flex-direction:column;min-width:0}
+#scenBar{padding:6px 10px;border-bottom:1px solid #000;background:var(--panel);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#inspector{background:var(--panel);border-left:1px solid #000;display:flex;flex-direction:column;min-height:0}
+#inspHead{padding:9px 10px 6px;border-bottom:1px solid #000}
 #inspBody{flex:1;overflow:auto;padding:10px;min-height:0}
-#inspFoot{padding:10px;border-top:1px solid #000;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.kv{display:flex;gap:8px;align-items:baseline;margin:5px 0;font-size:12px}
-.kv span{color:var(--dim);min-width:76px;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+#inspFoot{padding:8px 10px;border-top:1px solid #000;font-size:11px;color:var(--dim);min-height:34px}
+.kv{display:flex;gap:8px;align-items:baseline;margin:4px 0;font-size:11.5px}
+.kv span{color:var(--dim);min-width:74px;font-size:10px;text-transform:uppercase;letter-spacing:.4px}
 .kv b{font-weight:600;word-break:break-all}
-.dim{color:var(--dim)}
-.insp-heading{font-size:12px;margin-bottom:6px}
-.insp-heading b{color:var(--acc)}
+.field{margin:10px 0}
+.field label{display:block;margin-bottom:3px;font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px}
+.field textarea,.field input,.field select{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--txt);padding:5px 8px;font-size:12px;font-family:inherit}
+.field textarea{resize:vertical}
+.field .note{font-size:10.5px;color:#7c7d85;margin-top:3px}
 .chips{display:inline-flex;gap:4px;flex-wrap:wrap}
 .chip{font-size:9.5px;padding:1px 6px;border-radius:8px;background:#3a3b40;color:#c2c2ca}
 .chip.acc{background:#4a3a28;color:var(--acc)}
-.edit-form label{display:block;margin:8px 0 2px;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px}
-.edit-form input,.edit-form textarea,.edit-form select{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--txt);padding:5px 8px;font-size:12px;font-family:inherit}
-.edit-form textarea{resize:vertical}
-.edit-form input[type=checkbox]{width:auto}
-.edit-form .acc-row{display:flex;gap:4px;align-items:center;margin:2px 0}
-.edit-form .acc-row input{flex:1}
-.edit-form .acc-row button{padding:2px 6px;font-size:11px}
-.edit-form .hintline{font-size:10.5px;color:#7c7d85;margin:2px 0}
-.edit-form .oprow{display:flex;gap:6px;align-items:center;margin:4px 0}
-.edit-form .oprow select,.edit-form .oprow input{font-size:11.5px}
-.btn-primary{background:var(--acc);border-color:var(--acc);color:#141310;font-weight:700;width:100%;margin-top:10px;padding:7px}
-.btn-danger{border-color:#7a3b3b;color:#ffb0b0}
-.btn-ghost{border-color:var(--line)}
-.docblock{margin:8px 0;padding:8px 10px;border-left:3px solid var(--acc);background:#2a2b30;border-radius:0 8px 8px 0;font-size:12px;color:#c7c8ce;white-space:pre-wrap;overflow:auto;line-height:1.5}
-.docblock .dhdr{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);margin-bottom:5px}
-.docblock.code{border-left-color:#4c4e56;font-style:italic;color:#84858d}
-.codewrap{margin-top:10px;border:1px solid var(--line);border-radius:8px;overflow:hidden}
-.codehd{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:5px 8px;background:var(--panel2);font-size:11px;color:var(--dim)}
-.codehd button{padding:1px 7px;font-size:11px}
-#codePre{margin:0;padding:8px;background:#1e1f22;color:#d7d7db;font:11px/15px Consolas,monospace;max-height:420px;overflow:auto;white-space:pre}
+#createPane{flex:1;overflow:auto;padding:18px 22px;display:block}
+#createPane .wrap{max-width:1000px;margin:0 auto}
+#createPane h2{margin:0 0 6px;font-size:18px;color:var(--acc)}
+#createPane p{margin:4px 0 12px;color:var(--dim);font-size:12px;line-height:1.6}
+.node-row,.edge-row{display:grid;gap:6px;align-items:start;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px;margin:6px 0}
+.node-row{grid-template-columns:120px 170px 1fr 190px 1fr 30px}
+.edge-row{grid-template-columns:1fr 150px 1fr 30px}
+.node-row input,.node-row select,.node-row textarea,.edge-row select{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:5px;color:var(--txt);padding:4px 6px;font-size:12px;font-family:inherit}
+.node-row textarea{resize:vertical}
+.node-row .ep{display:flex;gap:4px}
+.node-row .ep select{width:80px}
+.node-row .ep input{flex:1}
+.rowhead{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px;margin:14px 0 2px}
+.actions{display:flex;gap:8px;align-items:center;margin-top:12px}
+.primary{background:var(--acc);border-color:var(--acc);color:#171510;font-weight:700;padding:7px 18px}
+#createResult{margin-top:14px;font-size:12px;white-space:pre-wrap;color:var(--txt);background:#1e1f22;border:1px solid var(--line);border-radius:8px;padding:10px;display:none}
 #toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#111;border:1px solid var(--acc);color:var(--txt);padding:8px 14px;border-radius:8px;display:none;z-index:99}
-#modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:100}
-.modal-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;max-width:640px;width:92%;max-height:82vh;overflow:auto}
-.modal-box h3{margin:0 0 12px;color:var(--acc)}
-.modal-box .msec{margin:10px 0;font-size:12px}
-.modal-box .msec b{color:var(--dim)}
-.modal-box .item{padding:2px 0;font-size:12px}
-.modal-btns{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
-main.edit-only{grid-template-columns:1fr 380px}
-main.edit-only #left{display:none}
-.diff-file{margin:8px 0}
-.diff-path{font-size:11px;color:var(--dim);padding:2px 0}
-.diff-body{margin:0;padding:8px;background:#1e1f22;font:11px/15px Consolas,monospace;max-height:320px;overflow:auto;white-space:pre}
-.diff-add{color:#7fc97f;background:#1f3a1f}
-.diff-del{color:#ff5d5d;background:#3a1f1f}
-.diff-hunk{color:#bb9af7}
-.diff-header{color:#9a9aa2}
-.diff-ctx{color:#b8b8c0}
-.linkrow{cursor:pointer;color:var(--blue);font-size:11.5px;padding:1px 0}
-.linkrow:hover{text-decoration:underline}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#3f4046;border-radius:6px;border:2px solid transparent;background-clip:content-box}
 </style>
 </head>
 <body>
 <header>
-<span class="logo">⬢ studio</span>
-<span class="hgroup"><span class="hcat">Режим</span><span class="seg">
-<button id="mView" class="on" title="просмотр карты: только чтение">Просмотр</button>
-<button id="mEdit" title="конструктор: мастер создания нового сценария">Конструктор</button>
-</span></span>
-<span class="hgroup" id="pathModeGroup"><span class="hcat">Вид</span><span class="seg">
-<button data-pm="scenario" class="on" title="путь одного запроса: HTTP → сценарий → база → модель">Сценарий</button>
-<button data-pm="overview" title="все сценарии, сгруппированные по HTTP-методу и домену">Обзор</button>
-</span></span>
-<span class="hgroup"><span class="hcat">На узлах</span><span class="seg" id="contentSeg">
-<button id="btnDesc" class="on" title="показывать описание на узлах">Описание</button>
-<button id="btnAcc" class="on" title="показывать критерии приёмки на узлах">Критерии</button>
-</span></span>
-<span class="hgroup"><span class="hcat">Масштаб</span><span class="seg">
-<button id="zOut" title="отдалить">−</button>
-<span id="zoomLabel" title="вписать карту в окно">100%</span>
-<button id="zIn" title="приблизить">+</button>
-<button id="zFit" title="вписать карту в окно">вписать</button>
-<button id="zReset" title="масштаб 100%">1:1</button>
-</span></span>
-<span style="flex:1"></span>
-<span class="hgroup"><span class="hcat">Действия</span><span class="seg" id="exportSeg">
-<button id="btnExport" title="экспорт карты: Markdown / JSON / буфер обмена">Экспорт ▾</button>
-<div id="exportMenu" style="display:none;position:absolute;top:calc(100% + 6px);right:0;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px;z-index:50">
-<button id="expMd" style="display:block;width:100%;text-align:left;border:none;background:none;padding:4px 8px">Markdown</button>
-<button id="expJson" style="display:block;width:100%;text-align:left;border:none;background:none;padding:4px 8px">JSON</button>
-<button id="expCopy" style="display:block;width:100%;text-align:left;border:none;background:none;padding:4px 8px">Копировать Markdown</button>
-</div>
-</span></span>
-<button id="btnRescan" title="пересканировать код проекта (план сохранится)">Обновить из кода</button>
-<button id="btnSavePlan" style="display:none" title="сохранить несохранённые правки (Ctrl+S)">Сохранить</button>
-<button id="btnFiles" style="display:none" title="создать файлы-скелеты по плану (scaffold)">Создать файлы</button>
-<button id="btnClearPlan" style="display:none" title="удалить .studio/plan.json — созданные сценарии и их связи исчезнут (код не меняется)">Очистить план</button>
-<span id="stats">—</span>
+  <span class="logo">⬢ studio</span>
+  <span class="tabs">
+    <button class="tabbtn on" data-tab="map" title="только эндпоинты fastbase, сгруппированные по домену и HTTP-методу">Карта</button>
+    <button class="tabbtn" data-tab="scenario" title="подробный путь одного сценария от эндпоинта до модели">Сценарий</button>
+    <button class="tabbtn" data-tab="create" title="конструктор нового сценария: только метаданные, без кода">Создание</button>
+  </span>
+  <span class="spacer"></span>
+  <label class="hint" title="визуально скрыть описания, критерии и домены на узлах"><input type="checkbox" id="hideMeta"> скрыть метаданные</label>
+  <span class="hint" id="zoomLabel">100%</span>
+  <button id="zOut" title="отдалить">−</button>
+  <button id="zIn" title="приблизить">+</button>
+  <button id="zFit" title="вписать карту в окно">вписать</button>
+  <button id="zReset" title="масштаб 100%">1:1</button>
+  <button id="rescan" title="перечитать код проекта и метаданные">Обновить из кода</button>
 </header>
-<main id="main">
-<div id="left">
-<h3>Сценарии</h3>
-<input id="scenSearch" type="search" placeholder="поиск сценариев…" autocomplete="off" title="фильтр по названию, классу, домену и HTTP-методу">
-<div class="panel-legend">группировка: HTTP-метод → домен</div>
-<div id="slist"></div>
-</div>
-<div id="center">
-<div id="canvas"><div id="view"><div id="stage"><svg id="edges"></svg></div></div>
-<div id="hint">фон — панорама · колесо — зум · клик по узлу — инспектор · Esc — снять выделение</div>
-</div>
-</div>
-<div id="right">
-<div id="inspHead"><h3 style="margin:0">Инспектор</h3><div id="inspChips" class="chips"></div></div>
-<div id="inspBody"></div>
-<div id="inspFoot"></div>
-</div>
+<main>
+  <section class="tab on" id="tab-map">
+    <div id="mapPane">
+      <div class="mapbar"><span>Границы пакета: <b>fastbase</b></span><span class="hint">показаны только эндпоинты; домен → HTTP-метод; клик открывает сценарий</span></div>
+      <div class="canvas" id="mapCanvas"><div class="view" id="mapView"><div class="stage" id="mapStage"><svg class="edges" id="mapEdges"></svg></div></div></div>
+    </div>
+  </section>
+  <section class="tab" id="tab-scenario">
+    <div id="scenWrap">
+      <aside id="scenList"></aside>
+      <div id="scenMain">
+        <div id="scenBar">
+          <span class="hint">Сценарий:</span>
+          <select id="scenSelect" style="min-width:260px"></select>
+          <span class="hint" id="scenHint">путь: endpoint → scenario → io → model; тесты — справа</span>
+        </div>
+        <div class="canvas" id="scenCanvas"><div class="view" id="scenView"><div class="stage" id="scenStage"><svg class="edges" id="scenEdges"></svg></div></div></div>
+      </div>
+      <aside id="inspector">
+        <div id="inspHead"><h3 style="margin:0;font-size:12px;color:var(--acc)">Метаданные узла</h3><div id="inspChips" class="chips" style="margin-top:5px"></div></div>
+        <div id="inspBody"><p class="hint">Выберите узел на карте сценария.</p></div>
+        <div id="inspFoot">Правки сохраняются при потере фокуса.</div>
+      </aside>
+    </div>
+  </section>
+  <section class="tab" id="tab-create">
+    <div id="createPane"><div class="wrap">
+      <h2>Создание</h2>
+      <p>Конструктор создаёт <b>только метаданные</b> — файлы с комментариями-маркерами, без кода. Один файл на узел. Код пишет разработчик: это TODO. Таблицы БД не выбираются — реализации ещё нет.</p>
+      <div class="rowhead">Узлы</div>
+      <div id="createNodes"></div>
+      <button id="addNode" type="button">+ узел</button>
+      <div class="rowhead">Связи <span class="hint">(необязательны; from/to выбираются по именам узлов)</span></div>
+      <div id="createEdges"></div>
+      <button id="addEdge" type="button">+ связь</button>
+      <div class="actions"><button id="createSubmit" class="primary" type="button">Добавить</button><span class="hint">существующие файлы не перезаписываются</span></div>
+      <div id="createResult"></div>
+    </div></div>
+  </section>
 </main>
 <div id="toast"></div>
-<div id="modal"><div class="modal-box" id="modalBox"></div></div>
 <script>
 "use strict";
-const KIND_COLORS={endpoint:"#5aa0ff",scenario:"#e8833a",io:"#7fc97f",model:"#bb9af7",test:"#c9a86a",helper:"#9a9aa2"};
-const KIND_NAMES={endpoint:"эндпоинт",scenario:"сценарий",io:"операция БД",model:"модель",test:"тест",helper:"помощник"};
-const ROLE_NAMES={schema:"схема",dependency:"зависимость",exception:"исключение",settings:"настройки",utils:"утилита",other:"прочее"};
-const ORIGIN_NAMES={code:"из кода",user:"план",stale:"помечен на удаление"};
-const IO_METHODS=["create","read","update","delete","query","custom"];
-const HTTP_METHODS=["get","post","put","patch","delete"];
-const METHOD_ORDER=["get","post","put","patch","delete"];
-const METHOD_LABELS={get:"GET",post:"POST",put:"PUT",patch:"PATCH",delete:"DELETE"};
-const METHOD_COLORS={get:"#5aa0ff",post:"#7fc97f",put:"#e8833a",patch:"#bb9af7",delete:"#ff5d5d","без метода":"#9a9aa2"};
-const NO_METHOD="без метода";
+const KIND_NAMES={endpoint:"эндпоинт",scenario:"сценарий",io:"io",model:"модель",test:"тест"};
+const KIND_COLORS={endpoint:"#5aa0ff",scenario:"#e8833a",io:"#7fc97f",model:"#bb9af7",test:"#c9a86a"};
+const EDGE_COLORS={dispatch:"#5aa0ff",scenario_call:"#e8833a",port_call:"#7fc97f",table:"#bb9af7",tests:"#c9a86a",uses:"#9a9aa2",depends:"#9a9aa2"};
+const EDGE_NAMES={dispatch:"вызов сценария",scenario_call:"вызов сценария",port_call:"порт БД",table:"таблица",tests:"тест",uses:"использует",depends:"зависит"};
+const METHOD_ORDER=["GET","POST","PUT","PATCH","DELETE"];
+const METHOD_COLORS={GET:"#5aa0ff",POST:"#7fc97f",PUT:"#e8833a",PATCH:"#bb9af7",DELETE:"#ff5d5d","ДРУГОЙ":"#9a9aa2"};
 const NO_DOMAIN="без домена";
-const EDGE_STYLE={
-  dispatch:{c:"#5aa0ff",m:"ar-dispatch"},
-  scenario_call:{c:"#e8833a",m:"ar-scenario"},
-  port_call:{c:"#7fc97f",m:"ar-port"},
-  table:{c:"#bb9af7",m:"ar-table"},
-  tests:{c:"#c9a86a",m:"ar-tests",dash:"4,4"},
-  uses:{c:"#9a9aa2",m:"ar-plain",dash:"6,5"},
-  depends:{c:"#9a9aa2",m:"ar-plain",dash:"6,5"},
-  shared:{c:"#4c4e56",m:"ar-shared",dash:"4,6"}
-};
-const MARKERS=[["ar-dispatch","#5aa0ff"],["ar-scenario","#e8833a"],["ar-port","#7fc97f"],["ar-table","#bb9af7"],["ar-tests","#c9a86a"],["ar-plain","#9a9aa2"],["ar-shared","#4c4e56"]];
-const LS={desc:"studio.showDescription",acc:"studio.showAcceptance"};
-const COLW=300,GAPX=66,GAPY=26,PADX=26,PADTOP=30;
+const CARD_W=280,GAPY=24,PAD=30;
 
-let G=null,byId={},scenList=[];
-let viewMode="view",pathMode="scenario",selScenario=null,selId=null;
-let showDesc=true,showAcc=true,scenFilter="";
-const nodePos=new Map();
-function posKey(){return viewMode==="edit"?"edit":(pathMode==="scenario"?"sc:"+(selScenario||""):"overview")}
-const drafts=new Map();
-let wizard=null;
-let codeState=null;
-let drag=null,panDrag=null,justDragged=false,dragRaf=0;
-const view={x:40,y:40,k:1};
-let boxes={};
-let colAnchors=[];
+let G=null,byId={},tab="map",selectedScenario=null,selectedNode=null,hideMeta=false;
+let scenView={x:30,y:30,k:1},mapView={x:30,y:30,k:1};
+let scenBoxes={},mapBoxes={};
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-function toast(m){const t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",2800)}
-function msg(e){const m=e&&e.message?String(e.message):"";return m.indexOf("404")!==-1?m+" — сервер не поддерживает операцию. Обновите пакет (pip install --upgrade \"git+https://github.com/senia-glitch/pacage-studio-ide.git\") и перезапустите studio dev":m}
-
-/* ---------- данные ---------- */
-function applyGraph(g){
-  G=g||{};byId={};(G.nodes||[]).forEach(x=>byId[x.id]=x);
-  scenList=(G.scenarios||[]).filter(id=>byId[id]);
-  if(selId&&!byId[selId])selId=null;
-  if(selScenario&&!byId[selScenario])selScenario=null;
-}
-function isArea(id){const n=byId[id];return !!n&&n.kind==="endpoint"&&n.origin==="user"}
-function areaOfView(n){return n&&n.area&&byId[n.area]?n.area:""}
-function nodeDisplay(n){const d=drafts.get(n.id);return d?Object.assign({},n,d):n}
-function viewNode(id){const n=byId[id];return n?nodeDisplay(n):null}
-function draftDirty(id){return drafts.has(id)}
-function anyDirty(){return drafts.size>0}
-function viewForm(n){
-  return {description:String(n.description||""),domain:String(n.domain||"")};
-}
-const dtoStr=v=>v===null||v===undefined||String(v).trim()===""?"":String(v);
-function setViewDraft(id,vals){
-  const n=byId[id];if(!n)return;
-  if(JSON.stringify(viewForm(n))===JSON.stringify(vals))drafts.delete(id);
-  else drafts.set(id,vals);
-  updateDirtyUI();updateNodePreview(id);
-}
-function clearDraft(id){if(drafts.delete(id)){updateDirtyUI();updateNodePreview(id)}}
-
-/* ---------- API ---------- */
+function toast(m){const t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",3000)}
 async function api(path,method="GET",body){
   const opts={method,headers:{}};
   if(body!==undefined){opts.headers["Content-Type"]="application/json";opts.body=JSON.stringify(body)}
   const r=await fetch(path,opts);
-  if(!r.ok){
-    let text="";try{text=await r.text()}catch(_){}
-    const err=new Error(text||("HTTP "+r.status));err.status=r.status;throw err;
-  }
+  if(!r.ok){let text="";try{text=await r.text()}catch(_){ }throw new Error(text||("HTTP "+r.status))}
   return r.json();
 }
-async function setGraphFrom(response){applyGraph(response);if(selScenario&&!byId[selScenario]){selScenario=null}updateDirtyUI();renderAll()}
-async function putNodePatch(payload){
-  const g=await api("/api/plan/patch","PUT",payload);await setGraphFrom(g);return g;
+function applyGraph(g){G=g||{};byId={};(G.nodes||[]).forEach(n=>byId[n.id]=n);
+  if(selectedScenario&&!G.scenario_paths?.[selectedScenario])selectedScenario=null;
+  if(selectedNode&&!byId[selectedNode])selectedNode=null;
 }
-async function putEdge(edge){
-  const g=await api("/api/plan/patch","PUT",{target_id:edge.id,is_edge:true,edge});await setGraphFrom(g);return g;
-}
-
-/* ---------- id узлов (как в сканере) ---------- */
-function nodeIdFor(n){
+function methodOfEndpoint(n){return String((n.details||{}).http_method||"").toUpperCase()||"ДРУГОЙ"}
+function urlOfEndpoint(n){const d=n.details||{};return d.url_path||d.path||"/"}
+function endpointLabel(n){
   const d=n.details||{};
-  if(n.kind==="endpoint")return`endpoint:${n.file_path}:${d.function_name||""}`;
-  if(n.kind==="scenario")return`scenario:${n.file_path}:${d.class_name||""}`;
-  if(n.kind==="model")return`model:${n.file_path}:${d.class_name||""}`;
-  if(n.kind==="test")return`test:${n.file_path}:${d.test_name||""}`;
-  if(n.kind==="helper")return`helper:${String(d.module||"").replace(/\//g,".")}`;
-  if(n.kind==="io")return`io:${d.called_from||""}:${d.method||"custom"}:${dtoStr(d.table)||"_"}:${n.line||1}`;
-  return n.id;
+  return `${methodOfEndpoint(n)} ${urlOfEndpoint(n)}`.trim()+"\n"+(d.function_name||"");
 }
-function freeId(id,except){
-  if(id===except||!byId[id])return id;
-  const m=id.match(/^(.*):(\d+)$/);
-  const base=m?m[1]:id;let i=m?parseInt(m[2],10)+1:2;
-  while(byId[base+":"+i]&&base+":"+i!==except)i++;
-  return base+":"+i;
+function nodeMeta(n){
+  const d=n.details||{};
+  if(n.kind==="endpoint")return d.function_name||"";
+  if(n.kind==="io")return `_db.${d.method||""}${d.table?"(\u0022"+d.table+"\u0022)":""}`;
+  if(n.kind==="model")return `таблица ${d.tablename||""}`;
+  if(n.kind==="test")return d.module||"";
+  return d.class_name||d.name||"";
 }
-function slug(s){return String(s||"").trim().toLowerCase().replace(/[^a-z0-9а-яё]+/gi,"_").replace(/^_+|_+$/g,"")||"node"}
-function pascal(s){return String(s||"").split(/[^A-Za-z0-9А-Яа-яЁё]+/).filter(Boolean).map(p=>p[0].toUpperCase()+p.slice(1)).join("")||"Node"}
-
-/* ---------- левая панель: сценарии ---------- */
-function methodOfScenario(id){
-  const methods=new Set();
-  (G.edges||[]).forEach(e=>{
-    if(e.kind==="dispatch"&&e.to_node===id){
-      const m=byId[e.from_node]?.details?.http_method;
-      if(m)methods.add(String(m).toLowerCase());
+function cardHtml(n,opts={}){
+  const c=opts.method?METHOD_COLORS[opts.method]:KIND_COLORS[n.kind]||"#888";
+  let h=`<div class="hd"><span class="chip">${esc(KIND_NAMES[n.kind]||n.kind)}</span><span class="t">${esc(n.label)}</span></div>`;
+  h+=`<div class="mt">${esc(nodeMeta(n))}</div>`;
+  if(!hideMeta){
+    if(n.description){
+      h+=`<div class="sec"><div class="lbl">описание</div><div class="body">${esc(n.description)}</div></div>`;
     }
-  });
-  return methods.size?[...methods]:[NO_METHOD];
+    if(n.acceptance&&n.acceptance.length){
+      h+=`<div class="sec"><div class="lbl">критерии приёмки</div><div class="body">${esc(n.acceptance.join("\n"))}</div></div>`;
+    }
+    if(n.domain){
+      h+=`<div class="sec"><div class="lbl">${n.kind==="endpoint"?"домен":"домен (наследуется)"}</div><div class="body">${esc(n.domain)}</div></div>`;
+    }
+  }
+  const cls=`card k-${n.kind}${opts.method?" method-"+opts.method.toLowerCase():""}${opts.nested?" nested":""}${selectedNode===n.id?" sel":""}`;
+  return {cls,html:h,c};
 }
-function domainOfScenario(id){const d=(byId[id]?.domain||"").trim();return d||NO_DOMAIN}
-function scenarioGroupsByMethodDomain(filterFn){
-  const groups=new Map();
-  scenList.forEach(id=>{
-    if(!byId[id]||byId[id].origin==="stale")return;
-    const methods=methodOfScenario(id),domain=domainOfScenario(id),shared=methods.length>1;
-    methods.forEach(m=>{
-      if(filterFn&&!filterFn({id,method:m,domain}))return;
-      if(!groups.has(m))groups.set(m,new Map());
-      const byDom=groups.get(m);
-      if(!byDom.has(domain))byDom.set(domain,[]);
-      byDom.get(domain).push({id,shared});
-    });
-  });
-  const ordered=[];
-  METHOD_ORDER.forEach(m=>{if(groups.has(m))ordered.push([m,groups.get(m)])});
-  if(groups.has(NO_METHOD))ordered.push([NO_METHOD,groups.get(NO_METHOD)]);
-  ordered.forEach(([m,byDom])=>{
-    const sorted=[...byDom.keys()].sort((a,b)=>{
-      if(a===NO_DOMAIN)return 1;if(b===NO_DOMAIN)return -1;return a.localeCompare(b);
-    });
-    const out=new Map();sorted.forEach(d=>out.set(d,byDom.get(d)));byDom.clear();out.forEach((v,k)=>byDom.set(k,v));
-  });
-  return ordered;
+function makeCard(n,x,y,opts={}){
+  const spec=cardHtml(n,opts);
+  const e=document.createElement("div");
+  e.className=spec.cls;e.dataset.id=n.id;e.style.left=x+"px";e.style.top=y+"px";e.title=n.id;
+  e.innerHTML=spec.html;
+  e.onclick=ev=>{ev.stopPropagation();onCardClick(n.id)};
+  $("scenStage").appendChild(e);
+  return e;
 }
-function matchesFilter(id,method,domain){
-  if(!scenFilter)return true;
-  const n=byId[id];if(!n)return false;
-  const hay=[n.label,n.details?.name,n.details?.class_name,domain,METHOD_LABELS[method]||method].filter(Boolean).map(s=>String(s).toLowerCase());
-  return hay.some(s=>s.indexOf(scenFilter)!==-1);
+function onCardClick(id){
+  const n=byId[id];if(!n)return;
+  if(tab==="map"&&n.kind==="endpoint"){openEndpointScenario(id);return}
+  selectedNode=id;renderScenario();renderInspector();
 }
-function originTag(n){
-  if(n.origin==="user")return' <span class="tag-plan">✦ план</span>';
-  if(n.origin==="stale")return' <span class="tag-stale">⊘ удалён</span>';
-  return"";
-}
-const panelState=new Map();
-function renderList(){
-  const el=$("slist");
-  el.querySelectorAll("details[data-key]").forEach(d=>panelState.set(d.dataset.key,d.open));
-  el.innerHTML="";
-  if(!G)return;
-  const groups=scenarioGroupsByMethodDomain(it=>matchesFilter(it.id,it.method,it.domain));
-  if(!groups.length){el.innerHTML='<p class="dim" style="padding:6px">Сценариев нет.<br>Запусти <b>studio scan</b>.</p>';return}
-  let shown=0;
-  groups.forEach(([method,byDom])=>{
-    const visible=[];
-    byDom.forEach((items,domain)=>{if(items.length)visible.push([domain,items])});
-    if(!visible.length)return;
-    shown+=visible.reduce((s,[,items])=>s+items.length,0);
-    const count=visible.reduce((s,[,items])=>s+items.length,0);
-    const mDet=document.createElement("details");
-    mDet.dataset.key="m:"+method;mDet.open=panelState.has(mDet.dataset.key)?panelState.get(mDet.dataset.key):true;
-    const mSum=document.createElement("summary");mSum.className="method-summary";
-    mSum.title="HTTP-метод, которым вызываются сценарии";
-    mSum.innerHTML=`<span class="method-dot" style="background:${METHOD_COLORS[method]||"#9a9aa2"}"></span>${esc(METHOD_LABELS[method]||method.toUpperCase())} <small>· ${count}</small>`;
-    mDet.appendChild(mSum);
-    visible.forEach(([domain,items])=>{
-      const dDet=document.createElement("details");
-      dDet.dataset.key="d:"+method+":"+domain;dDet.open=panelState.has(dDet.dataset.key)?panelState.get(dDet.dataset.key):true;
-      const dSum=document.createElement("summary");dSum.className="domain-summary";
-      dSum.title=domain===NO_DOMAIN?"сценарии без заданного домена (домен задаётся в инспекторе справа)":"домен — логическая группа сценариев";
-      dSum.innerHTML=`${esc(domain)} <small>· ${items.length}</small>`;
-      dDet.appendChild(dSum);
-      items.forEach(({id,shared})=>{
-        const n=byId[id];if(!n)return;
-        const item=document.createElement("div");
-        item.className="sitem"+(selScenario===id?" sel":"");
-        const p=G.scenario_paths[id]||{};
-        item.title=n.file_path||n.label;
-        item.innerHTML=`${esc(n.label)} <small>· БД ${p.io_calls?p.io_calls.length:0}</small>${shared?' <span class="tag-stale" title="вызывается из нескольких методов">↻</span>':""}${originTag(n)}`;
-        item.onclick=()=>selectScenario(id);
-        dDet.appendChild(item);
-      });
-      mDet.appendChild(dDet);
-    });
-    el.appendChild(mDet);
-  });
-  if(!shown)el.innerHTML=`<p class="dim" style="padding:6px">Ничего не найдено${scenFilter?` по запросу «${esc(scenFilter)}»`:""}.</p>`;
-}
-async function selectScenario(id){
-  if(!byId[id])return;
-  if(!(await guardLeave()))return;
-  selScenario=id;selId=id;codeState=null;pathMode="scenario";setModeButtons();renderAll();fitView();
+function openEndpointScenario(endpointId){
+  const edge=(G.edges||[]).find(e=>e.kind==="dispatch"&&e.from_node===endpointId);
+  if(!edge){toast("У эндпоинта нет сценария (dispatch не найден)");return}
+  selectedScenario=edge.to_node;selectedNode=endpointId;setTab("scenario");
 }
 
-/* ---------- конструктор: области плана (визуальный контекст) ---------- */
-function planNodes(){return G.nodes.filter(n=>n.origin==="user")}
-function areas(){return G.nodes.filter(n=>n.kind==="endpoint"&&n.origin==="user")}
-function areaMembers(id){
-  const members=G.nodes.filter(n=>n.origin==="user"&&areaOfView(n)===id);
-  if(!members.some(n=>n.id===id))members.push(byId[id]);
-  return members;
+/* ---------- вкладки ---------- */
+function setTab(name){
+  tab=name;
+  document.querySelectorAll(".tabbtn").forEach(b=>b.classList.toggle("on",b.dataset.tab===name));
+  document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="tab-"+name));
+  if(name==="map")renderMap();
+  else if(name==="scenario")renderScenario();
+  else renderCreate();
 }
-function selectNode(id){doSelectNode(id)}
-function doSelectNode(id){
-  selId=id;codeState=null;
-  renderAll();
-}
+document.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
 
-/* ---------- канвас ---------- */
-function clearStage(){const stage=$("stage"),svg=$("edges");[...stage.children].forEach(ch=>{if(ch!==svg)ch.remove()});svg.innerHTML="";boxes={}}
-function el(tag,cls,style,html){const e=document.createElement(tag);if(cls)e.className=cls;if(style)Object.assign(e.style,style);if(html!==undefined)e.innerHTML=html;return e}
-function addNode(stage,id,x,y,opts={}){
-  const n=viewNode(id);if(!n)return null;
-  const linked=!!selId&&selId!==id&&(G.edges||[]).some(ed=>(ed.from_node===selId&&ed.to_node===id)||(ed.from_node===id&&ed.to_node===selId));
-  const e=el("div","node"+(opts.nested?" nested":"")+(selId===id?" sel":"")+(draftDirty(id)?" dirty":"")+(linked?" linked":""));
-  e.dataset.id=id;if(opts.zone)e.dataset.zone=opts.zone;e.title=n.label+" · "+KIND_NAMES[n.kind];
-  const saved=nodePos.get(posKey()+"|"+id);
-  e.style.left=(saved?saved.x:x)+"px";e.style.top=(saved?saved.y:y)+"px";
-  const c=KIND_COLORS[n.kind]||"#888";
-  if(n.origin==="user")e.style.border="1px dashed var(--acc)";
-  if(n.origin==="stale")e.style.opacity=".45";
-  const desc=String(n.description||n.doc||"");
-  const acc=Array.isArray(n.acceptance)?n.acceptance:[];
-  let body=`<div class="hd" style="--c:${c}"><span class="hdchip">${esc(KIND_NAMES[n.kind])}</span><span class="hdt">${esc(n.label)}</span></div>`;
-  body+=`<div class="mt">${esc(meta(n))}</div>`;
-  const hasDesc=showDesc&&!!desc,hasAcc=showAcc&&acc.length>0;
-  if(hasDesc){
-    const lines=desc.split("\n");const cut=lines.length>4;
-    body+=`<div class="node-sec"><div class="node-sec-label">${n.description?"описание":"документация из кода"}</div><div class="node-sec-body ds-full">${esc(cut?lines.slice(0,4).join("\n"):desc)}${cut?`\n… <span class="ds-more">(ещё)</span>`:""}</div></div>`;
-  }
-  if(hasDesc&&hasAcc)body+=`<div class="node-sec-divider"></div>`;
-  if(hasAcc){
-    const cut=acc.length>3;
-    body+=`<div class="node-sec"><div class="node-sec-label">критерии приёмки</div><div class="node-sec-body acc-full">${(cut?acc.slice(0,3):acc).map(a=>esc(a)).join("\n")}${cut?`\n<div class="acc-more">… ещё ${acc.length-3}</div>`:""}</div></div>`;
-  }
-  if(n.origin!=="code")body+=`<span class="origtag">${n.origin==="user"?(n.scaffolded?"✦ создан":"✦ план"):"⊘"}</span>`;
-  e.innerHTML=body;
-  if(pathMode==="scenario"&&n.kind==="endpoint"){
-    const mt=e.querySelector(".mt");if(mt)mt.insertAdjacentHTML("afterbegin",methodPlate(n.details?.http_method));
-  }
-  if(pathMode==="scenario"&&n.kind==="scenario"){
-    const mt=e.querySelector(".mt");if(mt)mt.insertAdjacentHTML("beforeend",domainPlate(n.id));
-  }
-  e.querySelectorAll(".node-sec-body").forEach(b=>b.addEventListener("wheel",ev=>ev.stopPropagation()));
-  stage.appendChild(e);return e;
+/* ---------- viewport ---------- */
+function bindViewport(canvasId,view,apply){
+  const c=$(canvasId);
+  let drag=null;
+  c.addEventListener("wheel",ev=>{
+    ev.preventDefault();
+    const r=c.getBoundingClientRect();
+    const px=ev.clientX-r.left,py=ev.clientY-r.top;
+    const k2=Math.min(2.5,Math.max(.2,view.k*(ev.deltaY<0?1.12:.89)));
+    const s=k2/view.k;view.x=px-(px-view.x)*s;view.y=py-(py-view.y)*s;view.k=k2;apply();
+  },{passive:false});
+  c.addEventListener("mousedown",ev=>{
+    if(ev.button!==0)return;
+    if(ev.target.closest&&ev.target.closest(".card"))return;
+    drag={x:ev.clientX,y:ev.clientY,vx:view.x,vy:view.y};
+    c.classList.add("grabbing");
+  });
+  window.addEventListener("mousemove",ev=>{
+    if(!drag)return;
+    view.x=drag.vx+ev.clientX-drag.x;view.y=drag.vy+ev.clientY-drag.y;apply();
+  });
+  window.addEventListener("mouseup",()=>{drag=null;c.classList.remove("grabbing")});
+  c.addEventListener("dblclick",()=>fitView(c,view,apply));
 }
-function meta(n){
-  const d=n.details||{};
-  if(n.kind==="endpoint")return"эндпоинт · "+(d.function_name||"")+(d.url_path||d.path?" · "+(d.url_path||d.path):"");
-  if(n.kind==="scenario")return"сценарий · "+(d.class_name||"");
-  if(n.kind==="io")return"БД · строка "+n.line;
-  if(n.kind==="model")return"модель · "+(d.tablename||"");
-  if(n.kind==="test")return"тест · "+(d.test_name||"");
-  if(n.kind==="helper")return"помощник · "+(ROLE_NAMES[d.role]||d.role||"");
-  return KIND_NAMES[n.kind]||n.kind;
+function applyTransform(viewId,view){const v=$(viewId);if(v)v.style.transform=`translate(${view.x}px,${view.y}px) scale(${view.k})`;$("zoomLabel").textContent=Math.round(view.k*100)+"%"}
+function fitView(canvas,view,apply){
+  const stage=canvas.querySelector(".stage");
+  if(!stage)return;
+  const cw=canvas.clientWidth,ch=canvas.clientHeight;
+  const w=stage.offsetWidth||1,h=stage.offsetHeight||1;
+  const k=Math.min(2,Math.max(.2,Math.min((cw-60)/w,(ch-60)/h)));
+  view.k=k;view.x=(cw-w*k)/2;view.y=(ch-h*k)/2;apply();
 }
-function methodPlate(method){if(!method)return"";return`<span class="method-plate" style="background:${METHOD_COLORS[method]||"#9a9aa2"};display:inline-block;padding:0 5px;border-radius:3px;font-size:9px;font-weight:700;color:#141310;margin-right:4px">${esc(METHOD_LABELS[method]||String(method).toUpperCase())}</span>`}
-function domainPlate(scenarioId){const d=domainOfScenario(scenarioId);if(d===NO_DOMAIN)return"";return`<span class="domain-plate" style="display:inline-block;padding:0 5px;border-radius:3px;font-size:9px;background:#3a3b40;color:#b8b8c0;margin-left:4px">${esc(d)}</span>`}
-
-function measure(){boxes={};document.querySelectorAll("#stage .node[data-id],#stage .badge").forEach(e=>{boxes[e.dataset.id]={x:parseFloat(e.style.left)||0,y:parseFloat(e.style.top)||0,w:e.offsetWidth,h:e.offsetHeight}})}
-function renderCanvas(){
-  const stage=$("stage"),svg=$("edges");
-  clearStage();
-  colAnchors=[];
-  if(!G){stage.style.width="100%";stage.style.height="100%";return}
-  if(viewMode==="edit")layoutAreas(stage);else if(pathMode==="scenario")layoutScenario(stage);else layoutOverview(stage);
-  measure();
-  alignColheads();
-  if(viewMode==="edit")areaZoneDivs();else renderZoneDivs();
-  drawEdges();sizeStage();applyView();
-}
-function sizeStage(){
-  let w=1200,h=700;
-  Object.values(boxes).forEach(b=>{w=Math.max(w,b.x+b.w+140);h=Math.max(h,b.y+b.h+120)});
-  document.querySelectorAll("#stage .zone").forEach(z=>{w=Math.max(w,(parseFloat(z.style.left)||0)+(z.offsetWidth||0)+140);h=Math.max(h,(parseFloat(z.style.top)||0)+(z.offsetHeight||0)+120)});
-  const stage=$("stage"),svg=$("edges");stage.style.width=w+"px";stage.style.height=h+"px";
+function sizeStage(stage,svg){
+  let w=900,h=600;
+  stage.querySelectorAll(".card,.zone,.colhead").forEach(e=>{
+    w=Math.max(w,(parseFloat(e.style.left)||0)+e.offsetWidth+80);
+    h=Math.max(h,(parseFloat(e.style.top)||0)+e.offsetHeight+80);
+  });
+  stage.style.width=w+"px";stage.style.height=h+"px";
   svg.setAttribute("width",w);svg.setAttribute("height",h);
 }
-function zoneBBoxes(){
-  const acc={};
-  document.querySelectorAll("#stage .node[data-zone]").forEach(e=>{
-    const z=e.dataset.zone;if(!z)return;
-    const x=parseFloat(e.style.left)||0,y=parseFloat(e.style.top)||0,w=e.offsetWidth||270,h=e.offsetHeight||60;
-    const b=acc[z]||(acc[z]={x1:x,y1:y,x2:x+w,y2:y+h,n:0});
-    b.x1=Math.min(b.x1,x);b.y1=Math.min(b.y1,y);b.x2=Math.max(b.x2,x+w);b.y2=Math.max(b.y2,y+h);b.n++;
-  });
-  return acc;
+function clearStage(stage,svg){
+  [...stage.children].forEach(ch=>{if(ch!==svg)ch.remove()});
+  svg.innerHTML="";
 }
-const ZONE_LABELS={rep:"эндпоинт",logic:"сценарий",io:"операции БД",tests:"тесты",helpers:"помощники",code:"из кода",orphan:"без области"};
-function renderZoneDivs(){
-  const stage=$("stage"),svg=$("edges");
-  document.querySelectorAll("#stage .zone").forEach(z=>z.remove());
-  const acc=zoneBBoxes();
-  for(const z in acc){
-    const b=acc[z];
-    const d=el("div","zone");
-    d.style.left=(b.x1-PADX)+"px";d.style.top=(b.y1-PADTOP)+"px";
-    d.style.width=Math.max(260,(b.x2-b.x1)+PADX*2)+"px";d.style.height=Math.max(80,(b.y2-b.y1)+PADTOP+PADX)+"px";
-    d.innerHTML=`<span class="zlab">${esc(ZONE_LABELS[z]||z)} <i>· ${b.n}</i></span>`;
-    stage.insertBefore(d,svg);
-  }
-}
-function areaZoneDivs(){
-  const stage=$("stage"),svg=$("edges");
-  document.querySelectorAll("#stage .zone").forEach(z=>z.remove());
-  areas().forEach(a=>{
-    const members=areaMembers(a.id);if(!members.length)return;
-    let x1=1e9,y1=1e9,x2=-1e9,y2=-1e9;
-    members.forEach(m=>{const b=boxes[m.id];if(!b)return;x1=Math.min(x1,b.x);y1=Math.min(y1,b.y);x2=Math.max(x2,b.x+b.w);y2=Math.max(y2,b.y+b.h)});
-    if(x2<0)return;
-    const d=el("div","zone areazone");
-    d.style.left=(x1-PADX)+"px";d.style.top=(y1-PADTOP)+"px";
-    d.style.width=(x2-x1+PADX*2)+"px";d.style.height=(y2-y1+PADTOP+PADX)+"px";
-    d.innerHTML=`<span class="zlab">${esc(a.label)} <i>· узлов ${members.length}</i></span>`;
-    stage.insertBefore(d,svg);
-  });
-  const acc=zoneBBoxes();
-  ["code","orphan"].forEach(z=>{
-    const b=acc[z];if(!b)return;
-    const d=el("div","zone ghostzone");
-    d.style.left=(b.x1-PADX)+"px";d.style.top=(b.y1-PADTOP)+"px";
-    d.style.width=Math.max(260,(b.x2-b.x1)+PADX*2)+"px";d.style.height=Math.max(80,(b.y2-b.y1)+PADTOP+PADX)+"px";
-    d.innerHTML=`<span class="zlab">${esc(ZONE_LABELS[z]||z)} <i>· ${b.n}</i></span>`;
-    stage.insertBefore(d,svg);
-  });
-}
-/* раскладка: путь одного сценария */
-function layoutScenario(stage){
-  if(!selScenario){stage.appendChild(el("div","empty",null,"Сценариев в коде нет. Запусти studio scan в корне проекта."));return}
-  const p=G.scenario_paths[selScenario];
-  if(!p){stage.appendChild(el("div","empty",null,"У сценария нет записи в пути запроса."));return}
-  const cx={rep:40,logic:430,io:960,model:1260,tests:1560};
-  const y0=70;
-  const h=e=>e?e.offsetHeight:150;
-  const isVis=id=>byId[id]&&byId[id].origin!=="stale";
-  if(p.endpoint&&isVis(p.endpoint)){addNode(stage,p.endpoint,cx.rep,y0,{zone:"rep"})}
-  else{const gh=el("div","node ghost",{left:cx.rep+"px",top:y0+"px"},'<div class="hd" style="--c:#6c6d75">нет эндпоинта</div><div class="mt">сценарий вызывается не из HTTP</div>');gh.dataset.zone="rep";stage.appendChild(gh)}
-  const main=addNode(stage,selScenario,cx.logic,y0,{zone:"logic"});
-  let logicY=y0+h(main)+GAPY;
-  [...new Set(p.called_scenarios||[])].forEach(id=>{if(!isVis(id)||id===selScenario)return;const e=addNode(stage,id,cx.logic,logicY,{nested:true,zone:"logic"});logicY+=h(e)+GAPY});
-  const ioY={};let ioT=y0;
-  [...new Set(p.io_calls||[])].forEach(id=>{if(!isVis(id))return;const e=addNode(stage,id,cx.io,ioT,{zone:"io"});ioY[id]=ioT;ioT+=h(e)+GAPY});
-  const plans=[];const placed=new Set();
-  (p.models||[]).forEach(id=>{
-    if(!isVis(id)||placed.has(id))return;placed.add(id);
-    let slot=null;
-    for(const ioId of (p.io_calls||[])){
-      const io=byId[ioId];
-      if(!io||!io.details||!io.details.table)continue;
-      if(G.edges.some(e=>e.kind==="table"&&e.from_node===ioId&&e.to_node===id)){slot=ioY[ioId];break}
-    }
-    plans.push({id,slot});
-  });
-  plans.sort((a,b)=>(a.slot===null?1e9:a.slot)-(b.slot===null?1e9:b.slot));
-  let mCur=y0;
-  plans.forEach(item=>{
-    const y=item.slot===null?mCur:Math.max(mCur,item.slot);
-    const e=addNode(stage,item.id,cx.model,y,{zone:"io"});
-    mCur=y+h(e)+GAPY;
-  });
-  let testY=y0;
-  [...new Set(p.tests||[])].forEach(id=>{if(!isVis(id))return;const e=addNode(stage,id,cx.tests,testY,{zone:"tests"});testY+=h(e)+GAPY});
-  const helpers=[...new Set((p.helpers||[]).filter(isVis))];
-  if(helpers.length){
-    let maxY=y0;
-    document.querySelectorAll("#stage .node").forEach(e=>{maxY=Math.max(maxY,(parseFloat(e.style.top)||0)+e.offsetHeight)});
-    let rowTop=maxY+60,rowMax=0;
-    helpers.forEach((id,i)=>{
-      const e=addNode(stage,id,40+(i%6)*300,rowTop,{zone:"helpers"});
-      rowMax=Math.max(rowMax,h(e)+GAPY);
-      if((i+1)%6===0||i===helpers.length-1){rowTop+=rowMax;rowMax=0}
-    });
-  }
-}
-/* раскладка: обзор */
-function alignColheads(){
-  colAnchors.forEach(({el,ids})=>{
-    let x1=1e9,y1=1e9;
-    ids.forEach(id=>{const b=boxes[id];if(!b)return;x1=Math.min(x1,b.x);y1=Math.min(y1,b.y)});
-    if(x1===1e9)return;
-    el.style.left=x1+"px";el.style.top=(y1-(parseFloat(el.dataset.off)||28))+"px";
-  });
-}
-function layoutOverview(stage){
-  const groups=scenarioGroupsByMethodDomain(it=>matchesFilter(it.id,it.method,it.domain));
-  if(!groups.length){stage.appendChild(el("div","empty",null,scenFilter?`Ничего не найдено по запросу «${esc(scenFilter)}».`:"Пусто. Запусти studio scan в корне проекта."));return}
-  let y=70;
-  groups.forEach(([method,byDom])=>{
-    let count=0;byDom.forEach(items=>count+=items.length);
-    const methodIds=[];byDom.forEach(items=>items.forEach(it=>methodIds.push(it.id)));
-    const mHead=el("div","colhead",{left:"40px",top:y+"px"},`<span class="method-dot" style="background:${METHOD_COLORS[method]||"#9a9aa2"}"></span>${esc(METHOD_LABELS[method]||method.toUpperCase())} <i>· ${count}</i>`);
-    mHead.dataset.off="52";stage.appendChild(mHead);
-    colAnchors.push({el:mHead,ids:methodIds});
-    y+=44;
-    byDom.forEach((items,domain)=>{
-      const dHead=el("div","colhead",{left:"60px",top:y+"px","font-weight":"400","font-size":"11px"},`${esc(domain)} <i>· ${items.length}</i>`);
-      dHead.dataset.off="26";stage.appendChild(dHead);
-      colAnchors.push({el:dHead,ids:items.map(it=>it.id)});
-      y+=34;
-      const cols=Math.min(3,Math.max(1,items.length));
-      let rowTop=y,rowMax=0;
-      items.forEach(({id},i)=>{
-        const e=addNode(stage,id,60+(i%cols)*300,rowTop,{});
-        rowMax=Math.max(rowMax,(e?e.offsetHeight:150)+GAPY);
-        if((i+1)%cols===0||i===items.length-1){rowTop+=rowMax;rowMax=0}
-      });
-      y=rowTop+18;
-    });
-    y+=30;
-  });
-  const shared=sharedModels();
-  if(shared.length){
-    let maxRight=0;document.querySelectorAll("#stage .node").forEach(e=>{maxRight=Math.max(maxRight,(parseFloat(e.style.left)||0)+e.offsetWidth)});
-    const x=maxRight+90;
-    stage.appendChild(el("div","colhead",{left:x+"px",top:"70px"},"общая модель"));
-    shared.forEach((mid,i)=>{
-      const n=byId[mid];
-      const b=el("div","badge",{left:x+"px",top:(110+i*100)+"px"},"общая: "+(n?n.label:mid));
-      b.dataset.id="shared:"+mid;stage.appendChild(b);
-    });
-  }
-}
-function sharedModels(){
-  const count={};
-  scenList.forEach(id=>{if(!byId[id]||byId[id].origin==="stale")return;const p=G.scenario_paths[id];if(!p)return;[...new Set(p.models||[])].forEach(m=>count[m]=(count[m]||0)+1)});
-  return Object.keys(count).filter(m=>count[m]>=2&&byId[m]&&byId[m].origin!=="stale").sort((a,b)=>byId[a].label.localeCompare(byId[b].label));
-}
-/* раскладка: конструктор (области) */
-function layoutAreas(stage){
-  const list=areas();
-  let y=90;
-  if(!list.length){
-    stage.appendChild(el("div","empty",null,"Областей плана пока нет.<br>Нажми «Новый сценарий» справа — создашь эндпоинт и первый сценарий области."));
-  }
-  list.forEach(a=>{
-    const members=areaMembers(a.id);
-    const ep=members.find(m=>m.id===a.id);
-    const scen=members.filter(m=>m.kind==="scenario").sort((p,q)=>orderScenarios(p,q,a.id));
-    const ios=members.filter(m=>m.kind==="io").sort((p,q)=>orderIo(p,q,a.id));
-    const models=members.filter(m=>m.kind==="model");
-    const tests=members.filter(m=>m.kind==="test");
-    const helpers=members.filter(m=>m.kind==="helper");
-    let sy=y;
-    if(ep)sy=stack(stage,sy,"40px","rep",[ep]);
-    sy=stack(stage,sy,"40px","logic",scen);
-    let iy=y;
-    iy=stack(stage,iy,"340px","io",ios);
-    let my=y;
-    my=stack(stage,my,"640px","io",models);
-    let ty=y;
-    ty=stack(stage,ty,"940px","tests",tests);
-    let hy=y;
-    hy=stack(stage,hy,"1240px","helpers",helpers);
-    const bottom=Math.max(sy,iy,my,ty,hy,sy+10);
-    y=bottom+50;
-  });
-  layoutCodeZone(stage,y);
-  layoutOrphanZone(stage);
-}
-function orderScenarios(a,b,areaId){
-  const edge=id=>G.edges.find(e=>e.from_node===areaId&&e.to_node===id);
-  const la=edge(a.id)?1:2,lb=edge(b.id)?1:2;
-  return la-lb||a.label.localeCompare(b.label);
-}
-function orderIo(a,b,areaId){
-  const ca=a.details&&a.details.called_from,cb=b.details&&b.details.called_from;
-  if(ca!==cb)return ca?-1:1;
-  return (a.line||0)-(b.line||0);
-}
-function stack(stage,top,left,zone,items){
-  let y=top;
-  items.forEach(n=>{
-    const e=addNode(stage,n.id,parseFloat(left),y,{zone});
-    if(e){y+=e.offsetHeight+GAPY}else y+=150;
-  });
-  return y;
-}
-function gridZone(stage,ids,x0,y0,zone,cols=5,spacing=300){
-  let rowTop=y0,rowMax=0;
-  ids.forEach((id,i)=>{
-    const e=addNode(stage,id,x0+(i%cols)*spacing,rowTop,{zone});
-    rowMax=Math.max(rowMax,(e?e.offsetHeight:150)+GAPY);
-    if((i+1)%cols===0||i===ids.length-1){rowTop+=rowMax;rowMax=0}
-  });
-  return rowTop;
-}
-function layoutCodeZone(stage,fromY){
-  const linked=new Set();
-  const planIds=new Set(G.nodes.filter(n=>n.origin!=="code").map(n=>n.id));
-  (G.edges||[]).forEach(e=>{if(planIds.has(e.from_node)&&!planIds.has(e.to_node))linked.add(e.to_node);if(planIds.has(e.to_node)&&!planIds.has(e.from_node))linked.add(e.from_node)});
-  const codeIds=[...linked].filter(id=>byId[id]&&byId[id].origin==="code");
-  if(!codeIds.length)return;
-  gridZone(stage,codeIds,40,fromY+20,"code");
-}
-function layoutOrphanZone(stage){
-  const orphans=planNodes().filter(n=>!isArea(n.id)&&!areaOfView(n));
-  if(!orphans.length)return;
-  let maxY=80;document.querySelectorAll("#stage .node").forEach(e=>{maxY=Math.max(maxY,(parseFloat(e.style.top)||0)+e.offsetHeight)});
-  gridZone(stage,orphans.map(n=>n.id),40,maxY+80,"orphan");
-}
-/* ---------- связи ---------- */
-function edgeList(){
-  const out=[];
-  if(!G)return out;
-  const visible=id=>!!boxes[id];
-  const full=!(viewMode==="edit")&&pathMode==="scenario";
-  G.edges.forEach(e=>{
-    if(!visible(e.from_node)||!visible(e.to_node))return;
-    if(viewMode==="edit"){out.push(e);return}
-    if(!full){if(e.kind==="scenario_call")out.push(e);return}
-    if(e.kind==="scenario_call"||["dispatch","port_call","table","uses","depends","tests"].includes(e.kind))out.push(e);
-  });
-  if(!full&&viewMode!=="edit"){
-    sharedModels().forEach(mid=>{
-      scenList.forEach(sid=>{
-        const p=G.scenario_paths[sid];
-        if(!p)return;
-        if((p.models||[]).includes(mid)){
-          out.push({from_node:sid,to_node:"shared:"+mid,kind:"shared",label:""});
-        }
-      });
-    });
-  }
-  return out;
-}
-function anchor(a,b){
-  const ax=a.x+a.w/2,ay=a.y+a.h/2,bx=b.x+b.w/2,by=b.y+b.h/2,dx=bx-ax,dy=by-ay;
-  if(Math.abs(dx)>=Math.abs(dy))return dx>=0?{x1:a.x+a.w,y1:ay,x2:b.x-6,y2:by,h:true}:{x1:a.x,y1:ay,x2:b.x+b.w+6,y2:by,h:true};
-  return dy>=0?{x1:ax,y1:a.y+a.h,x2:bx,y2:b.y-6,h:false}:{x1:ax,y1:a.y,x2:bx,y2:b.y+b.h+6,h:false};
-}
-function edgeLabel(e){
-  if(e.kind==="tests")return"тест";
-  return e.label||"";
-}
-function drawEdges(){
-  const svg=$("edges");
-  let defs="<defs>"+MARKERS.map(([id,c])=>`<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="${c}"/></marker>`).join("")+"</defs>";
-  const body=edgeList().map(e=>{
+function drawEdges(svg,boxes,edges){
+  let defs='<defs>';
+  Object.entries(EDGE_COLORS).forEach(([k,c])=>{defs+=`<marker id="ar-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="${c}"/></marker>`});
+  defs+='</defs>';
+  const paths=edges.map(e=>{
     const a=boxes[e.from_node],b=boxes[e.to_node];
     if(!a||!b)return"";
-    const st=EDGE_STYLE[e.kind]||EDGE_STYLE.uses,s=anchor(a,b);
-    const d=s.h?`M${s.x1},${s.y1} C${(s.x1+s.x2)/2},${s.y1} ${(s.x1+s.x2)/2},${s.y2} ${s.x2},${s.y2}`:`M${s.x1},${s.y1} C${s.x1},${(s.y1+s.y2)/2} ${s.x2},${(s.y1+s.y2)/2} ${s.x2},${s.y2}`;
-    const mx=(s.x1+s.x2)/2,my=(s.y1+s.y2)/2-5;
-    const hi=!selId||e.from_node===selId||e.to_node===selId;
-    const op=e.origin==="stale"?0.4:(selId&&!hi?0.15:1);
-    const label=edgeLabel(e)?`<text class="elab" x="${mx}" y="${my}" text-anchor="middle" opacity="${op}">${esc(edgeLabel(e))}</text>`:"";
-    const dash=e.origin==="user"?' stroke-dasharray="6,4"':"";
-    return `<path d="${d}" fill="none" stroke="${st.c}" stroke-width="1.7" opacity="${op}"${st.dash?` stroke-dasharray="${st.dash}"`:""}${dash} marker-end="url(#${st.m})"/>${label}`;
+    const x1=a.x+a.w,y1=a.y+a.h/2,x2=b.x-6,y2=b.y+b.h/2;
+    const d=`M${x1},${y1} C${(x1+x2)/2},${y1} ${(x1+x2)/2},${y2} ${x2},${y2}`;
+    const mx=(x1+x2)/2,my=(y1+y2)/2-5;
+    return `<path d="${d}" fill="none" stroke="${EDGE_COLORS[e.kind]||"#9a9aa2"}" stroke-width="1.7" marker-end="url(#ar-${e.kind})"/>`+
+      `<text class="elab" x="${mx}" y="${my}" text-anchor="middle">${esc(EDGE_NAMES[e.kind]||e.kind)}</text>`;
   }).join("");
-  svg.innerHTML=defs+body;
+  svg.innerHTML=defs+paths;
 }
-/* ---------- панорама, зум, выделение ---------- */
-function applyView(){const v=$("view");if(v)v.style.transform=`translate(${view.x}px,${view.y}px) scale(${view.k})`;const z=$("zoomLabel");if(z)z.textContent=Math.round(view.k*100)+"%"}
-function toWorld(cx,cy){const r=$("canvas").getBoundingClientRect();return[(cx-r.left-view.x)/view.k,(cy-r.top-view.y)/view.k]}
-function zoomAt(cx,cy,f){const r=$("canvas").getBoundingClientRect();const px=cx-r.left,py=cy-r.top;const k2=Math.min(2.5,Math.max(.25,view.k*f)),s=k2/view.k;view.x=px-(px-view.x)*s;view.y=py-(py-view.y)*s;view.k=k2;applyView()}
-function zoomCenter(f){const r=$("canvas").getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,f)}
-function fitView(){
-  const els=[...document.querySelectorAll("#stage .node,#stage .badge,#stage .colhead,#stage .zone")];
-  if(!els.length)return;
-  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
-  els.forEach(e=>{const x=parseFloat(e.style.left)||0,y=parseFloat(e.style.top)||0;x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x+(e.offsetWidth||270));y1=Math.max(y1,y+(e.offsetHeight||60))});
-  const c=$("canvas");
-  const k=Math.min(2,Math.max(.25,Math.min((c.clientWidth-70)/Math.max(1,x1-x0),(c.clientHeight-70)/Math.max(1,y1-y0))));
-  view.k=k;view.x=(c.clientWidth-(x1-x0)*k)/2-x0*k;view.y=(c.clientHeight-(y1-y0)*k)/2-y0*k;applyView();
-}
-/* ---------- перерисовка одного узла (превью черновика) ---------- */
-function updateNodePreview(id){
-  const old=document.querySelector(`#stage .node[data-id="${CSS.escape(id)}"]`);
-  if(!old)return;
-  const x=parseFloat(old.style.left)||0,y=parseFloat(old.style.top)||0;
-  const zone=old.dataset.zone,nested=old.classList.contains("nested");
-  old.remove();
-  const fresh=addNode($("stage"),id,x,y,{zone,nested});
-  if(selId===id&&fresh)fresh.classList.add("sel");
-  if(fresh)boxes[id]={x,y,w:fresh.offsetWidth,h:fresh.offsetHeight};
-  if(viewMode==="edit")areaZoneDivs();else renderZoneDivs();
-  drawEdges();sizeStage();
-}
-/* ---------- сохранение правок (режим Просмотр) ---------- */
-async function saveDraft(){
-  const id=selId;
-  const v=drafts.get(id);
-  if(!id||!v)return;
-  const n=byId[id];if(!n)return;
-  const descChanged=v.description!==String(n.description||"");
-  const domChanged=v.domain!==String(n.domain||"");
-  try{
-    if(domChanged)await putNodePatch({target_id:id,is_edge:false,patch:{domain:v.domain}});
-    if(descChanged)applyGraph(await api("/api/metadata/node","POST",{node_id:id,description:v.description}));
-    else if(domChanged)applyGraph(await api("/api/graph"));
-    drafts.delete(id);updateDirtyUI();renderAll();
-    toast(descChanged?"описание сохранено в код":"сохранено");
-  }catch(e){toast("ошибка сохранения: "+msg(e))}
-}
-/* ---------- инспектор ---------- */
-function renderAll(){renderHeader();if(viewMode!=="edit")renderList();renderCanvas();renderInspector();renderStats()}
-function renderStats(){
-  if(!G){$("stats").textContent="—";return}
-  const planScen=G.nodes.filter(n=>n.kind==="scenario"&&n.origin==="user").length;
-  $("stats").textContent=`узлов ${G.nodes.length} · связей ${G.edges.length} · сценариев ${G.scenarios.length}`+(viewMode==="edit"?` · областей ${areas().length}`+(planScen?` · сценариев плана ${planScen}`:""):"");
-}
-function renderHeader(){
-  $("mView").classList.toggle("on",viewMode==="view");
-  $("mEdit").classList.toggle("on",viewMode==="edit");
-  document.querySelectorAll("#pathModeGroup [data-pm]").forEach(b=>b.classList.toggle("on",b.dataset.pm===pathMode));
-  $("pathModeGroup").style.display=viewMode==="view"?"":"none";
-  document.querySelector("main").classList.toggle("edit-only",viewMode==="edit");
-  $("btnFiles").style.display=viewMode==="edit"?"":"none";
-  $("btnClearPlan").style.display=viewMode==="edit"?"":"none";
-  $("btnDesc").classList.toggle("on",showDesc);
-  $("btnAcc").classList.toggle("on",showAcc);
-  $("hint").textContent=viewMode==="edit"
-    ?"Конструктор: создай новый сценарий в мастере справа · кнопки «Создать файлы» и «Очистить план» — в шапке"
-    :"клик по узлу — инспектор: правь описание и домен · фон — панорама · колесо — зум · двойной клик — вписать · Esc — снять выделение";
-  const d=$("btnSavePlan");
-  d.style.display=anyDirty()?"":"none";
-  d.textContent="Сохранить"+(drafts.size>1?" ("+drafts.size+")":"");
-}
-function setModeButtons(){
-  $("mView").classList.toggle("on",viewMode==="view");
-  $("mEdit").classList.toggle("on",viewMode==="edit");
-  $("pathModeGroup").style.display=viewMode==="view"?"":"none";
-  document.querySelector("main").classList.toggle("edit-only",viewMode==="edit");
-}
-function renderInspector(){
-  const chips=$("inspChips"),body=$("inspBody"),foot=$("inspFoot");
-  chips.innerHTML="";body.innerHTML="";foot.innerHTML="";
-  if(!G){body.innerHTML='<p class="dim">Загрузка…</p>';return}
-  if(viewMode==="edit"){renderWizard();return}
-  if(!selId||!byId[selId]){
-    body.innerHTML='<p class="dim">Выбери узел на канвасе или в списке слева.<br>Справа можно править описание узла и домен сценария.</p>';return;
+function measure(stage,map){const out={};stage.querySelectorAll(".card[data-id]").forEach(e=>{out[e.dataset.id]={x:parseFloat(e.style.left)||0,y:parseFloat(e.style.top)||0,w:e.offsetWidth,h:e.offsetHeight}});return out}
+
+/* ---------- Карта ---------- */
+function renderMap(){
+  const stage=$("mapStage"),svg=$("mapEdges");
+  clearStage(stage,svg);mapBoxes={};
+  const endpoints=(G.nodes||[]).filter(n=>n.kind==="endpoint");
+  if(!endpoints.length){
+    const e=document.createElement("div");e.className="empty";
+    e.innerHTML="Эндпоинтов fastbase не найдено.<br>Проверьте FAT_ROUTES_PACKAGE и запустите скан.";
+    stage.appendChild(e);stage.style.width="900px";stage.style.height="500px";applyTransform("mapView",mapView);return;
   }
-  const n=viewNode(selId),orig=byId[selId];
-  chips.innerHTML=`<span class="chip acc">${esc(KIND_NAMES[orig.kind])}</span><span class="chip">${esc(ORIGIN_NAMES[orig.origin])}</span>${draftDirty(orig.id)?'<span class="chip acc">не сохранено</span>':""}`;
-  let html="";
-  const rows=(pairs)=>pairs.filter(p=>p&&p[1]!==undefined&&p[1]!==null&&p[1]!=="")
-    .map(([k,v])=>`<div class="kv"><span>${esc(k)}</span><b>${esc(Array.isArray(v)?v.join(", "):v)}</b></div>`).join("");
-  const det=n.details||{};
-  if(n.kind==="endpoint")html+=rows([["HTTP-метод",METHOD_LABELS[det.http_method]||det.http_method],["URL",det.url_path||det.path],["путь в декораторе",det.path],["функция",det.function_name],["модуль",det.router_module],["теги",det.tags]]);
-  if(n.kind==="scenario")html+=rows([["имя регистрации",det.name],["класс",det.class_name],["модуль",det.module],["вход (dto)",det.dto],["ответ (response)",det.response]]);
-  if(n.kind==="io")html+=rows([["метод",det.method],["таблица",det.table],["через",det.via_attr],["сценарий",det.called_from]]);
-  if(n.kind==="model")html+=rows([["таблица",det.tablename],["класс",det.class_name],["файл",det.source_file]]);
-  if(n.kind==="test")html+=rows([["имя теста",det.test_name],["тестирует сценарий",det.test_for_scenario],["модуль",det.module]]);
-  if(n.kind==="helper")html+=rows([["роль",ROLE_NAMES[det.role]||det.role],["модуль",det.module]]);
-  const desc=n.description||n.doc;
-  if(desc)html+=`<div class="docblock${n.description?"":" code"}"><div class="dhdr">${n.description?"описание":"документация из кода"}</div>${esc(desc)}</div>`;
-  const canDesc=orig.kind!=="io";
-  const canDomain=orig.kind==="scenario";
-  if(canDesc||canDomain){
-    const v=viewForm(n);
-    html+=`<div class="edit-form">`;
-    if(canDesc){
-      html+=`<label>Описание</label><textarea id="vDesc" rows="4">${esc(v.description)}</textarea>`;
-      html+=`<div class="hintline">${orig.origin==="user"?"пока файла нет — описание хранится в плане; в код попадёт маркером после «Создать файлы»":"сохраняется в код блоком # studio: description start/end"}</div>`;
-    }
-    if(canDomain){
-      html+=`<label>Домен</label><input id="vDomain" value="${esc(v.domain)}" placeholder="например, заказы">`;
-      html+=`<div class="hintline">домен хранится в плане (.studio/plan.json)</div>`;
-    }
-    html+=`</div>`;
-  }else if(orig.kind==="io"){
-    html+=`<div class="hintline" style="margin-top:8px">Описание операции БД задаётся в сценарии-родителе.</div>`;
+  const byDomain=new Map();
+  endpoints.forEach(n=>{
+    const domain=(n.domain||"").trim()||NO_DOMAIN;
+    if(!byDomain.has(domain))byDomain.set(domain,new Map());
+    const method=methodOfEndpoint(n);
+    const byMethod=byDomain.get(domain);
+    if(!byMethod.has(method))byMethod.set(method,[]);
+    byMethod.get(method).push(n);
+  });
+  const domains=[...byDomain.keys()].sort((a,b)=>(a===NO_DOMAIN)-(b===NO_DOMAIN)||a.localeCompare(b));
+  const pkg=document.createElement("div");pkg.className="zone";pkg.dataset.zone="pkg";
+  const pkgLab=document.createElement("div");pkgLab.className="zlab";pkgLab.textContent="fastbase";pkg.appendChild(pkgLab);
+  stage.appendChild(pkg);
+
+  let y=70,x=60,rowMax=0,zoneX1=1e9,zoneY1=1e9,zoneX2=0,zoneY2=0;
+  domains.forEach(domain=>{
+    const dHead=document.createElement("div");dHead.className="colhead";dHead.style.left=x+"px";dHead.style.top=y+"px";
+    dHead.innerHTML=`${esc(domain)}`;stage.appendChild(dHead);y+=36;
+    const byMethod=byDomain.get(domain);
+    const methods=[...byMethod.keys()].sort((a,b)=>{
+      const ia=METHOD_ORDER.indexOf(a),ib=METHOD_ORDER.indexOf(b);
+      return (ia<0?99:ia)-(ib<0?99:ib)||a.localeCompare(b);
+    });
+    methods.forEach(method=>{
+      const items=byMethod.get(method);
+      const mHead=document.createElement("div");mHead.className="colhead";mHead.style.left=(x+16)+"px";mHead.style.top=y+"px";
+      mHead.innerHTML=`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${METHOD_COLORS[method]||"#9a9aa2"};margin-right:5px"></span>${esc(method)} · ${items.length}`;
+      stage.appendChild(mHead);y+=30;
+      const cols=Math.min(3,Math.max(1,items.length));
+      let rowTop=y,rowH=0;
+      items.forEach((n,i)=>{
+        const d=n.details||{};
+        const e=document.createElement("div");
+        e.className=`card method-${method.toLowerCase()}`;e.dataset.id=n.id;
+        e.style.left=(x+32+(i%cols)*300)+"px";e.style.top=rowTop+"px";
+        e.innerHTML=`<div class="hd"><span class="t">${esc(method)} ${esc(urlOfEndpoint(n))}</span></div>`+
+          `<div class="mt">${esc(d.function_name||"")}</div>`;
+        e.onclick=ev=>{ev.stopPropagation();openEndpointScenario(n.id)};
+        stage.appendChild(e);
+        rowH=Math.max(rowH,e.offsetHeight+GAPY);
+        if((i+1)%cols===0||i===items.length-1){rowTop+=rowH;rowH=0}
+        zoneX1=Math.min(zoneX1,parseFloat(e.style.left));zoneY1=Math.min(zoneY1,parseFloat(e.style.top));
+        zoneX2=Math.max(zoneX2,parseFloat(e.style.left)+e.offsetWidth);zoneY2=Math.max(zoneY2,parseFloat(e.style.top)+e.offsetHeight);
+      });
+      y=rowTop+16;
+    });
+    y+=18;
+  });
+  if(zoneX1<1e9){
+    pkg.style.left=(zoneX1-PAD)+"px";pkg.style.top=(zoneY1-PAD-18)+"px";
+    pkg.style.width=(zoneX2-zoneX1+PAD*2)+"px";pkg.style.height=(zoneY2-zoneY1+PAD*2+18)+"px";
   }
-  html+=`<div class="docblock" style="border-left-color:#4c4e56"><div class="dhdr">Связи</div><div id="links"></div></div>`;
-  body.innerHTML=html;
-  const descEl=$("vDesc"),domEl=$("vDomain");
-  const readView=()=>{const v=viewForm(orig);if(descEl)v.description=descEl.value;if(domEl)v.domain=domEl.value;setViewDraft(orig.id,v)};
-  if(descEl)descEl.addEventListener("input",readView);
-  if(domEl)domEl.addEventListener("input",readView);
-  renderLinks(orig.id);
-  if(codeState)body.insertAdjacentHTML("beforeend",codeBlockHtml(codeState));
-  foot.innerHTML="";
-  if(canDesc||canDomain){
-    const save=document.createElement("button");save.id="bSaveDesc";save.className="btn-primary";save.style.marginTop="0";
-    save.textContent="Сохранить изменения"+(drafts.size>1?" ("+drafts.size+")":"");
-    save.onclick=saveDraft;foot.appendChild(save);
-    if(draftDirty(orig.id)){const dis=document.createElement("button");dis.className="btn-ghost";dis.textContent="Отменить правки";dis.onclick=()=>{clearDraft(orig.id);renderInspector()};foot.appendChild(dis)}
+  // заголовок пакета поверх зоны
+  const pkgTitle=document.createElement("div");pkgTitle.className="colhead";
+  pkgTitle.style.left=(zoneX1-PAD+14)+"px";pkgTitle.style.top=Math.max(8,zoneY1-PAD-46)+"px";
+  pkgTitle.innerHTML='<b style="color:var(--acc)">fastbase</b>';
+  stage.appendChild(pkgTitle);
+  sizeStage(stage,svg);
+  applyTransform("mapView",mapView);
+}
+
+/* ---------- Сценарий ---------- */
+function fillScenarioSelect(){
+  const sel=$("scenSelect");sel.innerHTML="";
+  (G.scenarios||[]).forEach(id=>{const n=byId[id];if(!n)return;
+    const o=document.createElement("option");o.value=id;o.textContent=n.label;o.selected=id===selectedScenario;sel.appendChild(o)});
+  sel.onchange=()=>{selectedScenario=sel.value;selectedNode=null;renderScenario();renderInspector()};
+  const list=$("scenList");list.innerHTML="";
+  const group=new Map();
+  (G.scenarios||[]).forEach(id=>{
+    const p=G.scenario_paths[id]||{};const ep=p.endpoint?byId[p.endpoint]:null;
+    const key=ep?`${methodOfEndpoint(ep)} ${urlOfEndpoint(ep)}`:"без эндпоинта";
+    if(!group.has(key))group.set(key,[]);group.get(key).push(id);
+  });
+  [...group.keys()].sort().forEach(key=>{
+    const h=document.createElement("div");h.className="hint";h.style.padding="6px 6px 2px";h.textContent=key;list.appendChild(h);
+    group.get(key).forEach(id=>{
+      const n=byId[id];if(!n)return;
+      const e=document.createElement("div");e.className="sitem"+(selectedScenario===id?" on":"");e.textContent=n.label;
+      e.title=n.id;e.onclick=()=>{selectedScenario=id;selectedNode=null;renderScenario();renderInspector()};
+      list.appendChild(e);
+    });
+  });
+}
+function visibleEdges(ids){
+  const set=new Set(ids);
+  return (G.edges||[]).filter(e=>set.has(e.from_node)&&set.has(e.to_node));
+}
+function renderScenario(){
+  fillScenarioSelect();
+  const stage=$("scenStage"),svg=$("scenEdges");
+  clearStage(stage,svg);scenBoxes={};
+  if(!G.scenarios.length){
+    const e=document.createElement("div");e.className="empty";e.innerHTML="Сценариев не найдено.<br>Запустите скан проекта.";stage.appendChild(e);
+    stage.style.width="900px";stage.style.height="500px";applyTransform("scenView",scenView);renderInspector();return;
   }
-  const code=document.createElement("button");code.textContent=orig.file_path?"Открыть исходник":"Путь кода";code.onclick=()=>openCode(orig);foot.appendChild(code);
-  if(codeState){const c=document.createElement("button");c.textContent="Закрыть код";c.onclick=()=>{codeState=null;renderInspector()};foot.appendChild(c)}
-  if(codeState){const pre=$("codePre");if(pre&&codeState.line)pre.scrollTop=Math.max(0,(codeState.line-5)*15)}
-}
-function codeBlockHtml(st){return`<div class="codewrap"><div class="codehd"><span>${esc(st.path)}${st.line?": "+st.line:""}</span><button id="bCloseCode">закрыть</button></div><pre id="codePre">${esc(st.code)}</pre></div>`}
-function renderLinks(id){
-  const box=$("links");if(!box)return;
-  const rel=(G.edges||[]).filter(e=>e.from_node===id||e.to_node===id);
-  if(!rel.length){box.innerHTML='<p class="dim">нет связей</p>';return}
-  box.innerHTML=rel.map(e=>{
-    const other=e.from_node===id?e.to_node:e.from_node;
-    const o=byId[other];
-    const dir=e.from_node===id?"→":"←";
-    return`<div class="linkrow" data-node="${esc(other)}">${dir} ${esc(KIND_NAMES[o?.kind]||"")} ${esc(o?o.label:other)} <small>· ${esc(edgeLabel(e)||e.kind)}</small></div>`;
-  }).join("");
-  box.querySelectorAll(".linkrow").forEach(d=>d.onclick=()=>selectNode(d.dataset.node));
-}
-async function openCode(n){
-  try{
-    const r=await api("/api/file?path="+encodeURIComponent(n.file_path));
-    codeState={path:n.file_path,line:n.line,code:r.code||"(файл не найден)"};
-  }catch(e){codeState={path:n.file_path,line:n.line,code:"ошибка: "+e.message}}
+  if(!selectedScenario)selectedScenario=G.scenarios[0];
+  const path=G.scenario_paths[selectedScenario];
+  if(!path){const e=document.createElement("div");e.className="empty";e.textContent="У сценария нет пути.";stage.appendChild(e);applyTransform("scenView",scenView);return}
+  const ids=[];
+  const add=(id,x,y,opts)=>{if(!id||!byId[id])return null;const e=makeCard(byId[id],x,y,opts);ids.push(id);return e};
+  let y=90;
+  const ep=path.endpoint?add(path.endpoint,40,y,{}):null;
+  if(!ep){const g=document.createElement("div");g.className="card";g.style.left="40px";g.style.top=y+"px";g.innerHTML='<div class="hd"><span class="chip">endpoint</span><span class="t">нет эндпоинта</span></div><div class="mt">сценарий вызывается не из HTTP</div>';stage.appendChild(g)}
+  const sc=add(path.scenario,400,y,{});
+  let nestedY=y+(sc?sc.offsetHeight:120)+24;
+  (path.called_scenarios||[]).forEach(id=>{
+    if(id===selectedScenario)return;
+    const e=add(id,400,nestedY,{nested:true});
+    if(e)nestedY+=e.offsetHeight+GAPY;
+  });
+  let ioT=y;
+  (path.io_calls||[]).forEach(id=>{const e=add(id,760,ioT,{});if(e)ioT+=e.offsetHeight+GAPY});
+  let modelY=y;
+  (path.models||[]).forEach(id=>{const e=add(id,1120,modelY,{});if(e)modelY+=e.offsetHeight+GAPY});
+  let testY=y;
+  (path.tests||[]).forEach(id=>{const e=add(id,1480,testY,{});if(e)testY+=e.offsetHeight+GAPY});
+
+  const heads=[["endpoint",40],["scenario",400],["io",760],["model",1120],["тесты",1480]];
+  heads.forEach(([t,x])=>{const h=document.createElement("div");h.className="colhead";h.style.left=x+"px";h.style.top="40px";h.textContent=t;stage.appendChild(h)});
+  if(!hideMeta){
+    const note=document.createElement("div");note.className="hint";note.style.position="absolute";note.style.left="40px";note.style.top="12px";
+    note.textContent="слои слева направо: endpoint → scenario → io → model; вложенные сценарии — рядом с родителем; тесты — справа";
+    stage.appendChild(note);
+  }
+  sizeStage(stage,svg);
+  scenBoxes=measure(stage);
+  const vis=[...new Set(ids)];
+  drawEdges(svg,scenBoxes,visibleEdges(vis));
+  applyTransform("scenView",scenView);
   renderInspector();
 }
-/* ---------- мастер «Новый сценарий» ---------- */
-const TRANSLIT={а:"a",б:"b",в:"v",г:"g",д:"d",е:"e",ё:"e",ж:"zh",з:"z",и:"i",й:"y",к:"k",л:"l",м:"m",н:"n",о:"o",п:"p",р:"r",с:"s",т:"t",у:"u",ф:"f",х:"h",ц:"c",ч:"ch",ш:"sh",щ:"sch",ъ:"",ы:"y",ь:"",э:"e",ю:"yu",я:"ya"};
-function translit(s){return String(s||"").toLowerCase().split("").map(ch=>TRANSLIT[ch]||ch).join("")}
-function newSlug(label){return slug(translit(label))}
-function newPascal(label){return pascal(translit(label))}
-function renderWizard(){
+
+/* ---------- инспектор и автосейв ---------- */
+function renderInspector(){
   const chips=$("inspChips"),body=$("inspBody"),foot=$("inspFoot");
-  chips.innerHTML='<span class="chip acc">мастер</span>';
-  const isNew=!wizard;
-  if(!wizard){
-    const areaOpts=areas();
-    wizard={
-      label:"",http:true,method:"post",path:"",desc:"",acc:"",domain:"",
-      ops:[{method:"create",table:""}],withFile:true,
-      area:"",name:"",class_name:"",nameTouched:false,classTouched:false
-    };
-    if(!areaOpts.length)wizard.area="";
+  chips.innerHTML="";body.innerHTML="";
+  if(!selectedNode||!byId[selectedNode]){
+    body.innerHTML='<p class="hint">Выберите узел на карте сценария. Описание, критерии и домен хранятся маркерами в коде.</p>';
+    foot.textContent="Правки сохраняются при потере фокуса.";return;
   }
-  const w=wizard;
-  const scenFile=w.name?`app/scenarios/${slug(w.name)}.py`:"app/scenarios/new_scenario.py";
-  const epFile=w.path?`app/api/v1/routes/${newSlug(w.path).replace(/^_+/,"")||"new"}.py`:"app/api/v1/routes/new_endpoint.py";
-  const epFunc=w.path?newSlug(w.path).replace(/^_+/,"")||"new_endpoint":"new_endpoint";
-  const name=w.nameTouched?(w.name||""):(newSlug(w.label)||"new_scenario");
-  const cls=w.classTouched?(w.class_name||""):(newPascal(w.label)||"NewScenario")+"Scenario";
-  const newTables=w.ops.map(o=>o.table).filter(Boolean).filter(t=>!G.nodes.some(n=>n.kind==="model"&&String(n.details.tablename||"")===t));
-  const kindName=name&&!/^[a-z_][a-z0-9_]*$/.test(name)?" (имя станет недопустимым)":"";
-  let html=`<div class="edit-form"><div class="insp-heading">Новый сценарий</div>`;
-  html+=`<label>Название сценария</label><input id="wLabel" value="${esc(w.label)}" placeholder="например, Возврат заказа">`;
-  html+=`<label>Описание</label><textarea id="wDesc" rows="3">${esc(w.desc)}</textarea>`;
-  html+=`<label>Критерии приёмки (пункт на строку)</label><textarea id="wAcc" rows="2">${esc(w.acc)}</textarea>`;
-  html+=`<label>Домен</label><input id="wDomain" value="${esc(w.domain)}" placeholder="например, заказы">`;
-  html+=`<label><input type="checkbox" id="wHttp" ${w.http?"checked":""}> вызывать по HTTP (создаст новую область плана)</label>`;
-  if(w.http){
-    html+=`<label>HTTP-метод</label><select id="wMethod">${HTTP_METHODS.map(m=>`<option ${w.method===m?"selected":""}>${m}</option>`).join("")}</select>`;
-    html+=`<label>Путь маршрута</label><input id="wPath" value="${esc(w.path)}" placeholder="/refund">`;
+  const n=byId[selectedNode];
+  chips.innerHTML=`<span class="chip acc">${esc(KIND_NAMES[n.kind]||n.kind)}</span><span class="chip">${esc(n.file_path)}:${n.line}</span>`;
+  let h="";
+  h+=`<div class="kv"><span>якорь</span><b>${esc(anchorText(n))}</b></div>`;
+  h+=`<div class="field"><label>Описание</label><textarea id="fDesc" rows="5">${esc(n.description)}</textarea></div>`;
+  h+=`<div class="field"><label>Критерии приёмки (по одному на строку)</label><textarea id="fAcc" rows="5">${esc((n.acceptance||[]).join("\n"))}</textarea></div>`;
+  if(n.kind==="endpoint"){
+    h+=`<div class="field"><label>Домен</label><input id="fDomain" value="${esc(n.domain)}" placeholder="например, orders"><div class="note">Домен назначается только эндпоинту; остальные узлы наследуют его автоматически.</div></div>`;
+  }else{
+    h+=`<div class="field"><label>Домен (наследуется)</label><input value="${esc(n.domain)}" disabled><div class="note">Домен нельзя назначить этому узлу: он наследуется от связанных эндпоинтов.</div></div>`;
   }
-  html+=`<label>Операции с базой</label>`;
-  w.ops.forEach((o,i)=>{
-    html+=`<div class="oprow"><select data-wop="${i}" data-wf="method">${IO_METHODS.map(m=>`<option ${o.method===m?"selected":""}>${m}</option>`).join("")}</select>`;
-    html+=`<input data-wop="${i}" data-wf="table" list="tableList" value="${esc(o.table)}" placeholder="таблица">`;
-    html+=`<button type="button" data-delop="${i}" title="убрать">×</button></div>`;
+  body.innerHTML=h;
+  [["fDesc","description"],["fAcc","acceptance"],["fDomain","domain"]].forEach(([id,_f])=>{
+    const el=$(id);if(!el)return;
+    el.addEventListener("blur",()=>saveMetadata());
+    el.addEventListener("keydown",ev=>{if(ev.key==="Enter"&&(ev.ctrlKey||ev.metaKey))el.blur()});
   });
-  html+=`<button id="wAddOp" type="button" class="btn-ghost" style="font-size:11px;padding:2px 6px">+ операция</button>`;
-  html+=`<datalist id="tableList">${G.nodes.filter(x=>x.kind==="model").map(x=>`<option value="${esc(x.details.tablename||"")}">${esc(x.label)}</option>`).join("")}</datalist>`;
-  html+=`<label><input type="checkbox" id="wFile" ${w.withFile?"checked":""}> создавать файлы по кнопке «Создать файлы»</label>`;
-  html+=`<label>Область плана</label><select id="wArea"><option value="">— новая (если выбран HTTP) —</option>${areas().map(a=>`<option value="${esc(a.id)}" ${w.area===a.id?"selected":""}>${esc(a.label)}</option>`).join("")}</select>`;
-  html+=`<div class="hintline" style="margin-top:10px">Будет создано: ${w.http?`эндпоинт и область · `:""}сценарий · операций БД ${w.ops.length} · новых моделей ${newTables.length||"нет"}</div>`;
-  html+=`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:11px;color:var(--dim)">детали имён</summary>`;
-  html+=`<div class="hintline" id="wDetail" style="margin-top:6px">${wizardDetailHtml(name,cls,scenFile,epFile,epFunc,kindName,w.http)}</div>`;
-  html+=`<label style="margin-top:8px">Имя регистрации</label><input id="wName" value="${esc(w.name||"")}" placeholder="определяется из названия">`;
-  html+=`<label>Имя класса</label><input id="wClass" value="${esc(w.class_name||"")}" placeholder="определяется из названия">`;
-  html+=`</details></div>`;
-  body.innerHTML=html;foot.innerHTML="";
-  if(isNew){const l=$("wLabel");if(l)l.focus()}
-  const b=document.createElement("button");b.id="bCreateNode";b.className="btn-primary";b.style.marginTop="0";b.textContent="Создать сценарий";
-  b.onclick=createWizard;foot.appendChild(b);
-  const cancel=document.createElement("button");cancel.className="btn-ghost";cancel.textContent="Отмена";cancel.onclick=()=>{wizard=null;renderInspector()};foot.appendChild(cancel);
-  $("wLabel").addEventListener("input",()=>{
-    wizard.label=$("wLabel").value;
-    if(!wizard.nameTouched){wizard.name=""}
-    if(!wizard.classTouched){wizard.class_name=""}
-    updateWizardDetail();
-  });
-  $("wName").addEventListener("input",()=>{wizard.name=$("wName").value;wizard.nameTouched=true;if(!wizard.classTouched)wizard.class_name="";updateWizardDetail()});
-  $("wClass").addEventListener("input",()=>{wizard.class_name=$("wClass").value;wizard.classTouched=true;updateWizardDetail()});
-  $("wDesc").addEventListener("input",()=>{wizard.desc=$("wDesc").value});
-  $("wAcc").addEventListener("input",()=>{wizard.acc=$("wAcc").value});
-  $("wDomain").addEventListener("input",()=>{wizard.domain=$("wDomain").value});
-  $("wHttp").addEventListener("change",()=>{wizard.http=$("wHttp").checked;renderWizard()});
-  $("wMethod").addEventListener("change",()=>{wizard.method=$("wMethod").value});
-  $("wPath").addEventListener("input",()=>{wizard.path=$("wPath").value;updateWizardDetail()});
-  $("wFile").addEventListener("change",()=>{wizard.withFile=$("wFile").checked});
-  $("wArea").addEventListener("change",()=>{wizard.area=$("wArea").value});
-  $("wAddOp").onclick=()=>{wizard.ops.push({method:"create",table:""});renderWizard()};
-  document.querySelectorAll("[data-delop]").forEach(bx=>bx.onclick=()=>{wizard.ops.splice(parseInt(bx.dataset.delop),1);renderWizard()});
-  document.querySelectorAll("[data-wop]").forEach(inp=>{
-    inp.addEventListener(inp.tagName==="SELECT"?"change":"input",()=>{
-      wizard.ops[parseInt(inp.dataset.wop)][inp.dataset.wf]=inp.value;
-    });
-  });
+  foot.textContent="Автосейв при потере фокуса. Пустой раздел удаляется из кода.";
 }
-function wizardDetailHtml(name,cls,scenFile,epFile,epFunc,kindName,http){
-  return `имя регистрации: <b>${esc(name||"—")}</b>${esc(kindName||"")}<br>класс: <b>${esc(cls||"—")}</b><br>файл сценария: <b>${esc(scenFile)}</b>${http?`<br>файл маршрута: <b>${esc(epFile)}</b><br>функция: <b>${esc(epFunc)}</b>`:""}`;
+function anchorText(n){
+  const d=n.details||{};
+  if(n.kind==="endpoint")return d.function_name||"";
+  if(n.kind==="scenario"||n.kind==="model")return d.class_name||"";
+  if(n.kind==="test")return d.test_name||"";
+  if(n.kind==="io")return `${d.scenario_class}._db.${d.method}:${n.line}`;
+  return "";
 }
-function updateWizardDetail(){
-  const w=wizard;if(!w)return;
-  const name=w.nameTouched?(w.name||""):(newSlug(w.label)||"new_scenario");
-  const cls=w.classTouched?(w.class_name||""):(newPascal(w.label)||"NewScenario")+"Scenario";
-  const scenFile=w.name?`app/scenarios/${slug(w.name)}.py`:"app/scenarios/new_scenario.py";
-  const epFile=w.path?`app/api/v1/routes/${newSlug(w.path).replace(/^_+/,"")||"new"}.py`:"app/api/v1/routes/new_endpoint.py";
-  const epFunc=w.path?newSlug(w.path).replace(/^_+/,"")||"new_endpoint":"new_endpoint";
-  const kindName=name&&!/^[a-z_][a-z0-9_]*$/.test(name)?" (имя станет недопустимым)":"";
-  const d=$("wDetail");if(d)d.innerHTML=wizardDetailHtml(name,cls,scenFile,epFile,epFunc,kindName,w.http);
-}
-function readWizard(){
-  const g=id=>{const e=$(id);return e?e.value:""};
-  const nameTouched=!!wizard.nameTouched,classTouched=!!wizard.classTouched;
-  const wname=g("wName"),wclass=g("wClass");
-  return Object.assign(wizard,{
-    label:g("wLabel"),desc:g("wDesc"),acc:g("wAcc"),domain:g("wDomain"),
-    method:g("wMethod")||"post",path:g("wPath"),withFile:$("wFile")?.checked??true,area:g("wArea"),
-    name:nameTouched?wname:(newSlug(g("wLabel"))||"new_scenario"),
-    class_name:classTouched?wclass:(newPascal(g("wLabel"))||"NewScenario")+"Scenario"
-  });
-}
-async function createWizard(){
-  const w=Object.assign({},readWizard());
-  const label=w.label.trim();
-  if(!label){toast("укажи название сценария");return}
-  if(w.http&&!w.path.trim()){toast("укажи путь маршрута");return}
-  const name=(w.name&&String(w.name).trim())?slug(String(w.name).trim()):(newSlug(label)||"new_scenario");
-  const className=(w.class_name&&String(w.class_name).trim())?pascal(String(w.class_name).trim()):((newPascal(label)||"NewScenario")+"Scenario");
-  if(!/^[a-z_][a-z0-9_]*$/.test(name)){toast("имя регистрации недопустимо: "+name);return}
-  const area=await createScenarioFlow({label,name,className,method:w.method,path:w.path.trim(),desc:w.desc,
-    acc:w.acc,domain:w.domain,ops:w.ops,withFile:w.withFile,http:w.http,area:w.area});
-  if(area){wizard=null;toast("создан сценарий "+name+" — режим Просмотр")}
-}
-async function createScenarioFlow(o){
-  let areaId=o.area;
-  const created=[];
+async function saveMetadata(){
+  const n=byId[selectedNode];if(!n)return;
+  const desc=$("fDesc")?$("fDesc").value:n.description;
+  const acc=$("fAcc")?$("fAcc").value.split("\n").map(s=>s.trim()).filter(Boolean):n.acceptance;
+  const dom=$("fDomain")?$("fDomain").value:(n.kind==="endpoint"?n.domain:"");
+  const same=desc===n.description&&JSON.stringify(acc)===JSON.stringify(n.acceptance)&&(n.kind!=="endpoint"||dom===n.domain);
+  if(same)return;
   try{
-    if(o.http){
-      const fn=newSlug(o.path).replace(/^_+/,"")||"new_endpoint";
-      const file=`app/api/v1/routes/${fn}.py`;
-      const ep={id:"",kind:"endpoint",layer:"representation",label:`${o.method.toUpperCase()} ${o.path}`,
-        file_path:file,line:1,details:{http_method:o.method,path:o.path,function_name:fn,router_module:"app.api.v1.routes."+fn,tags:[]},
-        origin:"user",description:o.desc,acceptance:o.acc.split("\n").map(s=>s.trim()).filter(Boolean),
-        notes:"",domain:o.domain,area:"",scaffolded:false,create_file:o.withFile,append_model:false};
-      ep.id=freeId(nodeIdFor(ep));
-      await putNodePatch({target_id:ep.id,is_edge:false,node:ep});
-      created.push({target_id:ep.id,is_edge:false});
-      areaId=ep.id;
-    }
-    const file=`app/scenarios/${slug(o.name)}.py`;
-    const scen={id:"",kind:"scenario",layer:"logic",label:o.label,file_path:file,line:1,
-      details:{name:o.name,class_name:o.className,module:"app.scenarios."+slug(o.name),dto:null,response:null},
-      origin:"user",description:o.desc,acceptance:o.acc.split("\n").map(s=>s.trim()).filter(Boolean),
-      notes:"",domain:o.domain,area:areaId,scaffolded:false,create_file:o.withFile,append_model:false};
-    scen.id=freeId(nodeIdFor(scen));
-    await putNodePatch({target_id:scen.id,is_edge:false,node:scen});
-    created.push({target_id:scen.id,is_edge:false});
-    if(areaId){await putEdge({id:`${areaId}::dispatch::${scen.id}`,from_node:areaId,to_node:scen.id,kind:"dispatch",label:`run("${o.name}")`,line:1,origin:"user",description:""});created.push({target_id:`${areaId}::dispatch::${scen.id}`,is_edge:true})}
-    for(let i=0;i<o.ops.length;i++){
-      const op=o.ops[i];const table=String(op.table||"").trim();
-      const io={id:"",kind:"io",layer:"io",label:table?`_db.${op.method}(${table})`:`_db.${op.method}()`,file_path:"",line:5+i,
-        details:{method:op.method,table:table||null,via_attr:"_db",called_from:scen.id},
-        origin:"user",description:"",acceptance:[],notes:"",domain:"",area:areaId,scaffolded:false,create_file:true,append_model:false};
-      io.id=freeId(nodeIdFor(io));
-      await putNodePatch({target_id:io.id,is_edge:false,node:io});
-      created.push({target_id:io.id,is_edge:false});
-      await putEdge({id:`${scen.id}::port_call::${io.id}`,from_node:scen.id,to_node:io.id,kind:"port_call",
-        label:io.label,line:io.line,origin:"user",description:""});
-      created.push({target_id:`${scen.id}::port_call::${io.id}`,is_edge:true});
-      if(table){
-        const modelId=Object.keys(byId).find(k=>byId[k].kind==="model"&&String(byId[k].details.tablename||"")===table);
-        if(modelId){await putEdge({id:`${io.id}::table::${modelId}`,from_node:io.id,to_node:modelId,kind:"table",label:"",line:1,origin:"user",description:""});created.push({target_id:`${io.id}::table::${modelId}`,is_edge:true})}
-        else{
-          const cls=pascal(slug(table));
-          const model={id:"",kind:"model",layer:"io",label:cls,file_path:"models.py",line:1,
-            details:{tablename:table,class_name:cls,source_file:"models.py"},
-            origin:"user",description:"",acceptance:[],notes:"",domain:o.domain,area:areaId,scaffolded:false,create_file:false,append_model:true};
-          model.id=freeId(nodeIdFor(model));
-          await putNodePatch({target_id:model.id,is_edge:false,node:model});
-          created.push({target_id:model.id,is_edge:false});
-          await putEdge({id:`${io.id}::table::${model.id}`,from_node:io.id,to_node:model.id,kind:"table",label:"",line:1,origin:"user",description:""});
-          created.push({target_id:`${io.id}::table::${model.id}`,is_edge:true});
-        }
-      }
-    }
-    selScenario=scen.id;selId=scen.id;codeState=null;
-    viewMode="view";pathMode="scenario";
-    setModeButtons();renderAll();fitView();
-    return areaId;
-  }catch(e){
-    for(let i=created.length-1;i>=0;i--){
-      const c=created[i];
-      try{
-        await api("/api/plan/patch?target_id="+encodeURIComponent(c.target_id)+"&is_edge="+(c.is_edge?1:0),"DELETE");
-      }catch(_){}
-    }
-    try{applyGraph(await api("/api/graph"))}catch(_){}
-    renderAll();
-    toast("ошибка создания: "+msg(e)+(created.length?" — созданные узлы откачены":""));
-    return null;
-  }
-}
-/* ---------- несохранённые изменения ---------- */
-async function guardLeave(){
-  if(!anyDirty())return true;
-  const choice=await modal("Есть несохранённые правки","Узлов с несохранёнными изменениями: "+drafts.size+". Что сделать?",
-    ["Сохранить и продолжить","Не сохранять","Остаться"]);
-  if(choice==="Сохранить и продолжить"){await saveDraft();return true}
-  if(choice==="Не сохранять"){drafts.clear();updateDirtyUI();return true}
-  return false;
-}
-function updateDirtyUI(){
-  const d=$("btnSavePlan");
-  d.style.display=anyDirty()?"":"none";
-  if(anyDirty())d.textContent="Сохранить"+(drafts.size>1?" ("+drafts.size+")":"");
-  document.querySelectorAll("#stage .node").forEach(e=>{
-    e.classList.toggle("dirty",drafts.has(e.dataset.id));
-  });
-  const chip=$("inspChips");
-  if(chip){
-    let c=chip.querySelector(".chip.draft-chip");
-    if(selId&&drafts.has(selId)){
-      if(!c){c=document.createElement("span");c.className="chip acc draft-chip";c.textContent="не сохранено";chip.appendChild(c)}
-    }else if(c){c.remove()}
-  }
-}
-/* ---------- модальные окна ---------- */
-function modal(title,text,buttons){
-  return new Promise(resolve=>{
-    const box=$("modalBox");
-    box.innerHTML=`<h3>${esc(title)}</h3><div class="msec">${esc(text)}</div><div class="modal-btns"></div>`;
-    const btns=box.querySelector(".modal-btns");
-    const cancel=buttons.find(b=>b==="Отмена"||b==="Остаться")||buttons[buttons.length-1]||null;
-    let done=false;
-    const close=label=>{
-      if(done)return;done=true;
-      document.removeEventListener("keydown",onEsc,true);
-      $("modal").removeEventListener("click",onBackdrop);
-      $("modal").style.display="none";resolve(label);
-    };
-    const onEsc=e=>{if(e.key==="Escape"){e.preventDefault();e.stopPropagation();close(cancel)}};
-    const onBackdrop=e=>{if(e.target===$("modal"))close(cancel)};
-    buttons.forEach(b=>{
-      const elx=document.createElement("button");elx.textContent=b;
-      if(b==="Отмена"||b==="Остаться")elx.className="btn-ghost";
-      elx.onclick=()=>close(b);
-      btns.appendChild(elx);
-    });
-    $("modal").style.display="flex";
-    document.addEventListener("keydown",onEsc,true);
-    $("modal").addEventListener("click",onBackdrop);
-    const last=btns.children[btns.children.length-1];if(last)last.focus();
-  });
-}
-/* ---------- файлы и перенос в код ---------- */
-function diffLineClass(l){if(l.startsWith("+++")||l.startsWith("---"))return"diff-header";if(l.startsWith("@@"))return"diff-hunk";if(l.startsWith("+"))return"diff-add";if(l.startsWith("-"))return"diff-del";return"diff-ctx"}
-function diffToHtml(t){return t.split("\n").map(l=>`<span class="${diffLineClass(l)}">${esc(l)}</span>`).join("\n")}
-async function onClearPlan(){
-  const yes=await modal("Очистить план?","Созданные в Конструкторе сценарии и их связи будут удалены (.studio/plan.json). Код проекта не меняется.",["Очистить","Отмена"]);
-  if(!yes)return;
-  try{
-    drafts.clear();updateDirtyUI();
-    const g=await api("/api/plan/clear","POST");
+    const g=await api("/api/metadata/node","POST",{node_id:n.id,description:desc,acceptance:acc,domain:dom});
     applyGraph(g);
-    selId=null;wizard=null;selScenario=null;
-    renderAll();fitView();
-    toast("план очищен");
-  }catch(e){toast("ошибка: "+msg(e))}
+    if(!byId[selectedNode])selectedNode=null;
+    renderScenario();
+    toast("метаданные сохранены");
+  }catch(e){toast("ошибка сохранения: "+e.message)}
 }
-async function onFiles(){
-  try{
-    const data=await api("/api/scaffold/preview","POST");
-    const ops=data.ops||[],models=data.models||[];
-    const created=ops.filter(o=>o.action==="create"),updated=ops.filter(o=>o.action==="update_docstring"),skipped=ops.filter(o=>o.action.startsWith("skip"));
-    let html=`<h3>Создание файлов</h3>`;
-    if(created.length){
-      html+=`<div class="msec"><b>Будут созданы (${created.length}):</b></div>`;
-      created.forEach(o=>{html+=`<div class="item">${esc(o.path)} <small class="dim">(${esc(byId[o.node_id]?.label||o.node_id)})</small></div>`});
-    }
-    if(updated.length){
-      html+=`<div class="msec"><b>Будут обновлены (${updated.length}):</b></div>`;
-      updated.forEach(o=>{html+=`<div class="item">${esc(o.path)}</div>`});
-    }
-    if(models.length){
-      html+=`<div class="msec"><b>Будут дописаны в models.py (${models.length}):</b></div>`;
-      models.forEach(m=>{html+=`<div class="item">${esc(m.class_name)} <small class="dim">(${esc(m.tablename)})</small></div>`});
-    }
-    if(skipped.length){
-      html+=`<div class="msec"><b>Пропущены (${skipped.length}):</b></div>`;
-      skipped.forEach(o=>{html+=`<div class="item">${esc(o.path)} — ${esc(o.reason)}</div>`});
-    }
-    const total=created.length+updated.length+models.length;
-    html+=`<div class="modal-btns"><button id="mCancel" class="btn-ghost">${total?"Отмена":"Закрыть"}</button>`;
-    if(total)html+=`<button id="mApply" class="btn-primary" style="width:auto;margin:0">Создать ${created.length} файлов</button>`;
-    else html+=`<span class="dim" style="align-self:center">Нечего создавать — всё уже на месте</span>`;
-    html+=`</div>`;
-    $("modalBox").innerHTML=html;$("modal").style.display="flex";
-    $("mCancel").onclick=()=>{$("modal").style.display="none"};
-    if(total)$("mApply").onclick=async()=>{
-      $("modal").style.display="none";
-      if(!(await guardLeave())){toast("применение отменено");return}
-      const res=await api("/api/scaffold/apply","POST");
-      applyGraph(await api("/api/graph"));updateDirtyUI();renderAll();fitView();
-      toast(`файлы: создано ${res.created}, обновлено ${res.updated}, пропущено ${res.skipped} · план сохранён (очистить — «Очистить план»)`);
-    };
-  }catch(e){toast("ошибка: "+msg(e))}
+
+/* ---------- Создание ---------- */
+const CREATE_KINDS=["endpoint","scenario","io","model","test"];
+function createNodeRow(){
+  const row=document.createElement("div");row.className="node-row";
+  row.innerHTML=`
+    <select data-f="kind">${CREATE_KINDS.map(k=>`<option value="${k}">${KIND_NAMES[k]}</option>`).join("")}</select>
+    <input data-f="name" placeholder="имя / якорь">
+    <textarea data-f="description" rows="2" placeholder="описание"></textarea>
+    <textarea data-f="acceptance" rows="2" placeholder="критерии: по одному на строку"></textarea>
+    <div data-f="extra"></div>
+    <button type="button" title="удалить узел">×</button>`;
+  row.querySelector("button").onclick=()=>{row.remove();refreshEdgeOptions()};
+  row.querySelector('[data-f="kind"]').onchange=()=>{refreshRow(row);refreshEdgeOptions()};
+  row.querySelector('[data-f="name"]').addEventListener("input",refreshEdgeOptions);
+  refreshRow(row);
+  $("createNodes").appendChild(row);
+  refreshEdgeOptions();
 }
-async function onRescan(){
-  if(!(await guardLeave()))return;
-  try{await api("/api/rescan","POST");applyGraph(await api("/api/graph"));updateDirtyUI();renderAll();fitView();toast("граф обновлён из кода")}
-  catch(e){toast("ошибка: "+msg(e))}
+function refreshRow(row){
+  const kind=row.querySelector('[data-f="kind"]').value;
+  const extra=row.querySelector('[data-f="extra"]');
+  if(kind==="endpoint"){
+    extra.innerHTML=`<div class="ep"><select data-f="http"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option></select><input data-f="path" placeholder="/path"></div><input data-f="domain" placeholder="домен (необязательно)" style="margin-top:4px">`;
+  }else if(kind==="io"){
+    extra.innerHTML=`<input data-f="scenario" placeholder="сценарий (class name)">`;
+  }else{
+    extra.innerHTML=`<span class="hint">метаданные узла</span>`;
+  }
 }
-/* ---------- события ---------- */
-function setContentToggles(){
-  try{const d=localStorage.getItem(LS.desc),a=localStorage.getItem(LS.acc);showDesc=d!=="0";showAcc=a!=="0"}catch(_){}
-}
-function saveContentToggles(){try{localStorage.setItem(LS.desc,showDesc?"1":"0");localStorage.setItem(LS.acc,showAcc?"1":"0")}catch(_){}}
-async function load(){
-  setContentToggles();
-  applyGraph(await api("/api/graph"));
-  const visScen=scenList.filter(id=>byId[id]&&byId[id].origin!=="stale");
-  selScenario=visScen.find(id=>G.scenario_paths[id]&&G.scenario_paths[id].endpoint)||visScen[0]||null;
-  if(selScenario){selId=selScenario;pathMode="scenario"}
-  const hash=location.hash.slice(1);
-  if(hash==="overview"){pathMode="overview"}
-  else if(hash.indexOf("s=")===0){const want=decodeURIComponent(hash.slice(2));if(byId[want]&&byId[want].origin!=="stale"){selScenario=want;selId=want;pathMode="scenario"}}
-  setModeButtons();renderAll();fitView();
-}
-$("mView").onclick=async()=>{
-  if(!await guardLeave())return;
-  viewMode="view";
-  if(!(selScenario&&byId[selScenario]&&byId[selScenario].origin!=="stale")){
-    const cs=scenList.filter(id=>byId[id]&&byId[id].origin!=="stale");
-    selScenario=cs[0]||null;selId=selScenario;codeState=null;
-  }
-  renderAll();fitView();
-};
-$("mEdit").onclick=async()=>{
-  if(!await guardLeave())return;
-  viewMode="edit";selId=null;wizard=null;renderAll();fitView();
-  toast("Конструктор: создай новый сценарий в мастере справа");
-};
-document.querySelectorAll("#pathModeGroup [data-pm]").forEach(b=>b.onclick=()=>{
-  pathMode=b.dataset.pm;
-  if(pathMode==="scenario"&&!(selScenario&&byId[selScenario]&&byId[selScenario].origin!=="stale")){
-    const cs=scenList.filter(id=>byId[id]&&byId[id].origin!=="stale");
-    selScenario=cs[0]||null;selId=selScenario;
-  }
-  setModeButtons();renderAll();fitView();
-});
-$("btnDesc").onclick=()=>{showDesc=!showDesc;saveContentToggles();renderAll()};
-$("btnAcc").onclick=()=>{showAcc=!showAcc;saveContentToggles();renderAll()};
-$("zIn").onclick=()=>zoomCenter(1.2);
-$("zOut").onclick=()=>zoomCenter(1/1.2);
-$("zFit").onclick=fitView;
-$("zReset").onclick=()=>{view.k=1;applyView()};
-$("btnFiles").onclick=onFiles;
-$("btnClearPlan").onclick=onClearPlan;
-$("btnRescan").onclick=onRescan;
-$("btnSavePlan").onclick=saveDraft;
-$("btnExport").onclick=e=>{e.stopPropagation();const m=$("exportMenu");m.style.display=m.style.display==="none"?"block":"none"};
-document.addEventListener("click",()=>{$("exportMenu").style.display="none"});
-$("expMd").onclick=()=>window.open("/api/export?format=md","_blank");
-$("expJson").onclick=()=>window.open("/api/export?format=json","_blank");
-$("expCopy").onclick=async()=>{try{await navigator.clipboard.writeText(await(await fetch("/api/export?format=md")).text());toast("скопировано")}catch(_){toast("ошибка копирования")}};
-let _searchT=null;
-$("scenSearch").addEventListener("input",e=>{clearTimeout(_searchT);const v=e.target.value;_searchT=setTimeout(()=>{scenFilter=v.trim().toLowerCase();renderList()},150)});
-$("scenSearch").addEventListener("keydown",e=>{
-  if(e.key==="Enter"){const f=$("slist").querySelector(".sitem");if(f)f.click();return}
-  if(e.key==="Escape"){$("scenSearch").value="";scenFilter="";renderList();return}
-});
-$("canvas").addEventListener("mousedown",e=>{
-  if(e.button===1){e.preventDefault();panDrag={sx:e.clientX,sy:e.clientY,ox:view.x,oy:view.y};$("canvas").classList.add("grabbing");return}
-  if(e.button!==0)return;
-  const hd=e.target.closest(".node[data-id] .hd");
-  if(hd&&!hd.parentElement.classList.contains("ghost")){
-    const nodeEl=hd.parentElement,id=nodeEl.dataset.id;
-    drag={id,key:posKey(),el:nodeEl,sx:e.clientX,sy:e.clientY,ox:parseFloat(nodeEl.style.left)||0,oy:parseFloat(nodeEl.style.top)||0,moved:false};
-    e.preventDefault();e.stopPropagation();return;
-  }
-  if(e.target.closest(".badge"))return;
-  panDrag={sx:e.clientX,sy:e.clientY,ox:view.x,oy:view.y};$("canvas").classList.add("grabbing");e.preventDefault();
-});
-document.addEventListener("mousemove",e=>{
-  if(drag){
-    const dx=(e.clientX-drag.sx)/view.k,dy=(e.clientY-drag.sy)/view.k;
-    if(!drag.moved&&Math.hypot(e.clientX-drag.sx,e.clientY-drag.sy)<4)return;
-    if(!drag.moved){drag.moved=true;drag.el.classList.add("dragging")}
-    const nx=drag.ox+dx,ny=drag.oy+dy;
-    drag.el.style.left=nx+"px";drag.el.style.top=ny+"px";nodePos.set(drag.key+"|"+drag.id,{x:nx,y:ny});scheduleDragRender();return;
-  }
-  if(!panDrag)return;
-  view.x=panDrag.ox+e.clientX-panDrag.sx;view.y=panDrag.oy+e.clientY-panDrag.sy;applyView();
-});
-document.addEventListener("mouseup",e=>{
-  if(drag){
-    if(drag.moved){justDragged=true;drag.el.classList.remove("dragging");renderCanvas()}
-    drag=null;return;
-  }
-  if(panDrag){panDrag=null;$("canvas").classList.remove("grabbing")}
-});
-function scheduleDragRender(){
-  if(dragRaf)return;
-  dragRaf=requestAnimationFrame(()=>{
-    dragRaf=0;
-    if(!drag||!drag.el.parentElement)return;
-    boxes[drag.id]={x:parseFloat(drag.el.style.left)||0,y:parseFloat(drag.el.style.top)||0,w:drag.el.offsetWidth,h:drag.el.offsetHeight};
-    if(viewMode==="edit")areaZoneDivs();else renderZoneDivs();
-    alignColheads();
-    drawEdges();sizeStage();
+function refreshEdgeOptions(){
+  const names=[...$("createNodes").querySelectorAll('.node-row [data-f="name"]')].map(i=>i.value.trim()).filter(Boolean);
+  document.querySelectorAll("#createEdges .edge-row").forEach(row=>{
+    const from=row.querySelector('[data-f="from"]'),to=row.querySelector('[data-f="to"]');
+    const fv=from.value,tv=to.value;
+    from.innerHTML=names.map(n=>`<option>${esc(n)}</option>`).join("");
+    to.innerHTML=names.map(n=>`<option>${esc(n)}</option>`).join("");
+    if(names.includes(fv))from.value=fv;if(names.includes(tv))to.value=tv;
   });
 }
-$("canvas").addEventListener("wheel",e=>{e.preventDefault();zoomAt(e.clientX,e.clientY,e.deltaY<0?1.12:1/1.12)},{passive:false});
-$("canvas").addEventListener("auxclick",e=>{e.preventDefault()});
-$("canvas").addEventListener("dblclick",e=>{if(!e.target.closest(".node"))fitView()});
-$("zoomLabel").onclick=fitView;
-$("canvas").addEventListener("click",e=>{
-  if(justDragged){justDragged=false;return}
-  if(viewMode==="edit")return;
-  const elx=e.target.closest(".node[data-id]");
-  if(!elx){selectNode(null);return}
-  const n=byId[elx.dataset.id];if(!n)return;
-  if(pathMode==="overview"){if(n.kind==="scenario")selectScenario(n.id);else selectNode(n.id);return}
-  if(n.kind==="scenario"&&n.id!==selScenario){selectScenario(n.id);return}
-  selectNode(n.id);
-});
-document.addEventListener("keydown",e=>{
-  const tag=(e.target.tagName||"").toLowerCase();
-  const inField=tag==="input"||tag==="textarea"||tag==="select"||e.target.isContentEditable;
-  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){e.preventDefault();saveDraft();return}
-  if(!inField&&(e.key==="+"||e.key==="=")){e.preventDefault();zoomCenter(1.2);return}
-  if(!inField&&e.key==="-"){e.preventDefault();zoomCenter(1/1.2);return}
-  if(!inField&&e.key==="0"){e.preventDefault();view.k=1;applyView();return}
-  if(e.key==="Escape"){
-    if($("modal").style.display==="flex"){$("modal").style.display="none";return}
-    if(codeState){codeState=null;renderInspector();return}
-    if(inField)return;
-    selectNode(null);
+function createEdgeRow(){
+  const row=document.createElement("div");row.className="edge-row";
+  row.innerHTML=`<select data-f="from"></select><select data-f="kind">${Object.keys(EDGE_NAMES).map(k=>`<option value="${k}">${EDGE_NAMES[k]}</option>`).join("")}</select><select data-f="to"></select><button type="button" title="удалить связь">×</button>`;
+  row.querySelector("button").onclick=()=>row.remove();
+  $("createEdges").appendChild(row);refreshEdgeOptions();
+}
+function renderCreate(){
+  if(!$("createNodes").children.length){createNodeRow();}
+}
+function collectCreate(){
+  const nodes=[];
+  for(const row of $("createNodes").querySelectorAll(".node-row")){
+    const kind=row.querySelector('[data-f="kind"]').value;
+    const name=row.querySelector('[data-f="name"]').value.trim();
+    const description=row.querySelector('[data-f="description"]').value;
+    const acceptance=row.querySelector('[data-f="acceptance"]').value;
+    const node={kind,name,description,acceptance};
+    if(kind==="endpoint"){
+      node.details={http_method:row.querySelector('[data-f="http"]').value.toLowerCase(),path:row.querySelector('[data-f="path"]').value.trim()};
+      node.domain=row.querySelector('[data-f="domain"]')?.value||"";
+    }
+    if(kind==="io")node.details={scenario:row.querySelector('[data-f="scenario"]')?.value.trim()||""};
+    nodes.push(node);
   }
-});
-window.addEventListener("beforeunload",e=>{if(anyDirty()){e.preventDefault();e.returnValue=""}});
-$("modal").addEventListener("click",e=>{if(e.target===$("modal"))$("modal").style.display="none"});
-load().catch(e=>{document.body.innerHTML='<pre style="padding:20px;color:#ff5d5d">studio server недоступен: '+esc(e.message)+'</pre>'});
+  const edges=[];
+  for(const row of $("createEdges").querySelectorAll(".edge-row")){
+    const from=row.querySelector('[data-f="from"]').value,to=row.querySelector('[data-f="to"]').value,kind=row.querySelector('[data-f="kind"]').value;
+    if(from&&to)edges.push({from,to,kind});
+  }
+  return {nodes,edges};
+}
+async function submitCreate(){
+  const result=$("createResult");result.style.display="none";
+  try{
+    const data=await api("/api/create","POST",collectCreate());
+    applyGraph(data.graph);
+    result.style.display="block";
+    const lines=["Созданы файлы только с метаданными:"];
+    (data.created||[]).forEach(c=>lines.push(`  ${c.path}  — ${KIND_NAMES[c.kind]||c.kind} ${c.name}`));
+    lines.push("");lines.push("Кода в файлах нет: это TODO для разработчика. После написания кода узлы появятся на карте.");
+    result.textContent=lines.join("\n");
+    toast("файлы созданы");
+  }catch(e){
+    result.style.display="block";result.textContent="Ошибка: "+e.message;
+  }
+}
+
+/* ---------- инициализация ---------- */
+async function boot(){
+  try{
+    applyGraph(await api("/api/graph"));
+  }catch(e){toast("не удалось загрузить граф: "+e.message);G={nodes:[],edges:[],scenarios:[],scenario_paths:{}}}
+  $("mapCanvas").querySelector(".stage");
+  bindViewport("mapCanvas",mapView,()=>applyTransform("mapView",mapView));
+  bindViewport("scenCanvas",scenView,()=>applyTransform("scenView",scenView));
+  $("zIn").onclick=()=>{const v=tab==="map"?mapView:scenView;v.k=Math.min(2.5,v.k*1.15);applyTransform(tab==="map"?"mapView":"scenView",v)};
+  $("zOut").onclick=()=>{const v=tab==="map"?mapView:scenView;v.k=Math.max(.2,v.k*.87);applyTransform(tab==="map"?"mapView":"scenView",v)};
+  $("zReset").onclick=()=>{const v=tab==="map"?mapView:scenView;v.k=1;v.x=30;v.y=30;applyTransform(tab==="map"?"mapView":"scenView",v)};
+  $("zFit").onclick=()=>{if(tab==="map")fitView($("mapCanvas"),mapView,()=>applyTransform("mapView",mapView));else fitView($("scenCanvas"),scenView,()=>applyTransform("scenView",scenView))};
+  $("hideMeta").onchange=()=>{hideMeta=$("hideMeta").checked;if(tab==="map")renderMap();else if(tab==="scenario")renderScenario()};
+  $("rescan").onclick=async()=>{
+    try{applyGraph(await api("/api/rescan","POST",{}));if(tab==="map")renderMap();else if(tab==="scenario")renderScenario();toast("карта обновлена")}
+    catch(e){toast("ошибка скана: "+e.message)}
+  };
+  $("addNode").onclick=createNodeRow;
+  $("addEdge").onclick=createEdgeRow;
+  $("createSubmit").onclick=submitCreate;
+  setTab("map");
+}
+boot();
 </script>
 </body>
 </html>

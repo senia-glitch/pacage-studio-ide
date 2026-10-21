@@ -1,14 +1,18 @@
-"""AST-сканер студии v4: код → граф пути одного запроса + тесты + план.
+"""AST-сканер: код → граф пути HTTP-запроса (§3, §4).
 
-    HTTP → endpoint (fastbase) → scenario (core) → _db.<method> (io) → model (event-infra)
+    endpoint (fastbase) → scenario (core-package) → io → model (event-infra)
 
-Пять проходов: индексация (indexer) → связи (resolver) → helpers → tests → scenario_paths.
-Только чтение: ни один файл проекта не изменяется.
+Сканер только читает код. Источники узлов:
+
+- fastbase   — пакет routes (FAT_ROUTES_PACKAGE, по умолчанию app/api/v1/routes);
+- core-package — пакет сценариев (FAT_CORE_DISCOVER, по умолчанию app/scenarios);
+- event-infra — models.py в корне проекта;
+- tests      — папка tests/ в корне проекта.
 """
 
 from __future__ import annotations
 
-import datetime as _dt
+from collections import deque
 from pathlib import Path
 
 from studio.env import ProjectEnv, read_env
@@ -21,24 +25,20 @@ from studio.metamodel import (
     ScenarioDetails,
     ScenarioPath,
     TestDetails,
+    node_anchor,
+    normalize_domain,
 )
-from studio.scanner.ast_utils import EXCLUDED_DIRS, clear_cache
-from studio.scanner.helpers import attach_helpers
+from studio.scanner.ast_utils import clear_cache
 from studio.scanner.indexer import Index, build_index, scenario_node_id
 from studio.scanner.resolver import (
     resolve_dispatch,
     resolve_io_and_tables,
     resolve_scenario_calls,
 )
-from studio.scanner.tests_index import TestEntry, index_tests
-from studio.store.plan import apply_plan, read_plan
+from studio.scanner.tests_index import index_tests
 
 __all__ = [
-    "EXCLUDED_DIRS",
     "Index",
-    "TestEntry",
-    "attach_helpers",
-    "attach_tests",
     "build_core_graph",
     "build_index",
     "build_scenario_paths",
@@ -48,7 +48,7 @@ __all__ = [
 
 
 def build_core_graph(env: ProjectEnv, index: Index) -> Graph:
-    """Узлы endpoint/scenario/model + рёбра dispatch, scenario_call, port_call, table."""
+    """Узлы endpoint/scenario/io/model и связи из AST."""
     graph = Graph(project_root=env.project_root.as_posix())
 
     for entry in index.endpoints:
@@ -56,11 +56,9 @@ def build_core_graph(env: ProjectEnv, index: Index) -> Graph:
             Node(
                 id=entry.id,
                 kind="endpoint",
-                layer="representation",
                 label=f"{entry.http_method.upper()} {entry.url_path or entry.path or '/'}",
                 file_path=entry.file_path,
                 line=entry.line,
-                doc=entry.doc or "",
                 details=EndpointDetails(
                     http_method=entry.http_method,
                     path=entry.path,
@@ -78,11 +76,9 @@ def build_core_graph(env: ProjectEnv, index: Index) -> Graph:
             Node(
                 id=node_id,
                 kind="scenario",
-                layer="logic",
                 label=entry.name,
                 file_path=entry.file_path,
                 line=entry.line,
-                doc=entry.doc or "",
                 details=ScenarioDetails(
                     name=entry.name,
                     class_name=entry.class_name,
@@ -98,11 +94,9 @@ def build_core_graph(env: ProjectEnv, index: Index) -> Graph:
             Node(
                 id=f"model:{entry.file_path}:{entry.class_name}",
                 kind="model",
-                layer="io",
                 label=entry.class_name,
                 file_path=entry.file_path,
                 line=entry.line,
-                doc=entry.doc or "",
                 details=ModelDetails(
                     tablename=entry.tablename,
                     class_name=entry.class_name,
@@ -121,7 +115,7 @@ def build_core_graph(env: ProjectEnv, index: Index) -> Graph:
 
 
 def attach_tests(graph: Graph, env: ProjectEnv, index: Index) -> None:
-    """Pass 4: тест-узлы из tests/ + рёбра tests к сценариям/endpoint'ам."""
+    """Тест-узлы из tests/ и рёбра tests."""
     for entry in index_tests(env, index):
         node_id = f"test:{entry.file_path}:{entry.test_name}"
         if any(n.id == node_id for n in graph.nodes):
@@ -130,14 +124,11 @@ def attach_tests(graph: Graph, env: ProjectEnv, index: Index) -> None:
             Node(
                 id=node_id,
                 kind="test",
-                layer="",
                 label=entry.test_name,
                 file_path=entry.file_path,
                 line=entry.line,
                 details=TestDetails(
                     test_name=entry.test_name,
-                    test_for_scenario=entry.test_for_scenario,
-                    test_for_endpoint=entry.test_for_endpoint,
                     module=entry.module,
                 ).model_dump(),
             )
@@ -160,19 +151,119 @@ def _add_tests_edge(graph: Graph, from_id: str, to_id: str) -> None:
     if any(e.id == edge_id for e in graph.edges):
         return
     graph.edges.append(
-        Edge(
-            id=edge_id,
-            from_node=from_id,
-            to_node=to_id,
-            kind="tests",
-            label="tests",
-            line=1,
-        )
+        Edge(id=edge_id, from_node=from_id, to_node=to_id, kind="tests", label="тест")
     )
 
 
+def _anchor_index(graph: Graph) -> dict[str, str]:
+    index: dict[str, str] = {}
+    for node in sorted(graph.nodes, key=lambda n: n.id):
+        anchor = node_anchor(node)
+        if anchor:
+            index.setdefault(anchor, node.id)
+    return index
+
+
+def _resolve_anchor(text: str, graph: Graph, index: dict[str, str]) -> str | None:
+    if not text:
+        return None
+    exact = index.get(text)
+    if exact is not None:
+        return exact
+    if "._db." not in text:
+        return None
+    prefix = text.split(":", 1)[0] + ":"
+    try:
+        wanted_line = int(text.rsplit(":", 1)[1])
+    except (ValueError, IndexError):
+        wanted_line = 0
+    candidates: list[tuple[int, str]] = []
+    for node in graph.nodes:
+        if node.kind != "io":
+            continue
+        anchor = node_anchor(node)
+        if anchor.startswith(prefix):
+            candidates.append((abs(node.line - wanted_line), node.id))
+    if not candidates:
+        return None
+    return min(candidates)[1]
+
+
+def apply_metadata_edges(graph: Graph, specs) -> None:
+    """Edge-блоки из метаданных — истина по умолчанию (§6, §9)."""
+    index = _anchor_index(graph)
+    code_pairs = {
+        (edge.from_node, edge.to_node)
+        for edge in graph.edges
+        if edge.kind in ("dispatch", "scenario_call", "port_call", "table", "tests")
+    }
+    for spec in specs:
+        source = _resolve_anchor(spec.from_anchor, graph, index)
+        target = _resolve_anchor(spec.to_anchor, graph, index)
+        if not source or not target or source == target:
+            continue
+        edge_id = f"{source}::{spec.kind}::{target}"
+        if any(edge.id == edge_id for edge in graph.edges):
+            continue
+        if (source, target) in code_pairs:
+            graph.edges = [
+                edge
+                for edge in graph.edges
+                if (edge.from_node, edge.to_node) != (source, target)
+            ]
+        graph.edges.append(
+            Edge(
+                id=edge_id,
+                from_node=source,
+                to_node=target,
+                kind=spec.kind,
+                line=spec.line,
+            )
+        )
+
+
+def compute_domains(graph: Graph) -> None:
+    """Домен эндпоинта наследуется всеми связанными узлами (§5.7)."""
+    endpoints = [n for n in graph.nodes if n.kind == "endpoint"]
+    for node in graph.nodes:
+        if node.kind != "endpoint":
+            node.domain = ""
+
+    adjacency: dict[str, set[str]] = {}
+    for edge in graph.edges:
+        adjacency.setdefault(edge.from_node, set()).add(edge.to_node)
+        adjacency.setdefault(edge.to_node, set()).add(edge.from_node)
+
+    nodes = graph.by_id()
+    for endpoint in sorted(endpoints, key=lambda n: n.id):
+        endpoint.domain = normalize_domain(endpoint.domain)
+        endpoint_domains = [
+            part.strip()
+            for part in normalize_domain(endpoint.domain).split(",")
+            if part.strip()
+        ]
+        if not endpoint_domains:
+            continue
+        seen = {endpoint.id}
+        queue: deque[str] = deque([endpoint.id])
+        while queue:
+            current = queue.popleft()
+            for neighbor in sorted(adjacency.get(current, ())):
+                if neighbor in seen:
+                    continue
+                seen.add(neighbor)
+                queue.append(neighbor)
+                node = nodes.get(neighbor)
+                if node is None or node.kind == "endpoint":
+                    continue
+                names = [part.strip() for part in node.domain.split(",") if part.strip()]
+                for domain in endpoint_domains:
+                    if domain not in names:
+                        names.append(domain)
+                node.domain = ", ".join(names)
+
+
 def build_scenario_paths(graph: Graph) -> None:
-    """scenario_paths[id]: endpoint, io по line, модели, helpers, вложенные сценарии, тесты."""
     nodes = graph.by_id()
     paths: dict[str, ScenarioPath] = {}
 
@@ -183,7 +274,7 @@ def build_scenario_paths(graph: Graph) -> None:
             (
                 n
                 for n in graph.nodes
-                if n.kind == "io" and n.details.get("called_from") == scenario_id
+                if n.kind == "io" and (n.details or {}).get("scenario_id") == scenario_id
             ),
             key=lambda n: n.line,
         )
@@ -204,20 +295,18 @@ def build_scenario_paths(graph: Graph) -> None:
             None,
         )
 
-        sources = [scenario_id] + ([endpoint] if endpoint else [])
-        helpers: list[str] = []
         called: list[str] = []
         for edge in graph.edges:
-            if edge.from_node not in sources:
-                continue
-            if edge.kind in ("uses", "depends") and edge.to_node not in helpers:
-                helpers.append(edge.to_node)
-            if edge.kind == "scenario_call" and edge.to_node not in called:
-                called.append(edge.to_node)
+            if edge.from_node == scenario_id and edge.kind == "scenario_call":
+                if edge.to_node not in called:
+                    called.append(edge.to_node)
 
         tests: list[str] = []
+        test_targets = {scenario_id}
+        if endpoint:
+            test_targets.add(endpoint)
         for edge in graph.edges:
-            if edge.kind == "tests" and edge.to_node == scenario_id:
+            if edge.kind == "tests" and edge.to_node in test_targets:
                 if edge.from_node not in tests:
                     tests.append(edge.from_node)
 
@@ -226,7 +315,6 @@ def build_scenario_paths(graph: Graph) -> None:
             scenario=scenario_id,
             io_calls=[n.id for n in io_nodes],
             models=models,
-            helpers=helpers,
             called_scenarios=called,
             tests=tests,
         )
@@ -234,53 +322,20 @@ def build_scenario_paths(graph: Graph) -> None:
     graph.scenario_paths = paths
 
 
-def _apply_code_markers(graph: Graph, env: ProjectEnv) -> None:
-    """Блоки `# studio: description/acceptance` из кода — приоритет над планом.
-
-    Правки описаний в режиме Просмотр пишутся маркерами в код; на скане они —
-    источник правды (если блок удалён вручную, остаётся значение из плана).
-    """
-    from studio.metadata import read_markers  # ленивый импорт: metadata зависит от scaffold
-
-    for node in graph.nodes:
-        if node.origin != "code" or node.kind == "io" or not node.file_path:
-            continue
-        target = env.project_root / node.file_path
-        if not target.is_file():
-            continue
-        try:
-            text = target.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        description, acceptance = read_markers(node, text)
-        if description is not None:
-            node.description = description
-        if acceptance is not None:
-            node.acceptance = acceptance
-
-
 def scan(project_root: Path) -> Graph:
-    """Полный проход: env → индекс → связи → helpers → tests → пути → план."""
-    from studio.scaffold import _has_marker  # ленивый импорт: scaffold сам зависит от scanner.ast_utils
+    """Полный проход: env → AST → метаданные → домены → пути."""
+    # Ленивый импорт: metadata использует scanner.ast_utils.
+    from studio.metadata import scan_metadata
 
     clear_cache()
     env = read_env(project_root)
     index = build_index(env)
     graph = build_core_graph(env, index)
-    attach_helpers(graph, env, index)
     attach_tests(graph, env, index)
+    specs = scan_metadata(graph, env.project_root)
+    apply_metadata_edges(graph, specs)
+    compute_domains(graph)
     build_scenario_paths(graph)
-    plan = read_plan(project_root)
-    graph = apply_plan(graph, plan)
-    _apply_code_markers(graph, env)
-    for node in graph.nodes:
-        # scaffolded — факт с диска: файл-скелет с маркером (план может не знать).
-        if node.origin != "code" or not node.file_path:
-            continue
-        target = env.project_root / node.file_path
-        node.scaffolded = target.is_file() and _has_marker(target)
-    build_scenario_paths(graph)
-    graph.plan_meta.last_scan = _dt.datetime.now().isoformat(timespec="seconds")
     graph.nodes.sort(key=lambda n: n.id)
     graph.edges.sort(key=lambda e: e.id)
     graph.endpoints = sorted(n.id for n in graph.nodes if n.kind == "endpoint")

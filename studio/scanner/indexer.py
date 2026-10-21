@@ -100,7 +100,7 @@ def iter_module_files(root: Path, dotted: str) -> list[Path]:
             return out
         for path in candidates:
             rel = path.relative_to(base)
-            if any(part.startswith("_") for part in rel.parts):
+            if any(part.startswith("_") and part != "__init__.py" for part in rel.parts):
                 continue
             if any(part in EXCLUDED_DIRS for part in path.relative_to(root).parts):
                 continue
@@ -177,28 +177,38 @@ def index_scenarios(env: ProjectEnv) -> dict[str, ScenarioEntry]:
 
 
 def index_models(env: ProjectEnv) -> dict[str, ModelEntry]:
-    """SQLModel-классы с __tablename__, ключ — имя таблицы."""
-    if not env.has_models:
-        return {}
-    tree = parse_file(env.models_path)
-    if tree is None:
-        return {}
+    """SQLModel-классы с __tablename__: models.py и файлы конструктора models_*.py."""
+    paths: list[Path] = []
+    if env.has_models:
+        paths.append(env.models_path)
+    try:
+        paths.extend(sorted(env.project_root.glob("models_*.py")))
+    except OSError:
+        pass
+
     root = env.project_root
-    file_path = env.models_path.relative_to(root).as_posix()
     out: dict[str, ModelEntry] = {}
-    for node in tree.body:
-        if not isinstance(node, ast.ClassDef) or not has_base(node, "SQLModel"):
+    for path in paths:
+        tree = parse_file(path)
+        if tree is None:
             continue
-        tablename = _class_table_name(node)
-        if not tablename:
+        try:
+            file_path = path.relative_to(root).as_posix()
+        except ValueError:
             continue
-        out[tablename] = ModelEntry(
-            tablename=tablename,
-            class_name=node.name,
-            file_path=file_path,
-            line=node.lineno,
-            doc=_doc(node),
-        )
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef) or not has_base(node, "SQLModel"):
+                continue
+            tablename = _class_table_name(node)
+            if not tablename or tablename in out:
+                continue
+            out[tablename] = ModelEntry(
+                tablename=tablename,
+                class_name=node.name,
+                file_path=file_path,
+                line=node.lineno,
+                doc=_doc(node),
+            )
     return out
 
 

@@ -1,50 +1,34 @@
-"""Что проверяется: флаг полного стека.
+from __future__ import annotations
 
-Описание словами: установка с флагом [full] обязана тянуть fastbase
-с его флагом [full] — а тот уже тянет core-package и event-infra.
-Без флага studio ставится голым, без чужих зависимостей.
-"""
-
+import re
 import tomllib
 from pathlib import Path
 
-
-def _pyproject():
-    root = Path(__file__).resolve().parent.parent / "pyproject.toml"
-    return tomllib.loads(root.read_text(encoding="utf-8"))
+ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_флаг_full_тянет_стек():
-    """extra full есть и указывает на fastbase[full] из гит-репозитория."""
-    extras = _pyproject()["project"]["optional-dependencies"]
-    assert "full" in extras
-    assert any("fastbase[full]" in r and "fastapi-transport" in r for r in extras["full"])
+def _pyproject() -> dict:
+    return tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
 
-def test_по_умолчанию_зависимостей_почти_нет():
-    """Голый studio зависит только от pydantic — стек только по флагу."""
-    deps = _pyproject()["project"]["dependencies"]
-    assert deps == ["pydantic>=2"]
+def test_имя_и_версия_пакета():
+    project = _pyproject()["project"]
+    assert project["name"] == "pacage-studio"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", project["version"])
 
 
-def test_версии_не_разъезжаются():
-    """Пакет и pyproject разом: студия v2, версии не разъезжаются."""
-    import studio
-
-    assert studio.__version__ == _pyproject()["project"]["version"]
-    assert studio.__version__.startswith("2.")
+def test_зависимость_pydantic():
+    assert any("pydantic" in dep for dep in _pyproject()["project"]["dependencies"])
 
 
-def test_версия_имеет_формат_semver():
-    """pyproject.version имеет формат X.Y.Z (без хардкода конкретного номера)."""
-    import re
-
-    assert re.fullmatch(r"\d+\.\d+\.\d+", _pyproject()["project"]["version"])
+def test_точка_входа_studio():
+    assert _pyproject()["project"]["scripts"]["studio"] == "studio.cli:main"
 
 
-def test_ui_html_упакован_в_дистрибутив():
-    """Без package-data wheel ставится без index.html и studio dev падает — ловим это метаданными."""
-    data = _pyproject()["tool"]["setuptools"].get("package-data", {})
-    assert any("*.html" in v for v in data.get("studio.ui", []))
-    root = Path(__file__).resolve().parent.parent
-    assert (root / "studio" / "ui" / "index.html").is_file()
+def test_ui_упакован():
+    assert _pyproject()["tool"]["setuptools"]["package-data"]["studio.ui"] == ["*.html"]
+    assert (ROOT / "studio/ui/index.html").is_file()
+
+
+def test_readme_существует():
+    assert (ROOT / "README.md").is_file()

@@ -1,12 +1,12 @@
-"""pacage-studio 2.x — карта проекта для AI-разработки (fastbase / core-package / event-infra).
+"""pacage-studio — офлайн-карта пути HTTP-запроса по AST.
 
-Строит граф одного запроса (схема графа v4):
+Строит карту:
 
-    HTTP → endpoint (fastbase) → scenario (core) → _db.<method> (io) → model (event-infra)
+    endpoint (fastbase) → scenario (core-package) → io → model (event-infra)
 
-Сканирование (AST), plan-патчи, scaffold, export. Изменяющие операции пишут
-только `.studio/*` и файлы-скелеты с маркером.
+Сканер только читает код. Метаданные узлов (описание, критерии, домен) и связи
+хранятся в коде комментариями `# studio: <раздел> start/end`.
 """
 
-__version__ = "2.8.0"
+__version__ = "3.0.0"
 __all__ = ["__version__"]
