@@ -57,6 +57,14 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible}
 #scenList .sitem{padding:4px 8px;border-radius:5px;cursor:pointer;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #scenList .sitem:hover{background:var(--panel2)}
 #scenList .sitem.on{background:#4a3a28;outline:1px solid var(--acc)}
+#scenList details{margin:2px 0}
+#scenList summary{cursor:pointer;font-size:11px;color:var(--txt);padding:3px 5px;border-radius:5px;user-select:none}
+#scenList summary:hover{background:var(--panel2)}
+#scenList details[data-level="method"]>summary{font-weight:700;letter-spacing:.4px;text-transform:uppercase}
+#scenList details[data-level="domain"]>summary{color:var(--dim);padding-left:14px;font-size:11px}
+#scenList details[data-level="domain"] .sitem{padding-left:20px}
+.method-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.create-card{width:310px}
 #scenMain{display:flex;flex-direction:column;min-width:0}
 #scenBar{padding:6px 10px;border-bottom:1px solid #000;background:var(--panel);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 #inspector{background:var(--panel);border-left:1px solid #000;display:flex;flex-direction:column;min-height:0}
@@ -74,22 +82,31 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible}
 .chips{display:inline-flex;gap:4px;flex-wrap:wrap}
 .chip{font-size:9.5px;padding:1px 6px;border-radius:8px;background:#3a3b40;color:#c2c2ca}
 .chip.acc{background:#4a3a28;color:var(--acc)}
-#createPane{flex:1;overflow:auto;padding:18px 22px;display:block}
-#createPane .wrap{max-width:1000px;margin:0 auto}
-#createPane h2{margin:0 0 6px;font-size:18px;color:var(--acc)}
-#createPane p{margin:4px 0 12px;color:var(--dim);font-size:12px;line-height:1.6}
-.node-row,.edge-row{display:grid;gap:6px;align-items:start;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px;margin:6px 0}
-.node-row{grid-template-columns:120px 170px 1fr 190px 1fr 30px}
-.edge-row{grid-template-columns:1fr 150px 1fr 30px}
-.node-row input,.node-row select,.node-row textarea,.edge-row select{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:5px;color:var(--txt);padding:4px 6px;font-size:12px;font-family:inherit}
-.node-row textarea{resize:vertical}
-.node-row .ep{display:flex;gap:4px}
-.node-row .ep select{width:80px}
-.node-row .ep input{flex:1}
-.rowhead{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px;margin:14px 0 2px}
-.actions{display:flex;gap:8px;align-items:center;margin-top:12px}
-.primary{background:var(--acc);border-color:var(--acc);color:#171510;font-weight:700;padding:7px 18px}
-#createResult{margin-top:14px;font-size:12px;white-space:pre-wrap;color:var(--txt);background:#1e1f22;border:1px solid var(--line);border-radius:8px;padding:10px;display:none}
+#createPane{flex:1;display:flex;flex-direction:column;min-height:0}
+.createbar{display:flex;gap:8px;align-items:center;padding:6px 12px;border-bottom:1px solid #000;background:var(--panel);flex-wrap:wrap}
+.createbar select{background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--txt);padding:4px 8px;font:12px inherit}
+#createWrap{flex:1;display:flex;min-height:0}
+#createCanvas{flex:1;cursor:grab}
+#createSide{width:310px;background:var(--panel);border-left:1px solid #000;overflow:auto;padding:8px 10px;min-height:0}
+#createSide h3{margin:2px 0 4px;font-size:11px;text-transform:uppercase;color:var(--dim);letter-spacing:.6px}
+#createSide p{margin:4px 0 10px;line-height:1.5}
+.create-card .hd{cursor:move}
+.create-card .cbody{padding:6px 9px 8px;display:flex;flex-direction:column;gap:5px}
+.create-card .cbody label{font-size:9px;text-transform:uppercase;letter-spacing:.4px;color:#6c6d75}
+.create-card .cbody input,.create-card .cbody select,.create-card .cbody textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:5px;color:var(--txt);padding:3px 6px;font:11px/1.35 inherit}
+.create-card .cbody textarea{resize:vertical;min-height:30px}
+.create-card .cbody .two{display:flex;gap:4px}
+.create-card .cbody .two select{width:92px;flex:none}
+.create-card .cbody .two input{flex:1;min-width:0}
+.create-card .del{flex:none;padding:0 6px;font-size:14px;line-height:18px;border-radius:4px}
+.create-card .connector{position:absolute;right:-9px;top:50%;transform:translateY(-50%);width:15px;height:15px;border-radius:50%;background:var(--acc);border:2px solid #171510;cursor:crosshair;z-index:3}
+.create-card .connector:hover{box-shadow:0 0 0 4px #e8833a44}
+.edge-item{display:grid;grid-template-columns:1fr 120px 24px;gap:4px;align-items:center;background:#2a2b30;border:1px solid var(--line);border-radius:6px;padding:4px 6px;margin:4px 0;font-size:10.5px}
+.edge-item .names{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.edge-item select{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:4px;color:var(--txt);padding:2px 3px;font-size:10.5px}
+.edge-item button{padding:0 5px;font-size:13px;line-height:18px}
+#createResult{margin:8px 12px 12px;font-size:12px;white-space:pre-wrap;color:var(--txt);background:#1e1f22;border:1px solid var(--line);border-radius:8px;padding:10px;display:none;max-height:150px;overflow:auto}
+.primary{background:var(--acc);border-color:var(--acc);color:#171510;font-weight:700;padding:4px 14px}
 #toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#111;border:1px solid var(--acc);color:var(--txt);padding:8px 14px;border-radius:8px;display:none;z-index:99}
 ::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-thumb{background:#3f4046;border-radius:6px;border:2px solid transparent;background-clip:content-box}
@@ -138,18 +155,31 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible}
     </div>
   </section>
   <section class="tab" id="tab-create">
-    <div id="createPane"><div class="wrap">
-      <h2>Создание</h2>
-      <p>Конструктор создаёт <b>только метаданные</b> — файлы с комментариями-маркерами, без кода. Один файл на узел. Код пишет разработчик: это TODO. Таблицы БД не выбираются — реализации ещё нет.</p>
-      <div class="rowhead">Узлы</div>
-      <div id="createNodes"></div>
-      <button id="addNode" type="button">+ узел</button>
-      <div class="rowhead">Связи <span class="hint">(необязательны; from/to выбираются по именам узлов)</span></div>
-      <div id="createEdges"></div>
-      <button id="addEdge" type="button">+ связь</button>
-      <div class="actions"><button id="createSubmit" class="primary" type="button">Добавить</button><span class="hint">существующие файлы не перезаписываются</span></div>
+    <div id="createPane">
+      <div class="createbar">
+        <span class="hint">Конструктор создаёт только метаданные: один файл на узел, без кода.</span>
+        <span class="spacer"></span>
+        <select id="createKind">
+          <option value="endpoint">эндпоинт</option>
+          <option value="scenario">сценарий</option>
+          <option value="io">io</option>
+          <option value="model">модель</option>
+          <option value="test">тест</option>
+        </select>
+        <button id="addCreateNode" type="button">+ узел</button>
+        <button id="createClear" type="button">Очистить</button>
+        <button id="createSubmit" class="primary" type="button">Создать</button>
+      </div>
+      <div id="createWrap">
+        <div class="canvas" id="createCanvas"><div class="view" id="createView"><div class="stage" id="createStage"><svg class="edges" id="createEdges"></svg></div></div></div>
+        <aside id="createSide">
+          <h3>Связи</h3>
+          <p class="hint">Потяните за точку справа от узла и отпустите на другом узле. Связь пишется в метаданные при создании. Таблицы БД не выбираются — реализации ещё нет.</p>
+          <div id="createEdgeList"></div>
+        </aside>
+      </div>
       <div id="createResult"></div>
-    </div></div>
+    </div>
   </section>
 </main>
 <div id="toast"></div>
@@ -162,11 +192,18 @@ const EDGE_NAMES={dispatch:"вызов сценария",scenario_call:"вызо
 const METHOD_ORDER=["GET","POST","PUT","PATCH","DELETE"];
 const METHOD_COLORS={GET:"#5aa0ff",POST:"#7fc97f",PUT:"#e8833a",PATCH:"#bb9af7",DELETE:"#ff5d5d","ДРУГОЙ":"#9a9aa2"};
 const NO_DOMAIN="без домена";
+const NO_METHOD="без метода";
 const CARD_W=280,GAPY=24,PAD=30;
+const CREATE_KINDS=["endpoint","scenario","io","model","test"];
+const CREATE_LAYER_X={endpoint:40,scenario:400,io:760,model:1120,test:1480};
 
 let G=null,byId={},tab="map",selectedScenario=null,selectedNode=null,hideMeta=false;
-let scenView={x:30,y:30,k:1},mapView={x:30,y:30,k:1};
+let scenView={x:30,y:30,k:1},mapView={x:30,y:30,k:1},createView={x:30,y:30,k:1};
 let scenBoxes={},mapBoxes={};
+const mapPos=new Map(),scenPos=new Map(),listOpen=new Map();
+let justDraggedAt=0;
+const createState={nodes:[],edges:[],seq:1};
+let createConnect=null;
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -215,15 +252,22 @@ function cardHtml(n,opts={}){
   return {cls,html:h,c};
 }
 function makeCard(n,x,y,opts={}){
+  const key=`${selectedScenario}|${n.id}`;
+  const saved=scenPos.get(key);
+  if(saved){x=saved.x;y=saved.y}
   const spec=cardHtml(n,opts);
   const e=document.createElement("div");
   e.className=spec.cls;e.dataset.id=n.id;e.style.left=x+"px";e.style.top=y+"px";e.title=n.id;
   e.innerHTML=spec.html;
   e.onclick=ev=>{ev.stopPropagation();onCardClick(n.id)};
   $("scenStage").appendChild(e);
+  enableNodeDrag(e,"scen",key,x,y,scenView,
+    (nx,ny)=>{scenPos.set(key,{x:nx,y:ny});redrawScenarioEdges()},
+    ()=>sizeStage($("scenStage"),$("scenEdges")));
   return e;
 }
 function onCardClick(id){
+  if(Date.now()-justDraggedAt<250)return;
   const n=byId[id];if(!n)return;
   if(tab==="map"&&n.kind==="endpoint"){openEndpointScenario(id);return}
   selectedNode=id;renderScenario();renderInspector();
@@ -241,8 +285,7 @@ function setTab(name){
   document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="tab-"+name));
   if(name==="map")renderMap();
   else if(name==="scenario")renderScenario();
-  else renderCreate();
-}
+  else renderCreate();}
 document.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
 
 /* ---------- viewport ---------- */
@@ -270,6 +313,34 @@ function bindViewport(canvasId,view,apply){
   c.addEventListener("dblclick",()=>fitView(c,view,apply));
 }
 function applyTransform(viewId,view){const v=$(viewId);if(v)v.style.transform=`translate(${view.x}px,${view.y}px) scale(${view.k})`;$("zoomLabel").textContent=Math.round(view.k*100)+"%"}
+
+/* ---------- перемещение узлов ---------- */
+function enableNodeDrag(card,scope,key,x,y,view,onMove,onEnd){
+  const hd=card.querySelector(".hd");
+  if(!hd)return;
+  hd.addEventListener("mousedown",ev=>{
+    if(ev.button!==0)return;
+    if(ev.target.closest("button,input,select,textarea,.connector"))return;
+    ev.preventDefault();ev.stopPropagation();
+    const sx=ev.clientX,sy=ev.clientY;
+    let moved=false;
+    const move=e=>{
+      const dx=(e.clientX-sx)/(view.k||1),dy=(e.clientY-sy)/(view.k||1);
+      if(Math.abs(dx)+Math.abs(dy)>2)moved=true;
+      const nx=x+dx,ny=y+dy;
+      card.style.left=nx+"px";card.style.top=ny+"px";
+      onMove(nx,ny);
+    };
+    const up=()=>{
+      window.removeEventListener("mousemove",move);
+      window.removeEventListener("mouseup",up);
+      if(moved)justDraggedAt=Date.now();
+      if(onEnd)onEnd();
+    };
+    window.addEventListener("mousemove",move);
+    window.addEventListener("mouseup",up);
+  });
+}
 function fitView(canvas,view,apply){
   const stage=canvas.querySelector(".stage");
   if(!stage)return;
@@ -352,15 +423,21 @@ function renderMap(){
         const d=n.details||{};
         const e=document.createElement("div");
         e.className=`card method-${method.toLowerCase()}`;e.dataset.id=n.id;
-        e.style.left=(x+32+(i%cols)*300)+"px";e.style.top=rowTop+"px";
+        const saved=mapPos.get(n.id);
+        const left=saved?saved.x:x+32+(i%cols)*300;
+        const top=saved?saved.y:rowTop;
+        e.style.left=left+"px";e.style.top=top+"px";
         e.innerHTML=`<div class="hd"><span class="t">${esc(method)} ${esc(urlOfEndpoint(n))}</span></div>`+
           `<div class="mt">${esc(d.function_name||"")}</div>`;
-        e.onclick=ev=>{ev.stopPropagation();openEndpointScenario(n.id)};
+        e.onclick=ev=>{ev.stopPropagation();if(Date.now()-justDraggedAt<250)return;openEndpointScenario(n.id)};
         stage.appendChild(e);
+        enableNodeDrag(e,"map",n.id,left,top,mapView,
+          (nx,ny)=>mapPos.set(n.id,{x:nx,y:ny}),
+          ()=>sizeStage(stage,svg));
         rowH=Math.max(rowH,e.offsetHeight+GAPY);
         if((i+1)%cols===0||i===items.length-1){rowTop+=rowH;rowH=0}
-        zoneX1=Math.min(zoneX1,parseFloat(e.style.left));zoneY1=Math.min(zoneY1,parseFloat(e.style.top));
-        zoneX2=Math.max(zoneX2,parseFloat(e.style.left)+e.offsetWidth);zoneY2=Math.max(zoneY2,parseFloat(e.style.top)+e.offsetHeight);
+        zoneX1=Math.min(zoneX1,left);zoneY1=Math.min(zoneY1,top);
+        zoneX2=Math.max(zoneX2,left+e.offsetWidth);zoneY2=Math.max(zoneY2,top+e.offsetHeight);
       });
       y=rowTop+16;
     });
@@ -380,31 +457,88 @@ function renderMap(){
 }
 
 /* ---------- Сценарий ---------- */
+function methodOrder(m){const i=METHOD_ORDER.indexOf(m);return i<0?99:i}
+function methodsOfScenario(id){
+  const methods=new Set();
+  (G.edges||[]).forEach(e=>{
+    if(e.kind!=="dispatch"||e.to_node!==id)return;
+    const ep=byId[e.from_node];
+    if(ep&&ep.kind==="endpoint")methods.add(methodOfEndpoint(ep));
+  });
+  if(!methods.size)methods.add(NO_METHOD);
+  return [...methods].sort((a,b)=>methodOrder(a)-methodOrder(b)||a.localeCompare(b));
+}
+function domainsOfScenario(n){
+  const parts=String(n.domain||"").split(",").map(s=>s.trim()).filter(Boolean);
+  return parts.length?parts:[NO_DOMAIN];
+}
+function domainOrder(a,b){
+  if(a===NO_DOMAIN)return 1;
+  if(b===NO_DOMAIN)return -1;
+  return a.localeCompare(b);
+}
 function fillScenarioSelect(){
   const sel=$("scenSelect");sel.innerHTML="";
   (G.scenarios||[]).forEach(id=>{const n=byId[id];if(!n)return;
     const o=document.createElement("option");o.value=id;o.textContent=n.label;o.selected=id===selectedScenario;sel.appendChild(o)});
   sel.onchange=()=>{selectedScenario=sel.value;selectedNode=null;renderScenario();renderInspector()};
-  const list=$("scenList");list.innerHTML="";
-  const group=new Map();
+  const list=$("scenList");
+  list.querySelectorAll("details[data-key]").forEach(d=>listOpen.set(d.dataset.key,d.open));
+  list.innerHTML="";
+  if(!G.scenarios.length){list.innerHTML='<p class="hint" style="padding:6px">Сценариев нет.</p>';return}
+
+  const groups=new Map();
   (G.scenarios||[]).forEach(id=>{
-    const p=G.scenario_paths[id]||{};const ep=p.endpoint?byId[p.endpoint]:null;
-    const key=ep?`${methodOfEndpoint(ep)} ${urlOfEndpoint(ep)}`:"без эндпоинта";
-    if(!group.has(key))group.set(key,[]);group.get(key).push(id);
-  });
-  [...group.keys()].sort().forEach(key=>{
-    const h=document.createElement("div");h.className="hint";h.style.padding="6px 6px 2px";h.textContent=key;list.appendChild(h);
-    group.get(key).forEach(id=>{
-      const n=byId[id];if(!n)return;
-      const e=document.createElement("div");e.className="sitem"+(selectedScenario===id?" on":"");e.textContent=n.label;
-      e.title=n.id;e.onclick=()=>{selectedScenario=id;selectedNode=null;renderScenario();renderInspector()};
-      list.appendChild(e);
+    const n=byId[id];if(!n)return;
+    methodsOfScenario(id).forEach(method=>{
+      if(!groups.has(method))groups.set(method,new Map());
+      const byDomain=groups.get(method);
+      domainsOfScenario(n).forEach(domain=>{
+        if(!byDomain.has(domain))byDomain.set(domain,[]);
+        const items=byDomain.get(domain);
+        if(!items.includes(id))items.push(id);
+      });
     });
+  });
+
+  const methods=[...groups.keys()].sort((a,b)=>methodOrder(a)-methodOrder(b)||a.localeCompare(b));
+  methods.forEach(method=>{
+    const byDomain=groups.get(method);
+    let total=0;byDomain.forEach(items=>total+=items.length);
+    const mDet=document.createElement("details");
+    mDet.dataset.key="m:"+method;mDet.dataset.level="method";
+    mDet.open=listOpen.has(mDet.dataset.key)?listOpen.get(mDet.dataset.key):true;
+    const mSum=document.createElement("summary");
+    mSum.innerHTML=`<span class="method-dot" style="background:${METHOD_COLORS[method]||"#9a9aa2"}"></span>${esc(method)} <span class="hint">· ${total}</span>`;
+    mDet.appendChild(mSum);
+    [...byDomain.keys()].sort(domainOrder).forEach(domain=>{
+      const items=byDomain.get(domain);
+      const dDet=document.createElement("details");
+      dDet.dataset.key="d:"+method+":"+domain;dDet.dataset.level="domain";
+      dDet.open=listOpen.has(dDet.dataset.key)?listOpen.get(dDet.dataset.key):true;
+      const dSum=document.createElement("summary");
+      dSum.innerHTML=`${esc(domain)} <span class="hint">· ${items.length}</span>`;
+      dDet.appendChild(dSum);
+      items.forEach(id=>{
+        const n=byId[id];if(!n)return;
+        const e=document.createElement("div");
+        e.className="sitem"+(selectedScenario===id?" on":"");e.textContent=n.label;e.title=n.id;
+        e.onclick=()=>{selectedScenario=id;selectedNode=null;renderScenario();renderInspector()};
+        dDet.appendChild(e);
+      });
+      mDet.appendChild(dDet);
+    });
+    list.appendChild(mDet);
   });
 }
 function visibleEdges(ids){
   const set=new Set(ids);
   return (G.edges||[]).filter(e=>set.has(e.from_node)&&set.has(e.to_node));
+}
+function redrawScenarioEdges(){
+  const stage=$("scenStage"),svg=$("scenEdges");
+  scenBoxes=measure(stage);
+  drawEdges(svg,scenBoxes,visibleEdges(Object.keys(scenBoxes)));
 }
 function renderScenario(){
   fillScenarioSelect();
@@ -417,8 +551,7 @@ function renderScenario(){
   if(!selectedScenario)selectedScenario=G.scenarios[0];
   const path=G.scenario_paths[selectedScenario];
   if(!path){const e=document.createElement("div");e.className="empty";e.textContent="У сценария нет пути.";stage.appendChild(e);applyTransform("scenView",scenView);return}
-  const ids=[];
-  const add=(id,x,y,opts)=>{if(!id||!byId[id])return null;const e=makeCard(byId[id],x,y,opts);ids.push(id);return e};
+  const add=(id,x,y,opts)=>{if(!id||!byId[id])return null;return makeCard(byId[id],x,y,opts)};
   let y=90;
   const ep=path.endpoint?add(path.endpoint,40,y,{}):null;
   if(!ep){const g=document.createElement("div");g.className="card";g.style.left="40px";g.style.top=y+"px";g.innerHTML='<div class="hd"><span class="chip">endpoint</span><span class="t">нет эндпоинта</span></div><div class="mt">сценарий вызывается не из HTTP</div>';stage.appendChild(g)}
@@ -444,9 +577,7 @@ function renderScenario(){
     stage.appendChild(note);
   }
   sizeStage(stage,svg);
-  scenBoxes=measure(stage);
-  const vis=[...new Set(ids)];
-  drawEdges(svg,scenBoxes,visibleEdges(vis));
+  redrawScenarioEdges();
   applyTransform("scenView",scenView);
   renderInspector();
 }
@@ -502,74 +633,207 @@ async function saveMetadata(){
   }catch(e){toast("ошибка сохранения: "+e.message)}
 }
 
-/* ---------- Создание ---------- */
-const CREATE_KINDS=["endpoint","scenario","io","model","test"];
-function createNodeRow(){
-  const row=document.createElement("div");row.className="node-row";
-  row.innerHTML=`
-    <select data-f="kind">${CREATE_KINDS.map(k=>`<option value="${k}">${KIND_NAMES[k]}</option>`).join("")}</select>
-    <input data-f="name" placeholder="имя / якорь">
-    <textarea data-f="description" rows="2" placeholder="описание"></textarea>
-    <textarea data-f="acceptance" rows="2" placeholder="критерии: по одному на строку"></textarea>
-    <div data-f="extra"></div>
-    <button type="button" title="удалить узел">×</button>`;
-  row.querySelector("button").onclick=()=>{row.remove();refreshEdgeOptions()};
-  row.querySelector('[data-f="kind"]').onchange=()=>{refreshRow(row);refreshEdgeOptions()};
-  row.querySelector('[data-f="name"]').addEventListener("input",refreshEdgeOptions);
-  refreshRow(row);
-  $("createNodes").appendChild(row);
-  refreshEdgeOptions();
+/* ---------- Создание: графический конструктор ---------- */
+function createNodeById(id){return createState.nodes.find(n=>n.id===id)}
+function createNodeLabel(n){const name=String(n.name||"").trim();return name||`новый ${KIND_NAMES[n.kind]||n.kind}`}
+function createBoxes(){
+  const out={};
+  document.querySelectorAll("#createStage .create-card[data-cid]").forEach(e=>{
+    out[e.dataset.cid]={x:parseFloat(e.style.left)||0,y:parseFloat(e.style.top)||0,w:e.offsetWidth,h:e.offsetHeight};
+  });
+  return out;
 }
-function refreshRow(row){
-  const kind=row.querySelector('[data-f="kind"]').value;
-  const extra=row.querySelector('[data-f="extra"]');
-  if(kind==="endpoint"){
-    extra.innerHTML=`<div class="ep"><select data-f="http"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option></select><input data-f="path" placeholder="/path"></div><input data-f="domain" placeholder="домен (необязательно)" style="margin-top:4px">`;
-  }else if(kind==="io"){
-    extra.innerHTML=`<input data-f="scenario" placeholder="сценарий (class name)">`;
-  }else{
-    extra.innerHTML=`<span class="hint">метаданные узла</span>`;
+function drawCreateEdges(){
+  const svg=$("createEdges");
+  if(!svg)return;
+  drawEdges(svg,createBoxes(),createState.edges.map(e=>({from_node:e.from,to_node:e.to,kind:e.kind})));
+}
+function inferEdgeKind(fromKind,toKind){
+  if(fromKind==="endpoint"&&toKind==="scenario")return"dispatch";
+  if(fromKind==="scenario"&&toKind==="scenario")return"scenario_call";
+  if(fromKind==="scenario"&&toKind==="io")return"port_call";
+  if(fromKind==="io"&&toKind==="model")return"table";
+  if(fromKind==="test")return"tests";
+  return"uses";
+}
+function renderCreateEdgeList(){
+  const box=$("createEdgeList");if(!box)return;
+  box.innerHTML="";
+  if(!createState.edges.length){
+    box.innerHTML='<p class="hint">Связей нет. Потяните за точку справа от узла.</p>';
+    return;
   }
-}
-function refreshEdgeOptions(){
-  const names=[...$("createNodes").querySelectorAll('.node-row [data-f="name"]')].map(i=>i.value.trim()).filter(Boolean);
-  document.querySelectorAll("#createEdges .edge-row").forEach(row=>{
-    const from=row.querySelector('[data-f="from"]'),to=row.querySelector('[data-f="to"]');
-    const fv=from.value,tv=to.value;
-    from.innerHTML=names.map(n=>`<option>${esc(n)}</option>`).join("");
-    to.innerHTML=names.map(n=>`<option>${esc(n)}</option>`).join("");
-    if(names.includes(fv))from.value=fv;if(names.includes(tv))to.value=tv;
+  createState.edges.forEach((edge,index)=>{
+    const from=createNodeById(edge.from),to=createNodeById(edge.to);
+    const row=document.createElement("div");row.className="edge-item";
+    row.innerHTML=`<span class="names" title="${esc((from?createNodeLabel(from):"?")+" → "+(to?createNodeLabel(to):"?"))}">${esc(from?createNodeLabel(from):"?")} → ${esc(to?createNodeLabel(to):"?")}</span>`+
+      `<select>${Object.keys(EDGE_NAMES).map(k=>`<option value="${k}">${EDGE_NAMES[k]}</option>`).join("")}</select>`+
+      `<button type="button" title="удалить связь">×</button>`;
+    const sel=row.querySelector("select");sel.value=edge.kind;
+    sel.onchange=()=>{edge.kind=sel.value;drawCreateEdges()};
+    row.querySelector("button").onclick=()=>{createState.edges.splice(index,1);drawCreateEdges();renderCreateEdgeList()};
+    box.appendChild(row);
   });
 }
-function createEdgeRow(){
-  const row=document.createElement("div");row.className="edge-row";
-  row.innerHTML=`<select data-f="from"></select><select data-f="kind">${Object.keys(EDGE_NAMES).map(k=>`<option value="${k}">${EDGE_NAMES[k]}</option>`).join("")}</select><select data-f="to"></select><button type="button" title="удалить связь">×</button>`;
-  row.querySelector("button").onclick=()=>row.remove();
-  $("createEdges").appendChild(row);refreshEdgeOptions();
+function renderCreateGraph(){
+  const stage=$("createStage"),svg=$("createEdges");
+  clearStage(stage,svg);
+  if(!createState.nodes.length){
+    const e=document.createElement("div");e.className="empty";
+    e.innerHTML="Добавьте узел кнопкой «+ узел».<br>Он появится здесь как карточка с формой внутри.";
+    stage.appendChild(e);stage.style.width="900px";stage.style.height="500px";
+    applyTransform("createView",createView);renderCreateEdgeList();return;
+  }
+  [["endpoint","эндпоинт"],["scenario","сценарий"],["io","io"],["model","модель"],["test","тест"]].forEach(([kind,title])=>{
+    const h=document.createElement("div");h.className="colhead";
+    h.style.left=CREATE_LAYER_X[kind]+"px";h.style.top="40px";h.innerHTML=`${esc(title)} <span class="hint">· ${createState.nodes.filter(n=>n.kind===kind).length}</span>`;
+    stage.appendChild(h);
+  });
+  createState.nodes.forEach(node=>stage.appendChild(createCardElement(node)));
+  sizeStage(stage,svg);
+  drawCreateEdges();
+  applyTransform("createView",createView);
+  renderCreateEdgeList();
+}
+function createCardElement(node){
+  const e=document.createElement("div");
+  e.className=`card create-card k-${node.kind}`;
+  e.dataset.cid=node.id;e.dataset.kind=node.kind;
+  e.style.left=node.x+"px";e.style.top=node.y+"px";
+  const http=String((node.details||{}).http_method||"post").toUpperCase();
+  const extra=node.kind==="endpoint"
+    ? `<label>HTTP и путь</label><div class="two"><select data-f="http">${["GET","POST","PUT","PATCH","DELETE"].map(m=>`<option ${m===http?"selected":""}>${m}</option>`).join("")}</select><input data-f="path" value="${esc((node.details||{}).path||"")}" placeholder="/path"></div>`+
+      `<label>Домен</label><input data-f="domain" value="${esc(node.domain||"")}" placeholder="orders">`
+    : node.kind==="io"
+      ? `<label>Сценарий (class name)</label><input data-f="scenario" value="${esc((node.details||{}).scenario||"")}" placeholder="CreateOrderScenario">`
+      : "";
+  e.innerHTML=`<div class="hd"><span class="chip">${esc(KIND_NAMES[node.kind]||node.kind)}</span><span class="t">${esc(createNodeLabel(node))}</span><button type="button" class="del" title="удалить узел">×</button></div>`+
+    `<div class="cbody">`+
+      `<label>Вид узла</label><select data-f="kind">${CREATE_KINDS.map(k=>`<option value="${k}" ${k===node.kind?"selected":""}>${KIND_NAMES[k]}</option>`).join("")}</select>`+
+      `<label>Имя / якорь</label><input data-f="name" value="${esc(node.name||"")}" placeholder="имя элемента кода">`+
+      `<label>Описание</label><textarea data-f="description" rows="2" placeholder="описание узла">${esc(node.description||"")}</textarea>`+
+      `<label>Критерии приёмки (по одной на строку)</label><textarea data-f="acceptance" rows="2" placeholder="- критерий">${esc(node.acceptance||"")}</textarea>`+
+      extra+
+    `</div><div class="connector" title="потяните к другому узлу, чтобы создать связь"></div>`;
+
+  e.querySelector(".del").onclick=ev=>{ev.stopPropagation();deleteCreateNode(node.id)};
+  e.querySelector('[data-f="kind"]').onchange=ev=>{
+    node.kind=ev.target.value;
+    node.x=CREATE_LAYER_X[node.kind];
+    const siblings=createState.nodes.filter(n=>n.kind===node.kind&&n.id!==node.id);
+    node.y=80+siblings.length*310;
+    renderCreateGraph();
+  };
+  const bind=(sel,key,after)=>{
+    const el=e.querySelector(sel);if(!el)return;
+    el.addEventListener("input",()=>{node[key]=el.value;if(after)after()});
+  };
+  bind('[data-f="name"]',"name",()=>{
+    const t=e.querySelector(".hd .t");if(t)t.textContent=createNodeLabel(node);
+    renderCreateEdgeList();
+  });
+  bind('[data-f="description"]',"description");
+  bind('[data-f="acceptance"]',"acceptance");
+  if(node.kind==="endpoint"){
+    const httpEl=e.querySelector('[data-f="http"]');
+    httpEl.onchange=()=>{node.details.http_method=httpEl.value.toLowerCase()};
+    const pathEl=e.querySelector('[data-f="path"]');
+    pathEl.addEventListener("input",()=>{node.details.path=pathEl.value});
+    const domEl=e.querySelector('[data-f="domain"]');
+    domEl.addEventListener("input",()=>{node.domain=domEl.value});
+  }
+  if(node.kind==="io"){
+    const scEl=e.querySelector('[data-f="scenario"]');
+    scEl.addEventListener("input",()=>{node.details.scenario=scEl.value});
+  }
+  e.querySelector(".connector").addEventListener("mousedown",ev=>startCreateConnection(ev,node,e));
+  enableNodeDrag(e,"create",node.id,node.x,node.y,createView,
+    (nx,ny)=>{node.x=nx;node.y=ny;drawCreateEdges()},
+    ()=>sizeStage($("createStage"),$("createEdges")));
+  return e;
+}
+function addCreateNode(){
+  const kind=($("createKind")&&$("createKind").value)||"scenario";
+  const count=createState.nodes.filter(n=>n.kind===kind).length;
+  const node={
+    id:"c"+(createState.seq++),kind,name:"",description:"",acceptance:"",domain:"",
+    details:{http_method:"post",path:"",scenario:""},
+    x:CREATE_LAYER_X[kind]||40,y:80+count*310
+  };
+  createState.nodes.push(node);
+  renderCreateGraph();
+}
+function deleteCreateNode(id){
+  createState.nodes=createState.nodes.filter(n=>n.id!==id);
+  createState.edges=createState.edges.filter(e=>e.from!==id&&e.to!==id);
+  renderCreateGraph();
+}
+function startCreateConnection(ev,node,card){
+  if(ev.button!==0)return;
+  ev.preventDefault();ev.stopPropagation();
+  const svg=$("createEdges"),canvas=$("createCanvas");
+  const x1=(parseFloat(card.style.left)||0)+card.offsetWidth;
+  const y1=(parseFloat(card.style.top)||0)+card.offsetHeight/2;
+  const path=document.createElementNS("http://www.w3.org/2000/svg","path");
+  path.setAttribute("fill","none");path.setAttribute("stroke","#e8833a");
+  path.setAttribute("stroke-width","2");path.setAttribute("stroke-dasharray","6,4");
+  path.setAttribute("pointer-events","none");
+  svg.appendChild(path);
+  const rect=canvas.getBoundingClientRect();
+  const move=e=>{
+    const x2=(e.clientX-rect.left-createView.x)/(createView.k||1);
+    const y2=(e.clientY-rect.top-createView.y)/(createView.k||1);
+    path.setAttribute("d",`M${x1},${y1} C${(x1+x2)/2},${y1} ${(x1+x2)/2},${y2} ${x2},${y2}`);
+  };
+  const up=e=>{
+    window.removeEventListener("mousemove",move);
+    window.removeEventListener("mouseup",up);
+    path.remove();
+    const el=document.elementFromPoint(e.clientX,e.clientY);
+    const targetCard=el&&el.closest?el.closest(".create-card[data-cid]"):null;
+    if(targetCard&&targetCard.dataset.cid!==node.id){
+      const target=createNodeById(targetCard.dataset.cid);
+      if(target){
+        if(createState.edges.some(edge=>edge.from===node.id&&edge.to===target.id)){
+          toast("Такая связь уже есть");
+        }else{
+          createState.edges.push({from:node.id,to:target.id,kind:inferEdgeKind(node.kind,target.kind)});
+          drawCreateEdges();renderCreateEdgeList();
+        }
+      }
+    }
+    createConnect=null;
+  };
+  createConnect={from:node.id};
+  window.addEventListener("mousemove",move);
+  window.addEventListener("mouseup",up);
 }
 function renderCreate(){
-  if(!$("createNodes").children.length){createNodeRow();}
+  renderCreateGraph();
 }
 function collectCreate(){
-  const nodes=[];
-  for(const row of $("createNodes").querySelectorAll(".node-row")){
-    const kind=row.querySelector('[data-f="kind"]').value;
-    const name=row.querySelector('[data-f="name"]').value.trim();
-    const description=row.querySelector('[data-f="description"]').value;
-    const acceptance=row.querySelector('[data-f="acceptance"]').value;
-    const node={kind,name,description,acceptance};
-    if(kind==="endpoint"){
-      node.details={http_method:row.querySelector('[data-f="http"]').value.toLowerCase(),path:row.querySelector('[data-f="path"]').value.trim()};
-      node.domain=row.querySelector('[data-f="domain"]')?.value||"";
-    }
-    if(kind==="io")node.details={scenario:row.querySelector('[data-f="scenario"]')?.value.trim()||""};
-    nodes.push(node);
-  }
-  const edges=[];
-  for(const row of $("createEdges").querySelectorAll(".edge-row")){
-    const from=row.querySelector('[data-f="from"]').value,to=row.querySelector('[data-f="to"]').value,kind=row.querySelector('[data-f="kind"]').value;
-    if(from&&to)edges.push({from,to,kind});
-  }
+  if(!createState.nodes.length)throw new Error("Добавьте хотя бы один узел");
+  const names=createState.nodes.map(n=>String(n.name||"").trim());
+  if(names.some(n=>!n))throw new Error("Укажите имя (якорь) у каждого узла");
+  if(new Set(names).size!==names.length)throw new Error("Имена узлов не должны повторяться");
+  const nodes=createState.nodes.map((n,index)=>({
+    kind:n.kind,
+    name:names[index],
+    description:n.description||"",
+    acceptance:String(n.acceptance||"").split("\n").map(s=>s.trim()).filter(Boolean),
+    domain:n.kind==="endpoint"?(n.domain||""):"",
+    details:n.kind==="endpoint"
+      ? {http_method:String(n.details.http_method||"post").toLowerCase(),path:String(n.details.path||"").trim()}
+      : n.kind==="io"
+        ? {scenario:String(n.details.scenario||"").trim()}
+        : {}
+  }));
+  const byId=createState.nodes.reduce((acc,n)=>{acc[n.id]=n;return acc},{});
+  const edges=createState.edges.map(e=>({
+    from:String((byId[e.from]&&byId[e.from].name)||"").trim(),
+    to:String((byId[e.to]&&byId[e.to].name)||"").trim(),
+    kind:e.kind
+  })).filter(e=>e.from&&e.to);
   return {nodes,edges};
 }
 async function submitCreate(){
@@ -577,6 +841,8 @@ async function submitCreate(){
   try{
     const data=await api("/api/create","POST",collectCreate());
     applyGraph(data.graph);
+    createState.nodes=[];createState.edges=[];createState.seq=1;
+    renderCreateGraph();
     result.style.display="block";
     const lines=["Созданы файлы только с метаданными:"];
     (data.created||[]).forEach(c=>lines.push(`  ${c.path}  — ${KIND_NAMES[c.kind]||c.kind} ${c.name}`));
@@ -589,26 +855,38 @@ async function submitCreate(){
 }
 
 /* ---------- инициализация ---------- */
+function activeView(){
+  if(tab==="map")return{view:mapView,id:"mapView",canvas:$("mapCanvas")};
+  if(tab==="scenario")return{view:scenView,id:"scenView",canvas:$("scenCanvas")};
+  return{view:createView,id:"createView",canvas:$("createCanvas")};
+}
 async function boot(){
   try{
     applyGraph(await api("/api/graph"));
   }catch(e){toast("не удалось загрузить граф: "+e.message);G={nodes:[],edges:[],scenarios:[],scenario_paths:{}}}
-  $("mapCanvas").querySelector(".stage");
   bindViewport("mapCanvas",mapView,()=>applyTransform("mapView",mapView));
   bindViewport("scenCanvas",scenView,()=>applyTransform("scenView",scenView));
-  $("zIn").onclick=()=>{const v=tab==="map"?mapView:scenView;v.k=Math.min(2.5,v.k*1.15);applyTransform(tab==="map"?"mapView":"scenView",v)};
-  $("zOut").onclick=()=>{const v=tab==="map"?mapView:scenView;v.k=Math.max(.2,v.k*.87);applyTransform(tab==="map"?"mapView":"scenView",v)};
-  $("zReset").onclick=()=>{const v=tab==="map"?mapView:scenView;v.k=1;v.x=30;v.y=30;applyTransform(tab==="map"?"mapView":"scenView",v)};
-  $("zFit").onclick=()=>{if(tab==="map")fitView($("mapCanvas"),mapView,()=>applyTransform("mapView",mapView));else fitView($("scenCanvas"),scenView,()=>applyTransform("scenView",scenView))};
+  bindViewport("createCanvas",createView,()=>applyTransform("createView",createView));
+  $("zIn").onclick=()=>{const a=activeView();a.view.k=Math.min(2.5,a.view.k*1.15);applyTransform(a.id,a.view)};
+  $("zOut").onclick=()=>{const a=activeView();a.view.k=Math.max(.2,a.view.k*.87);applyTransform(a.id,a.view)};
+  $("zReset").onclick=()=>{const a=activeView();a.view.k=1;a.view.x=30;a.view.y=30;applyTransform(a.id,a.view)};
+  $("zFit").onclick=()=>{const a=activeView();fitView(a.canvas,a.view,()=>applyTransform(a.id,a.view))};
   $("hideMeta").onchange=()=>{hideMeta=$("hideMeta").checked;if(tab==="map")renderMap();else if(tab==="scenario")renderScenario()};
   $("rescan").onclick=async()=>{
     try{applyGraph(await api("/api/rescan","POST",{}));if(tab==="map")renderMap();else if(tab==="scenario")renderScenario();toast("карта обновлена")}
     catch(e){toast("ошибка скана: "+e.message)}
   };
-  $("addNode").onclick=createNodeRow;
-  $("addEdge").onclick=createEdgeRow;
+  $("addCreateNode").onclick=addCreateNode;
+  $("createClear").onclick=()=>{
+    if(!createState.nodes.length)return;
+    if(!confirm("Очистить предпросмотр? Файлы ещё не созданы."))return;
+    createState.nodes=[];createState.edges=[];createState.seq=1;
+    $("createResult").style.display="none";
+    renderCreateGraph();
+  };
   $("createSubmit").onclick=submitCreate;
-  setTab("map");
+  const initial=location.hash.replace(/^#/,"");
+  setTab(["map","scenario","create"].includes(initial)?initial:"map");
 }
 boot();
 </script>

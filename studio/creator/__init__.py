@@ -96,9 +96,17 @@ def _parse_nodes(data: dict) -> list[NodeSpec]:
         names.add(name)
         acceptance_raw = raw.get("acceptance") or []
         if isinstance(acceptance_raw, str):
-            acceptance = [line for line in acceptance_raw.splitlines() if line.strip()]
+            acceptance = [
+                re.sub(r"^-\s*", "", line.strip())
+                for line in acceptance_raw.splitlines()
+                if line.strip()
+            ]
         elif isinstance(acceptance_raw, list):
-            acceptance = [str(item) for item in acceptance_raw if str(item).strip()]
+            acceptance = [
+                re.sub(r"^-\s*", "", str(item).strip())
+                for item in acceptance_raw
+                if str(item).strip()
+            ]
         else:
             raise CreateError("критерии приёмки должны быть списком строк")
         nodes.append(

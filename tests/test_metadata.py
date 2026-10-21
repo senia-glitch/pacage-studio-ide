@@ -160,6 +160,17 @@ def test_очищенный_раздел_удаляется_с_маркерам�
     assert node.domain == ""
 
 
+def test_критерии_не_дублируют_маркер_списка(demo: Path):
+    graph = scan(demo)
+    node = next(
+        n for n in graph.nodes if n.kind == "endpoint" and n.details["function_name"] == "list_orders"
+    )
+    save_node_metadata(demo, node, "", ["- критерий"], "")
+    text = (demo / node.file_path).read_text(encoding="utf-8")
+    assert "# - критерий" in text
+    assert "# - - критерий" not in text
+
+
 def test_описание_io_над_вызовом(demo: Path):
     graph = scan(demo)
     io = next(n for n in graph.nodes if n.kind == "io" and n.details["method"] == "create")

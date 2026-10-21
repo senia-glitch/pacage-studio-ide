@@ -43,3 +43,24 @@ def test_создание_только_метаданных():
 def test_старые_режимы_убраны():
     for text in ("plan.json", "scaffold", "helper", "Конструктор областей"):
         assert text not in HTML
+
+
+def test_создание_графическое():
+    assert 'id="createStage"' in HTML
+    assert 'id="createEdgeList"' in HTML
+    assert "Потяните за точку" in HTML
+    assert "inferEdgeKind" in HTML
+    assert "createCardElement" in HTML
+
+
+def test_сценарии_группируются_метод_домен():
+    assert "methodsOfScenario" in HTML
+    assert "domainsOfScenario" in HTML
+    assert 'data-level="method"' in HTML
+    assert 'data-level="domain"' in HTML
+
+
+def test_узлы_перетаскиваются():
+    assert "enableNodeDrag" in HTML
+    assert "scenPos" in HTML
+    assert "mapPos" in HTML

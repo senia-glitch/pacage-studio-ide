@@ -465,7 +465,8 @@ def _metadata_lines(
             out.append(f"{pad}#" if line == "" else f"{pad}# {line}")
         out.append(f"{pad}# {PACKAGE_MARK}: description end")
 
-    items = [item.strip() for item in acceptance if item.strip()]
+    items = [re.sub(r"^-\s*", "", item.strip()) for item in acceptance if item.strip()]
+    items = [item for item in items if item]
     if items:
         out.append(f"{pad}# {PACKAGE_MARK}: acceptance start")
         for item in items:
