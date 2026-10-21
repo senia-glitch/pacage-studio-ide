@@ -75,6 +75,8 @@ class Node(BaseModel):
     description: str = ""
     acceptance: list[str] = Field(default_factory=list)
     domain: str = ""
+    # Периферийные узлы: методы/классы/файлы внутри узла (§4.3).
+    peripherals: list[dict] = Field(default_factory=list)
 
 
 class Edge(BaseModel):

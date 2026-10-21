@@ -122,6 +122,17 @@ def test_io_переезжает_при_сдвиге_строк(demo: Path):
     assert new.description == old.description == "Запись заказа."
 
 
+def test_периферийные_узлы_из_импортов(demo: Path):
+    graph = scan(demo)
+    scenario = next(n for n in graph.nodes if n.kind == "scenario" and n.details["name"] == "create_order")
+    names = {item["name"] for item in scenario.peripherals}
+    assert "app.utils.money" in names
+    item = next(item for item in scenario.peripherals if item["name"] == "app.utils.money")
+    assert item["role"] == "utils"
+    assert item["file_path"] == "app/utils/money.py"
+    assert "calc_total" in item["symbols"]
+
+
 def test_нет_плана_и_хелперов_в_графе(demo: Path):
     graph = scan(demo)
     data = graph.model_dump()

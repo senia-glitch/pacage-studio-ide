@@ -30,12 +30,22 @@ main{flex:1;min-height:0;position:relative}
 .canvas.grabbing{cursor:grabbing}
 .view{position:absolute;left:0;top:0;transform-origin:0 0}
 .stage{position:relative;background-image:radial-gradient(circle at 1px 1px,#34353b 1px,transparent 1px);background-size:22px 22px}
-svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible}
+svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index:1}
 .elab{font-size:10px;fill:#c9c9d0;paint-order:stroke;stroke:#232428;stroke-width:3px;stroke-linejoin:round}
 .colhead{position:absolute;font-weight:700;font-size:12px;padding:3px 12px;border-radius:6px;background:#1e1f22;border:1px solid var(--line);white-space:nowrap}
-.zone{position:absolute;border:1px dashed #4c4e56;border-radius:14px;background:rgba(120,130,160,.04);pointer-events:none}
-.zone .zlab{position:absolute;top:-11px;left:14px;font-size:11px;font-weight:700;letter-spacing:.4px;color:var(--dim);background:var(--bg);padding:1px 10px;border-radius:6px;border:1px solid var(--line);white-space:nowrap}
-.card{position:absolute;width:var(--w);background:#313236;border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 14px #0008;user-select:none;cursor:pointer;transition:border-color .12s,box-shadow .12s}
+.zone{position:absolute;border:1px dashed #4c4e56;border-radius:14px;background:rgba(120,130,160,.05);pointer-events:none}
+.zone .zlab{position:absolute;top:4px;left:10px;font-size:11px;font-weight:700;letter-spacing:.4px;color:var(--dim);background:#2a2b30;padding:1px 10px;border-radius:6px;border:1px solid var(--line);white-space:nowrap;z-index:2}
+.map-zone,.scen-zone,.create-zone{pointer-events:auto}
+.map-zone>.zlab,.scen-zone>.zlab,.create-zone>.zlab{cursor:move;color:var(--txt)}
+.zone.zone-dragging{box-shadow:0 0 0 1px var(--acc),0 8px 26px #0008}
+.zone.map-fastbase{background:rgba(90,160,255,.055)}
+.zone.map-method{background:rgba(120,130,160,.055)}
+.zone.scen-zone{background:rgba(120,130,160,.045)}
+.zone.create-zone{background:rgba(120,130,160,.045)}
+.periph-card{position:absolute;width:232px;background:#2a2b30;border:1px dashed #5a6478;border-radius:8px;padding:4px 8px;font-size:10.5px;color:#b8b8c0;z-index:2;pointer-events:none}
+.periph-card .ph{font-weight:700;font-size:10px;color:#d7d7db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.periph-card .pf{font-size:9.5px;color:#8a8b93;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card{position:absolute;width:var(--w);background:#313236;border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 14px #0008;user-select:none;cursor:pointer;transition:border-color .12s,box-shadow .12s;z-index:3}
 .card:hover{border-color:var(--acc);box-shadow:0 6px 20px #000c}
 .card.sel{outline:2px solid var(--acc)}
 .card .hd{padding:6px 9px;font-weight:700;border-bottom:2px solid var(--c,#888);background:rgba(255,255,255,.03);border-radius:10px 10px 0 0;display:flex;gap:6px;align-items:center;min-width:0}
@@ -186,6 +196,7 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible}
 <script>
 "use strict";
 const KIND_NAMES={endpoint:"эндпоинт",scenario:"сценарий",io:"io",model:"модель",test:"тест"};
+const ROLE_NAMES={schema:"схема",dependency:"зависимость",exception:"исключение",settings:"настройки",utils:"утилита",other:"прочее"};
 const KIND_COLORS={endpoint:"#5aa0ff",scenario:"#e8833a",io:"#7fc97f",model:"#bb9af7",test:"#c9a86a"};
 const EDGE_COLORS={dispatch:"#5aa0ff",scenario_call:"#e8833a",port_call:"#7fc97f",table:"#bb9af7",tests:"#c9a86a",uses:"#9a9aa2",depends:"#9a9aa2"};
 const EDGE_NAMES={dispatch:"вызов сценария",scenario_call:"вызов сценария",port_call:"порт БД",table:"таблица",tests:"тест",uses:"использует",depends:"зависит"};
@@ -201,8 +212,9 @@ let G=null,byId={},tab="map",selectedScenario=null,selectedNode=null,hideMeta=fa
 let scenView={x:30,y:30,k:1},mapView={x:30,y:30,k:1},createView={x:30,y:30,k:1};
 let scenBoxes={},mapBoxes={};
 const mapPos=new Map(),scenPos=new Map(),listOpen=new Map();
+const mapFastbase={x:40,y:40},mapMethods=new Map(),scenZonePos=new Map();
 let justDraggedAt=0;
-const createState={nodes:[],edges:[],seq:1};
+const createState={nodes:[],edges:[],seq:1,zones:{}};
 let createConnect=null;
 
 const $=id=>document.getElementById(id);
@@ -251,7 +263,7 @@ function cardHtml(n,opts={}){
   const cls=`card k-${n.kind}${opts.method?" method-"+opts.method.toLowerCase():""}${opts.nested?" nested":""}${selectedNode===n.id?" sel":""}`;
   return {cls,html:h,c};
 }
-function makeCard(n,x,y,opts={}){
+function makeCard(n,x,y,opts={},parent=null){
   const key=`${selectedScenario}|${n.id}`;
   const saved=scenPos.get(key);
   if(saved){x=saved.x;y=saved.y}
@@ -260,11 +272,50 @@ function makeCard(n,x,y,opts={}){
   e.className=spec.cls;e.dataset.id=n.id;e.style.left=x+"px";e.style.top=y+"px";e.title=n.id;
   e.innerHTML=spec.html;
   e.onclick=ev=>{ev.stopPropagation();onCardClick(n.id)};
-  $("scenStage").appendChild(e);
+  (parent||$("scenStage")).appendChild(e);
+  let last={x,y};
   enableNodeDrag(e,"scen",key,x,y,scenView,
-    (nx,ny)=>{scenPos.set(key,{x:nx,y:ny});redrawScenarioEdges()},
-    ()=>sizeStage($("scenStage"),$("scenEdges")));
+    (nx,ny)=>{
+      const cx=Math.max(14,nx),cy=Math.max(34,ny);
+      const oldX=parseFloat(e.style.left)||0,oldY=parseFloat(e.style.top)||0;
+      e.style.left=cx+"px";e.style.top=cy+"px";
+      movePeripherals(parent||$("scenStage"),n.id,cx-oldX,cy-oldY);
+      if(scenNodeOverlap(e)){
+        e.style.left=last.x+"px";e.style.top=last.y+"px";
+        movePeripherals(parent||$("scenStage"),n.id,last.x-cx,last.y-cy);
+        return;
+      }
+      last={x:cx,y:cy};
+      scenPos.set(key,last);
+      recomputeScenarioSizes();
+      redrawScenarioEdges();
+    },
+    ()=>{
+      scenPos.set(key,last);
+      settleZoneOverlaps(scenZones(),zone=>{
+        const layer=zone.dataset.layer;
+        scenZonePos.set(`${selectedScenario}|zone|${layer}`,{x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0});
+      });
+      recomputeScenarioSizes();redrawScenarioEdges();
+    });
   return e;
+}
+function movePeripherals(zone,parentId,dx,dy){
+  zone.querySelectorAll(".periph-card").forEach(pc=>{
+    if(pc.dataset.parent!==parentId)return;
+    pc.style.left=(parseFloat(pc.style.left)||0)+dx+"px";
+    pc.style.top=(parseFloat(pc.style.top)||0)+dy+"px";
+  });
+}
+function scenNodeOverlap(card){
+  const zone=card.parentElement;if(!zone)return false;
+  const r=styleRect(card);
+  return[...zone.querySelectorAll(".card[data-id]")].some(other=>other!==card&&rectsOverlap(r,styleRect(other),8));
+}
+function scenZones(){return[...$("scenStage").querySelectorAll(".scen-zone")]}
+function scenZoneOverlap(zone){
+  const r=styleRect(zone);
+  return scenZones().some(other=>other!==zone&&rectsOverlap(r,styleRect(other),8));
 }
 function onCardClick(id){
   if(Date.now()-justDraggedAt<250)return;
@@ -315,6 +366,35 @@ function bindViewport(canvasId,view,apply){
 function applyTransform(viewId,view){const v=$(viewId);if(v)v.style.transform=`translate(${view.x}px,${view.y}px) scale(${view.k})`;$("zoomLabel").textContent=Math.round(view.k*100)+"%"}
 
 /* ---------- перемещение узлов ---------- */
+function enableZoneDrag(zone,view,onMove,onEnd){
+  const handle=zone.querySelector(".zlab");
+  if(!handle)return;
+  handle.addEventListener("mousedown",ev=>{
+    if(ev.button!==0)return;
+    ev.preventDefault();ev.stopPropagation();
+    const sx=ev.clientX,sy=ev.clientY;
+    const left=parseFloat(zone.style.left)||0,top=parseFloat(zone.style.top)||0;
+    let moved=false;
+    zone.classList.add("zone-dragging");
+    const move=e=>{
+      const dx=(e.clientX-sx)/(view.k||1),dy=(e.clientY-sy)/(view.k||1);
+      if(Math.abs(dx)+Math.abs(dy)>2)moved=true;
+      const nx=left+dx,ny=top+dy;
+      zone.style.left=nx+"px";zone.style.top=ny+"px";
+      onMove(nx,ny);
+    };
+    const up=()=>{
+      window.removeEventListener("mousemove",move);
+      window.removeEventListener("mouseup",up);
+      zone.classList.remove("zone-dragging");
+      if(moved)justDraggedAt=Date.now();
+      if(onEnd)onEnd(left,top);
+    };
+    window.addEventListener("mousemove",move);
+    window.addEventListener("mouseup",up);
+  });
+}
+
 function enableNodeDrag(card,scope,key,x,y,view,onMove,onEnd){
   const hd=card.querySelector(".hd");
   if(!hd)return;
@@ -335,7 +415,7 @@ function enableNodeDrag(card,scope,key,x,y,view,onMove,onEnd){
       window.removeEventListener("mousemove",move);
       window.removeEventListener("mouseup",up);
       if(moved)justDraggedAt=Date.now();
-      if(onEnd)onEnd();
+      if(onEnd)onEnd(x,y);
     };
     window.addEventListener("mousemove",move);
     window.addEventListener("mouseup",up);
@@ -377,9 +457,72 @@ function drawEdges(svg,boxes,edges){
   }).join("");
   svg.innerHTML=defs+paths;
 }
-function measure(stage,map){const out={};stage.querySelectorAll(".card[data-id]").forEach(e=>{out[e.dataset.id]={x:parseFloat(e.style.left)||0,y:parseFloat(e.style.top)||0,w:e.offsetWidth,h:e.offsetHeight}});return out}
+function offsetInStage(el,stage){
+  let x=0,y=0,cur=el;
+  while(cur&&cur!==stage){x+=cur.offsetLeft||0;y+=cur.offsetTop||0;cur=cur.offsetParent}
+  return{x,y};
+}
+function measure(stage){
+  const out={};
+  stage.querySelectorAll(".card[data-id]").forEach(e=>{
+    const p=offsetInStage(e,stage);
+    out[e.dataset.id]={x:p.x,y:p.y,w:e.offsetWidth,h:e.offsetHeight};
+  });
+  return out;
+}
+function rectsOverlap(a,b,pad=6){
+  return a.x<b.x+b.w+pad&&a.x+a.w+pad>b.x&&a.y<b.y+b.h+pad&&a.y+a.h+pad>b.y;
+}
+function settleZoneOverlaps(zones,update,gap=10){
+  const ordered=zones.slice().sort((a,b)=>{const ra=styleRect(a),rb=styleRect(b);return ra.x-rb.x||ra.y-rb.y});
+  let changed=true,guard=0;
+  while(changed&&guard++<20){
+    changed=false;
+    for(let i=0;i<ordered.length;i++){
+      for(let j=i+1;j<ordered.length;j++){
+        const a=styleRect(ordered[i]),b=styleRect(ordered[j]);
+        if(!rectsOverlap(a,b,gap))continue;
+        ordered[j].style.left=(a.x+a.w+gap)+"px";
+        if(update)update(ordered[j]);
+        changed=true;
+      }
+    }
+  }
+}
 
 /* ---------- Карта ---------- */
+function styleRect(el){
+  return{x:parseFloat(el.style.left)||0,y:parseFloat(el.style.top)||0,w:el.offsetWidth,h:el.offsetHeight};
+}
+function mapMethodZones(){return[...$("mapStage").querySelectorAll(".map-method")]}
+function recomputeMapSizes(){
+  const stage=$("mapStage"),svg=$("mapEdges"),fast=stage.querySelector(".map-fastbase");
+  if(!fast)return;
+  fast.querySelectorAll(".map-method").forEach(zone=>{
+    let w=240,h=70;
+    zone.querySelectorAll(".card[data-id]").forEach(card=>{
+      const r=styleRect(card);
+      w=Math.max(w,r.x+r.w+14);h=Math.max(h,r.y+r.h+14);
+    });
+    zone.style.width=w+"px";zone.style.height=h+"px";
+  });
+  let fw=280,fh=90;
+  fast.querySelectorAll(".map-method").forEach(zone=>{
+    const r=styleRect(zone);
+    fw=Math.max(fw,r.x+r.w+18);fh=Math.max(fh,r.y+r.h+18);
+  });
+  fast.style.width=fw+"px";fast.style.height=fh+"px";
+  sizeStage(stage,svg);
+}
+function mapNodeOverlap(card){
+  const zone=card.closest(".map-method");if(!zone)return false;
+  const r=styleRect(card);
+  return[...zone.querySelectorAll(".card[data-id]")].some(other=>other!==card&&rectsOverlap(r,styleRect(other),8));
+}
+function mapZoneOverlap(zone){
+  const r=styleRect(zone);
+  return mapMethodZones().some(other=>other!==zone&&rectsOverlap(r,styleRect(other),10));
+}
 function renderMap(){
   const stage=$("mapStage"),svg=$("mapEdges");
   clearStage(stage,svg);mapBoxes={};
@@ -389,69 +532,105 @@ function renderMap(){
     e.innerHTML="Эндпоинтов fastbase не найдено.<br>Проверьте FAT_ROUTES_PACKAGE и запустите скан.";
     stage.appendChild(e);stage.style.width="900px";stage.style.height="500px";applyTransform("mapView",mapView);return;
   }
-  const byDomain=new Map();
+  const byMethod=new Map();
   endpoints.forEach(n=>{
-    const domain=(n.domain||"").trim()||NO_DOMAIN;
-    if(!byDomain.has(domain))byDomain.set(domain,new Map());
     const method=methodOfEndpoint(n);
-    const byMethod=byDomain.get(domain);
     if(!byMethod.has(method))byMethod.set(method,[]);
     byMethod.get(method).push(n);
   });
-  const domains=[...byDomain.keys()].sort((a,b)=>(a===NO_DOMAIN)-(b===NO_DOMAIN)||a.localeCompare(b));
-  const pkg=document.createElement("div");pkg.className="zone";pkg.dataset.zone="pkg";
-  const pkgLab=document.createElement("div");pkgLab.className="zlab";pkgLab.textContent="fastbase";pkg.appendChild(pkgLab);
-  stage.appendChild(pkg);
+  const methods=[...byMethod.keys()].sort((a,b)=>methodOrder(a)-methodOrder(b)||a.localeCompare(b));
+  const fast=document.createElement("div");
+  fast.className="zone map-zone map-fastbase";
+  fast.style.left=mapFastbase.x+"px";fast.style.top=mapFastbase.y+"px";
+  fast.style.width="320px";fast.style.height="120px";
+  const fastLab=document.createElement("div");fastLab.className="zlab";
+  fastLab.innerHTML='<b style="color:var(--acc)">fastbase</b>';fast.appendChild(fastLab);
+  stage.appendChild(fast);
 
-  let y=70,x=60,rowMax=0,zoneX1=1e9,zoneY1=1e9,zoneX2=0,zoneY2=0;
-  domains.forEach(domain=>{
-    const dHead=document.createElement("div");dHead.className="colhead";dHead.style.left=x+"px";dHead.style.top=y+"px";
-    dHead.innerHTML=`${esc(domain)}`;stage.appendChild(dHead);y+=36;
-    const byMethod=byDomain.get(domain);
-    const methods=[...byMethod.keys()].sort((a,b)=>{
-      const ia=METHOD_ORDER.indexOf(a),ib=METHOD_ORDER.indexOf(b);
-      return (ia<0?99:ia)-(ib<0?99:ib)||a.localeCompare(b);
+  const zones={};
+  methods.forEach(method=>{
+    const items=byMethod.get(method).slice().sort((a,b)=>(a.domain||"").localeCompare(b.domain||"")||a.label.localeCompare(b.label));
+    const zone=document.createElement("div");
+    zone.className="zone map-zone map-method";zone.dataset.method=method;
+    zone.style.left="0px";zone.style.top="38px";zone.style.width="240px";zone.style.height="70px";
+    const lab=document.createElement("div");lab.className="zlab";
+    lab.innerHTML=`<span class="method-dot" style="background:${METHOD_COLORS[method]||"#9a9aa2"}"></span>${esc(method)} <span class="hint">· ${items.length}</span>`;
+    zone.appendChild(lab);fast.appendChild(zone);zones[method]=zone;
+    items.forEach((n,i)=>{
+      const d=n.details||{};
+      const card=document.createElement("div");
+      card.className=`card method-${method.toLowerCase()}`;card.dataset.id=n.id;
+      const saved=mapPos.get(n.id);
+      const lx=saved?saved.x:14+(i%2)*292;
+      const ly=saved?saved.y:38+Math.floor(i/2)*94;
+      card.style.left=lx+"px";card.style.top=ly+"px";
+      card.innerHTML=`<div class="hd"><span class="t">${esc(method)} ${esc(urlOfEndpoint(n))}</span></div>`+
+        `<div class="mt">${esc(d.function_name||"")}</div>`;
+      card.onclick=ev=>{ev.stopPropagation();if(Date.now()-justDraggedAt<250)return;openEndpointScenario(n.id)};
+      zone.appendChild(card);
+      let last={x:lx,y:ly};
+      enableNodeDrag(card,"map",n.id,lx,ly,mapView,
+        (nx,ny)=>{
+          const cx=Math.max(14,nx),cy=Math.max(38,ny);
+          card.style.left=cx+"px";card.style.top=cy+"px";
+          if(mapNodeOverlap(card)){
+            card.style.left=last.x+"px";card.style.top=last.y+"px";return;
+          }
+          last={x:cx,y:cy};
+          mapPos.set(n.id,last);recomputeMapSizes();
+        },
+        (startX,startY)=>{
+          if(mapNodeOverlap(card)){
+            card.style.left=last.x+"px";card.style.top=last.y+"px";
+            mapPos.set(n.id,last);toast("Узлы не могут пересекаться");
+          }else{
+            mapPos.set(n.id,{x:parseFloat(card.style.left)||0,y:parseFloat(card.style.top)||0});
+          }
+          settleZoneOverlaps(mapMethodZones(),zone=>{
+            const method=zone.dataset.method;
+            mapMethods.set(method,{x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0});
+          });
+          recomputeMapSizes();
+        });
     });
-    methods.forEach(method=>{
-      const items=byMethod.get(method);
-      const mHead=document.createElement("div");mHead.className="colhead";mHead.style.left=(x+16)+"px";mHead.style.top=y+"px";
-      mHead.innerHTML=`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${METHOD_COLORS[method]||"#9a9aa2"};margin-right:5px"></span>${esc(method)} · ${items.length}`;
-      stage.appendChild(mHead);y+=30;
-      const cols=Math.min(3,Math.max(1,items.length));
-      let rowTop=y,rowH=0;
-      items.forEach((n,i)=>{
-        const d=n.details||{};
-        const e=document.createElement("div");
-        e.className=`card method-${method.toLowerCase()}`;e.dataset.id=n.id;
-        const saved=mapPos.get(n.id);
-        const left=saved?saved.x:x+32+(i%cols)*300;
-        const top=saved?saved.y:rowTop;
-        e.style.left=left+"px";e.style.top=top+"px";
-        e.innerHTML=`<div class="hd"><span class="t">${esc(method)} ${esc(urlOfEndpoint(n))}</span></div>`+
-          `<div class="mt">${esc(d.function_name||"")}</div>`;
-        e.onclick=ev=>{ev.stopPropagation();if(Date.now()-justDraggedAt<250)return;openEndpointScenario(n.id)};
-        stage.appendChild(e);
-        enableNodeDrag(e,"map",n.id,left,top,mapView,
-          (nx,ny)=>mapPos.set(n.id,{x:nx,y:ny}),
-          ()=>sizeStage(stage,svg));
-        rowH=Math.max(rowH,e.offsetHeight+GAPY);
-        if((i+1)%cols===0||i===items.length-1){rowTop+=rowH;rowH=0}
-        zoneX1=Math.min(zoneX1,left);zoneY1=Math.min(zoneY1,top);
-        zoneX2=Math.max(zoneX2,left+e.offsetWidth);zoneY2=Math.max(zoneY2,top+e.offsetHeight);
-      });
-      y=rowTop+16;
-    });
-    y+=18;
   });
-  if(zoneX1<1e9){
-    pkg.style.left=(zoneX1-PAD)+"px";pkg.style.top=(zoneY1-PAD-18)+"px";
-    pkg.style.width=(zoneX2-zoneX1+PAD*2)+"px";pkg.style.height=(zoneY2-zoneY1+PAD*2+18)+"px";
-  }
-  // заголовок пакета поверх зоны
-  const pkgTitle=document.createElement("div");pkgTitle.className="colhead";
-  pkgTitle.style.left=(zoneX1-PAD+14)+"px";pkgTitle.style.top=Math.max(8,zoneY1-PAD-46)+"px";
-  pkgTitle.innerHTML='<b style="color:var(--acc)">fastbase</b>';
-  stage.appendChild(pkgTitle);
+  recomputeMapSizes();
+  let cursor=18;
+  methods.forEach(method=>{
+    const zone=zones[method];
+    let pos=mapMethods.get(method);
+    if(!pos){pos={x:cursor,y:38};mapMethods.set(method,pos);cursor+=zone.offsetWidth+28}
+    zone.style.left=pos.x+"px";zone.style.top=pos.y+"px";
+  });
+  recomputeMapSizes();
+  methods.forEach(method=>{
+    const zone=zones[method];
+    let last={x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0};
+    enableZoneDrag(zone,mapView,
+      (nx,ny)=>{
+        const cx=Math.max(16,nx),cy=Math.max(38,ny);
+        zone.style.left=cx+"px";zone.style.top=cy+"px";
+        if(mapZoneOverlap(zone)){
+          zone.style.left=last.x+"px";zone.style.top=last.y+"px";return;
+        }
+        last={x:cx,y:cy};
+        mapMethods.set(method,last);recomputeMapSizes();
+      },
+      ()=>{
+        if(mapZoneOverlap(zone)){
+          zone.style.left=last.x+"px";zone.style.top=last.y+"px";
+          toast("Области не могут пересекаться");
+        }
+        mapMethods.set(method,last);recomputeMapSizes();
+      });
+  });
+  enableZoneDrag(fast,mapView,
+    (nx,ny)=>{
+      const cx=Math.max(20,nx),cy=Math.max(20,ny);
+      if(cx!==nx||cy!==ny){fast.style.left=cx+"px";fast.style.top=cy+"px"}
+      mapFastbase.x=cx;mapFastbase.y=cy;
+    },
+    ()=>{mapFastbase.x=parseFloat(fast.style.left)||40;mapFastbase.y=parseFloat(fast.style.top)||40;sizeStage(stage,svg)});
   sizeStage(stage,svg);
   applyTransform("mapView",mapView);
 }
@@ -540,6 +719,32 @@ function redrawScenarioEdges(){
   scenBoxes=measure(stage);
   drawEdges(svg,scenBoxes,visibleEdges(Object.keys(scenBoxes)));
 }
+function recomputeScenarioSizes(){
+  const stage=$("scenStage"),svg=$("scenEdges");
+  stage.querySelectorAll(".scen-zone").forEach(zone=>{
+    let w=240,h=70;
+    zone.querySelectorAll(".card[data-id],.periph-card").forEach(el=>{
+      const r=styleRect(el);
+      w=Math.max(w,r.x+r.w+14);h=Math.max(h,r.y+r.h+14);
+    });
+    zone.style.width=w+"px";zone.style.height=h+"px";
+  });
+  sizeStage(stage,svg);
+}
+function renderPeripherals(zone,parentCard,node){
+  let cursor=(parseFloat(parentCard.style.top)||0)+parentCard.offsetHeight+8;
+  const left=(parseFloat(parentCard.style.left)||0)+18;
+  (node.peripherals||[]).forEach(item=>{
+    const pc=document.createElement("div");
+    pc.className="periph-card";pc.dataset.parent=node.id;
+    pc.style.left=left+"px";pc.style.top=cursor+"px";
+    const symbols=(item.symbols||[]).join(", ");
+    pc.innerHTML=`<div class="ph">${esc(symbols||item.name||"")}</div>`+
+      `<div class="pf">${esc(ROLE_NAMES[item.role]||item.role||"")} · ${esc(item.name||"")}</div>`;
+    zone.appendChild(pc);
+    cursor+=pc.offsetHeight+6;
+  });
+}
 function renderScenario(){
   fillScenarioSelect();
   const stage=$("scenStage"),svg=$("scenEdges");
@@ -551,32 +756,75 @@ function renderScenario(){
   if(!selectedScenario)selectedScenario=G.scenarios[0];
   const path=G.scenario_paths[selectedScenario];
   if(!path){const e=document.createElement("div");e.className="empty";e.textContent="У сценария нет пути.";stage.appendChild(e);applyTransform("scenView",scenView);return}
-  const add=(id,x,y,opts)=>{if(!id||!byId[id])return null;return makeCard(byId[id],x,y,opts)};
-  let y=90;
-  const ep=path.endpoint?add(path.endpoint,40,y,{}):null;
-  if(!ep){const g=document.createElement("div");g.className="card";g.style.left="40px";g.style.top=y+"px";g.innerHTML='<div class="hd"><span class="chip">endpoint</span><span class="t">нет эндпоинта</span></div><div class="mt">сценарий вызывается не из HTTP</div>';stage.appendChild(g)}
-  const sc=add(path.scenario,400,y,{});
-  let nestedY=y+(sc?sc.offsetHeight:120)+24;
-  (path.called_scenarios||[]).forEach(id=>{
-    if(id===selectedScenario)return;
-    const e=add(id,400,nestedY,{nested:true});
-    if(e)nestedY+=e.offsetHeight+GAPY;
+  const defs=[["endpoint","эндпоинт",30],["scenario","сценарий",380],["io","io",730],["model","модель",1080],["tests","тесты",1430]];
+  const layers={};
+  defs.forEach(([kind,title,defaultX])=>{
+    const zone=document.createElement("div");
+    zone.className="zone scen-zone";zone.dataset.layer=kind;
+    const key=`${selectedScenario}|zone|${kind}`;
+    let pos=scenZonePos.get(key);
+    if(!pos){pos={x:defaultX,y:40};scenZonePos.set(key,pos)}
+    zone.style.left=pos.x+"px";zone.style.top=pos.y+"px";
+    zone.style.width="240px";zone.style.height="70px";
+    const lab=document.createElement("div");lab.className="zlab";
+    lab.innerHTML=`${esc(title)} <span class="hint">· 0</span>`;
+    zone.appendChild(lab);stage.appendChild(zone);layers[kind]=zone;
+    let last={x:pos.x,y:pos.y};
+    enableZoneDrag(zone,scenView,
+      (nx,ny)=>{
+        const cx=Math.max(10,nx),cy=Math.max(10,ny);
+        zone.style.left=cx+"px";zone.style.top=cy+"px";
+        if(scenZoneOverlap(zone)){
+          zone.style.left=last.x+"px";zone.style.top=last.y+"px";return;
+        }
+        last={x:cx,y:cy};
+        scenZonePos.set(key,last);redrawScenarioEdges();
+      },
+      ()=>{
+        if(scenZoneOverlap(zone)){
+          zone.style.left=last.x+"px";zone.style.top=last.y+"px";
+          toast("Области не могут пересекаться");
+        }
+        scenZonePos.set(key,last);
+        recomputeScenarioSizes();redrawScenarioEdges();
+      });
   });
-  let ioT=y;
-  (path.io_calls||[]).forEach(id=>{const e=add(id,760,ioT,{});if(e)ioT+=e.offsetHeight+GAPY});
-  let modelY=y;
-  (path.models||[]).forEach(id=>{const e=add(id,1120,modelY,{});if(e)modelY+=e.offsetHeight+GAPY});
-  let testY=y;
-  (path.tests||[]).forEach(id=>{const e=add(id,1480,testY,{});if(e)testY+=e.offsetHeight+GAPY});
-
-  const heads=[["endpoint",40],["scenario",400],["io",760],["model",1120],["тесты",1480]];
-  heads.forEach(([t,x])=>{const h=document.createElement("div");h.className="colhead";h.style.left=x+"px";h.style.top="40px";h.textContent=t;stage.appendChild(h)});
-  if(!hideMeta){
-    const note=document.createElement("div");note.className="hint";note.style.position="absolute";note.style.left="40px";note.style.top="12px";
-    note.textContent="слои слева направо: endpoint → scenario → io → model; вложенные сценарии — рядом с родителем; тесты — справа";
-    stage.appendChild(note);
+  const nextY={};
+  const add=(id,layer,x,y,opts)=>{
+    if(!id||!byId[id])return null;
+    const card=makeCard(byId[id],x,y,opts,layers[layer]);
+    renderPeripherals(layers[layer],card,byId[id]);
+    return card;
+  };
+  const stack=(id,layer,opts)=>{
+    const y=nextY[layer]===undefined?38:nextY[layer];
+    const card=add(id,layer,14,y,opts);
+    if(card)nextY[layer]=(parseFloat(card.style.top)||y)+card.offsetHeight+12;
+    return card;
+  };
+  if(path.endpoint){
+    stack(path.endpoint,"endpoint",{});
+  }else{
+    const note=document.createElement("div");note.className="hint";note.style.position="absolute";note.style.left="14px";note.style.top="42px";
+    note.textContent="нет эндпоинта";layers.endpoint.appendChild(note);
   }
-  sizeStage(stage,svg);
+  stack(path.scenario,"scenario",{});
+  (path.called_scenarios||[]).forEach(id=>{if(id!==selectedScenario)stack(id,"scenario",{nested:true})});
+  (path.io_calls||[]).forEach(id=>stack(id,"io",{}));
+  (path.models||[]).forEach(id=>stack(id,"model",{}));
+  (path.tests||[]).forEach(id=>stack(id,"tests",{}));
+  defs.forEach(([kind])=>{
+    const zone=layers[kind];
+    const count=zone.querySelectorAll(".card[data-id]").length;
+    const hint=zone.querySelector(".zlab .hint");
+    if(hint)hint.textContent="· "+count;
+  });
+  recomputeScenarioSizes();
+  settleZoneOverlaps(scenZones(),zone=>{
+    const layer=zone.dataset.layer;
+    scenZonePos.set(`${selectedScenario}|zone|${layer}`,{x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0});
+  });
+  recomputeScenarioSizes();
   redrawScenarioEdges();
   applyTransform("scenView",scenView);
   renderInspector();
@@ -600,6 +848,11 @@ function renderInspector(){
     h+=`<div class="field"><label>Домен</label><input id="fDomain" value="${esc(n.domain)}" placeholder="например, orders"><div class="note">Домен назначается только эндпоинту; остальные узлы наследуют его автоматически.</div></div>`;
   }else{
     h+=`<div class="field"><label>Домен (наследуется)</label><input value="${esc(n.domain)}" disabled><div class="note">Домен нельзя назначить этому узлу: он наследуется от связанных эндпоинтов.</div></div>`;
+  }
+  if((n.peripherals||[]).length){
+    h+=`<div class="field"><label>Периферийные узлы</label><div class="hint" style="line-height:1.6">`+
+      n.peripherals.map(p=>`${esc((p.symbols||[]).join(", ")||p.name)} — ${esc(ROLE_NAMES[p.role]||p.role||"")} · ${esc(p.name)}`).join("<br>")+
+      `</div></div>`;
   }
   body.innerHTML=h;
   [["fDesc","description"],["fAcc","acceptance"],["fDomain","domain"]].forEach(([id,_f])=>{
@@ -637,11 +890,34 @@ async function saveMetadata(){
 function createNodeById(id){return createState.nodes.find(n=>n.id===id)}
 function createNodeLabel(n){const name=String(n.name||"").trim();return name||`новый ${KIND_NAMES[n.kind]||n.kind}`}
 function createBoxes(){
-  const out={};
-  document.querySelectorAll("#createStage .create-card[data-cid]").forEach(e=>{
-    out[e.dataset.cid]={x:parseFloat(e.style.left)||0,y:parseFloat(e.style.top)||0,w:e.offsetWidth,h:e.offsetHeight};
+  const stage=$("createStage"),out={};
+  stage.querySelectorAll(".create-card[data-cid]").forEach(e=>{
+    const p=offsetInStage(e,stage);
+    out[e.dataset.cid]={x:p.x,y:p.y,w:e.offsetWidth,h:e.offsetHeight};
   });
   return out;
+}
+function recomputeCreateSizes(){
+  const stage=$("createStage"),svg=$("createEdges");
+  stage.querySelectorAll(".create-zone").forEach(zone=>{
+    let w=240,h=70;
+    zone.querySelectorAll(".create-card[data-cid]").forEach(card=>{
+      const r=styleRect(card);
+      w=Math.max(w,r.x+r.w+14);h=Math.max(h,r.y+r.h+14);
+    });
+    zone.style.width=w+"px";zone.style.height=h+"px";
+  });
+  sizeStage(stage,svg);
+}
+function createZones(){return[...$("createStage").querySelectorAll(".create-zone")]}
+function createZoneOverlap(zone){
+  const r=styleRect(zone);
+  return createZones().some(other=>other!==zone&&rectsOverlap(r,styleRect(other),8));
+}
+function createNodeOverlap(card){
+  const zone=card.parentElement;if(!zone)return false;
+  const r=styleRect(card);
+  return[...zone.querySelectorAll(".create-card[data-cid]")].some(other=>other!==card&&rectsOverlap(r,styleRect(other),8));
 }
 function drawCreateEdges(){
   const svg=$("createEdges");
@@ -679,23 +955,62 @@ function renderCreateGraph(){
   const stage=$("createStage"),svg=$("createEdges");
   clearStage(stage,svg);
   if(!createState.nodes.length){
-    const e=document.createElement("div");e.className="empty";
-    e.innerHTML="Добавьте узел кнопкой «+ узел».<br>Он появится здесь как карточка с формой внутри.";
-    stage.appendChild(e);stage.style.width="900px";stage.style.height="500px";
-    applyTransform("createView",createView);renderCreateEdgeList();return;
+    const e=document.createElement("div");e.className="empty";e.style.top="8px";
+    e.innerHTML="Добавьте узел кнопкой «+ узел» — он появится в области своего вида.";
+    stage.appendChild(e);
   }
-  [["endpoint","эндпоинт"],["scenario","сценарий"],["io","io"],["model","модель"],["test","тест"]].forEach(([kind,title])=>{
-    const h=document.createElement("div");h.className="colhead";
-    h.style.left=CREATE_LAYER_X[kind]+"px";h.style.top="40px";h.innerHTML=`${esc(title)} <span class="hint">· ${createState.nodes.filter(n=>n.kind===kind).length}</span>`;
-    stage.appendChild(h);
+  const defs=[["endpoint","эндпоинт"],["scenario","сценарий"],["io","io"],["model","модель"],["test","тест"]];
+  const zones={};
+  defs.forEach(([kind,title])=>{
+    const zone=document.createElement("div");
+    zone.className="zone create-zone";zone.dataset.kind=kind;
+    if(!createState.zones[kind])createState.zones[kind]={x:CREATE_LAYER_X[kind],y:40};
+    const pos=createState.zones[kind];
+    zone.style.left=pos.x+"px";zone.style.top=pos.y+"px";
+    zone.style.width="240px";zone.style.height="70px";
+    const lab=document.createElement("div");lab.className="zlab";
+    lab.innerHTML=`${esc(title)} <span class="hint">· 0</span>`;
+    zone.appendChild(lab);stage.appendChild(zone);zones[kind]=zone;
+    let last={x:pos.x,y:pos.y};
+    enableZoneDrag(zone,createView,
+      (nx,ny)=>{
+        const cx=Math.max(10,nx),cy=Math.max(10,ny);
+        zone.style.left=cx+"px";zone.style.top=cy+"px";
+        if(createZoneOverlap(zone)){
+          zone.style.left=last.x+"px";zone.style.top=last.y+"px";return;
+        }
+        last={x:cx,y:cy};
+        createState.zones[kind]=last;drawCreateEdges();
+      },
+      ()=>{
+        if(createZoneOverlap(zone)){
+          zone.style.left=last.x+"px";zone.style.top=last.y+"px";
+          toast("Области не могут пересекаться");
+        }
+        createState.zones[kind]=last;
+        recomputeCreateSizes();drawCreateEdges();
+      });
   });
-  createState.nodes.forEach(node=>stage.appendChild(createCardElement(node)));
-  sizeStage(stage,svg);
+  createState.nodes.forEach(node=>{
+    const zone=zones[node.kind];
+    if(zone)zone.appendChild(createCardElement(node,zone));
+  });
+  defs.forEach(([kind])=>{
+    const zone=zones[kind];
+    const hint=zone.querySelector(".zlab .hint");
+    if(hint)hint.textContent="· "+zone.querySelectorAll(".create-card[data-cid]").length;
+  });
+  recomputeCreateSizes();
+  settleZoneOverlaps(createZones(),zone=>{
+    const kind=zone.dataset.kind;
+    createState.zones[kind]={x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0};
+  });
+  recomputeCreateSizes();
   drawCreateEdges();
   applyTransform("createView",createView);
   renderCreateEdgeList();
 }
-function createCardElement(node){
+function createCardElement(node,zone){
   const e=document.createElement("div");
   e.className=`card create-card k-${node.kind}`;
   e.dataset.cid=node.id;e.dataset.kind=node.kind;
@@ -719,9 +1034,9 @@ function createCardElement(node){
   e.querySelector(".del").onclick=ev=>{ev.stopPropagation();deleteCreateNode(node.id)};
   e.querySelector('[data-f="kind"]').onchange=ev=>{
     node.kind=ev.target.value;
-    node.x=CREATE_LAYER_X[node.kind];
+    node.x=14;
     const siblings=createState.nodes.filter(n=>n.kind===node.kind&&n.id!==node.id);
-    node.y=80+siblings.length*310;
+    node.y=38+siblings.length*280;
     renderCreateGraph();
   };
   const bind=(sel,key,after)=>{
@@ -747,9 +1062,30 @@ function createCardElement(node){
     scEl.addEventListener("input",()=>{node.details.scenario=scEl.value});
   }
   e.querySelector(".connector").addEventListener("mousedown",ev=>startCreateConnection(ev,node,e));
+  let last={x:node.x,y:node.y};
   enableNodeDrag(e,"create",node.id,node.x,node.y,createView,
-    (nx,ny)=>{node.x=nx;node.y=ny;drawCreateEdges()},
-    ()=>sizeStage($("createStage"),$("createEdges")));
+    (nx,ny)=>{
+      const cx=Math.max(14,nx),cy=Math.max(34,ny);
+      e.style.left=cx+"px";e.style.top=cy+"px";
+      if(createNodeOverlap(e)){
+        e.style.left=last.x+"px";e.style.top=last.y+"px";return;
+      }
+      last={x:cx,y:cy};
+      node.x=cx;node.y=cy;
+      recomputeCreateSizes();drawCreateEdges();
+    },
+    ()=>{
+      if(createNodeOverlap(e)){
+        e.style.left=last.x+"px";e.style.top=last.y+"px";
+        toast("Узлы не могут пересекаться");
+      }
+      node.x=last.x;node.y=last.y;
+      settleZoneOverlaps(createZones(),zone=>{
+        const kind=zone.dataset.kind;
+        createState.zones[kind]={x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0};
+      });
+      recomputeCreateSizes();drawCreateEdges();
+    });
   return e;
 }
 function addCreateNode(){
@@ -758,7 +1094,7 @@ function addCreateNode(){
   const node={
     id:"c"+(createState.seq++),kind,name:"",description:"",acceptance:"",domain:"",
     details:{http_method:"post",path:"",scenario:""},
-    x:CREATE_LAYER_X[kind]||40,y:80+count*310
+    x:14,y:38+count*280
   };
   createState.nodes.push(node);
   renderCreateGraph();
@@ -771,9 +1107,10 @@ function deleteCreateNode(id){
 function startCreateConnection(ev,node,card){
   if(ev.button!==0)return;
   ev.preventDefault();ev.stopPropagation();
-  const svg=$("createEdges"),canvas=$("createCanvas");
-  const x1=(parseFloat(card.style.left)||0)+card.offsetWidth;
-  const y1=(parseFloat(card.style.top)||0)+card.offsetHeight/2;
+  const svg=$("createEdges"),canvas=$("createCanvas"),stage=$("createStage");
+  const origin=offsetInStage(card,stage);
+  const x1=origin.x+card.offsetWidth;
+  const y1=origin.y+card.offsetHeight/2;
   const path=document.createElementNS("http://www.w3.org/2000/svg","path");
   path.setAttribute("fill","none");path.setAttribute("stroke","#e8833a");
   path.setAttribute("stroke-width","2");path.setAttribute("stroke-dasharray","6,4");
@@ -867,6 +1204,15 @@ async function boot(){
   bindViewport("mapCanvas",mapView,()=>applyTransform("mapView",mapView));
   bindViewport("scenCanvas",scenView,()=>applyTransform("scenView",scenView));
   bindViewport("createCanvas",createView,()=>applyTransform("createView",createView));
+  $("scenCanvas").addEventListener("click",ev=>{
+    if(tab!=="scenario")return;
+    if(Date.now()-justDraggedAt<250)return;
+    if(ev.target.closest(".card")||ev.target.closest(".periph-card")||ev.target.closest(".zlab"))return;
+    if(selectedNode!==null){selectedNode=null;renderScenario()}
+  });
+  document.addEventListener("keydown",ev=>{
+    if(ev.key==="Escape"&&tab==="scenario"&&selectedNode!==null){selectedNode=null;renderScenario()}
+  });
   $("zIn").onclick=()=>{const a=activeView();a.view.k=Math.min(2.5,a.view.k*1.15);applyTransform(a.id,a.view)};
   $("zOut").onclick=()=>{const a=activeView();a.view.k=Math.max(.2,a.view.k*.87);applyTransform(a.id,a.view)};
   $("zReset").onclick=()=>{const a=activeView();a.view.k=1;a.view.x=30;a.view.y=30;applyTransform(a.id,a.view)};

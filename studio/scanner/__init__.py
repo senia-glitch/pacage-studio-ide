@@ -30,6 +30,7 @@ from studio.metamodel import (
 )
 from studio.scanner.ast_utils import clear_cache
 from studio.scanner.indexer import Index, build_index, scenario_node_id
+from studio.scanner.peripherals import attach_peripherals
 from studio.scanner.resolver import (
     resolve_dispatch,
     resolve_io_and_tables,
@@ -332,6 +333,7 @@ def scan(project_root: Path) -> Graph:
     index = build_index(env)
     graph = build_core_graph(env, index)
     attach_tests(graph, env, index)
+    attach_peripherals(graph, env, index)
     specs = scan_metadata(graph, env.project_root)
     apply_metadata_edges(graph, specs)
     compute_domains(graph)

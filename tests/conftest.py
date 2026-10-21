@@ -67,6 +67,7 @@ FILES: dict[str, str] = {
     ),
     "app/scenarios/orders.py": (
         "from core import BaseScenario, register_scenario\n"
+        "from app.utils.money import calc_total\n"
         "\n"
         "\n"
         "# studio: description start\n"
@@ -81,6 +82,7 @@ FILES: dict[str, str] = {
         '        await self._db.create("orders", {})\n'
         "        await self._db.query('SELECT id FROM \"users\"')\n"
         '        await run("charge_payment", dto)\n'
+        "        calc_total(10)\n"
         "\n"
         "\n"
         '@register_scenario("charge_payment")\n'
@@ -93,6 +95,10 @@ FILES: dict[str, str] = {
         "class ListOrdersScenario(BaseScenario):\n"
         "    async def execute(self):\n"
         '        await self._db.read("orders", {})\n'
+    ),
+    "app/utils/money.py": (
+        "def calc_total(x):\n"
+        "    return x\n"
     ),
     "tests/test_orders.py": (
         "def test_create_order():\n"

@@ -64,3 +64,18 @@ def test_узлы_перетаскиваются():
     assert "enableNodeDrag" in HTML
     assert "scenPos" in HTML
     assert "mapPos" in HTML
+
+
+def test_области_и_периферийные_узлы():
+    assert "map-fastbase" in HTML
+    assert "map-method" in HTML
+    assert "scen-zone" in HTML
+    assert "create-zone" in HTML
+    assert "periph-card" in HTML
+    assert "enableZoneDrag" in HTML
+
+
+def test_пустой_клик_и_esc_снимают_выделение():
+    assert 'ev.key==="Escape"' in HTML
+    assert "selectedNode=null" in HTML
+
