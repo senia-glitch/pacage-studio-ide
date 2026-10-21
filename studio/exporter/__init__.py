@@ -36,6 +36,8 @@ ROLE_NAMES = {
 
 
 def _where(node: Node) -> str:
+    if node.planned or node.line <= 0:
+        return node.file_path
     return f"{node.file_path}:{node.line}"
 
 
@@ -182,6 +184,8 @@ def _node_lines(graph: Graph, node: Node) -> list[str]:
     else:
         lines.append("  - Критерии приёмки: не заполнено")
     lines.append(f"  - Домен: {_text(node.domain)}")
+    if node.planned:
+        lines.append("  - Код: ещё не написан (метаданные без кода)")
     if node.peripherals:
         lines.append("  - Периферийные узлы:")
         for item in node.peripherals:

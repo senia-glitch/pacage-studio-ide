@@ -99,3 +99,11 @@ def test_раздел_неполных():
     assert 'data-layer="incomplete"' in HTML or '"incomplete","неполные"' in HTML
 
 
+def test_плановые_узлы_и_зум_областей():
+    assert "planned" in HTML
+    assert "chip plan" in HTML
+    assert "updateCreateZoneScales" in HTML
+    assert "revealElement" in HTML
+
+
+

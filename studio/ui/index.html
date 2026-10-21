@@ -104,6 +104,8 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index
 .chips{display:inline-flex;gap:4px;flex-wrap:wrap}
 .chip{font-size:9.5px;padding:1px 6px;border-radius:8px;background:#3a3b40;color:#c2c2ca}
 .chip.acc{background:#4a3a28;color:var(--acc)}
+.chip.plan{background:#3a3b40;color:#e8a35a}
+.card.planned{border-style:dashed}
 #createPane{flex:1;display:flex;flex-direction:column;min-height:0}
 .createbar{display:flex;gap:8px;align-items:center;padding:6px 12px;border-bottom:1px solid #000;background:var(--panel);flex-wrap:wrap}
 .createbar select{background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--txt);padding:4px 8px;font:12px inherit}
@@ -205,7 +207,7 @@ const KIND_COLORS={endpoint:"#5aa0ff",scenario:"#e8833a",io:"#7fc97f",model:"#bb
 const EDGE_COLORS={dispatch:"#5aa0ff",scenario_call:"#e8833a",port_call:"#7fc97f",table:"#bb9af7",tests:"#c9a86a",uses:"#9a9aa2",depends:"#9a9aa2"};
 const EDGE_NAMES={dispatch:"вызов сценария",scenario_call:"вызов сценария",port_call:"порт БД",table:"таблица",tests:"тест",uses:"использует",depends:"зависит"};
 const METHOD_ORDER=["GET","POST","PUT","PATCH","DELETE"];
-const METHOD_COLORS={GET:"#5aa0ff",POST:"#7fc97f",PUT:"#e8833a",PATCH:"#bb9af7",DELETE:"#ff5d5d","ДРУГОЙ":"#9a9aa2"};
+const METHOD_COLORS={GET:"#5aa0ff",POST:"#7fc97f",PUT:"#e8833a",PATCH:"#bb9af7",DELETE:"#ff5d5d","ДРУГОЙ":"#9a9aa2","БЕЗ МЕТОДА":"#9a9aa2"};
 const NO_DOMAIN="без домена";
 const NO_METHOD="без метода";
 const CARD_W=280,GAPY=24,PAD=30;
@@ -237,8 +239,8 @@ function applyGraph(g){G=g||{};byId={};(G.nodes||[]).forEach(n=>byId[n.id]=n);
   if(selectedScenario&&!G.scenario_paths?.[selectedScenario])selectedScenario=null;
   if(selectedNode&&!byId[selectedNode])selectedNode=null;
 }
-function methodOfEndpoint(n){return String((n.details||{}).http_method||"").toUpperCase()||"ДРУГОЙ"}
-function urlOfEndpoint(n){const d=n.details||{};return d.url_path||d.path||"/"}
+function methodOfEndpoint(n){const m=String((n.details||{}).http_method||"").toUpperCase();return m||"БЕЗ МЕТОДА"}
+function urlOfEndpoint(n){const d=n.details||{};return d.url_path||d.path||""}
 function endpointLabel(n){
   const d=n.details||{};
   return `${methodOfEndpoint(n)} ${urlOfEndpoint(n)}`.trim()+"\n"+(d.function_name||"");
@@ -253,7 +255,7 @@ function nodeMeta(n){
 }
 function cardHtml(n,opts={}){
   const c=opts.method?METHOD_COLORS[opts.method]:KIND_COLORS[n.kind]||"#888";
-  let h=`<div class="hd"><span class="grip" title="перетащить">⠿</span><span class="chip">${esc(KIND_NAMES[n.kind]||n.kind)}</span><span class="t">${esc(n.label)}</span></div>`;
+  let h=`<div class="hd"><span class="grip" title="перетащить">⠿</span><span class="chip">${esc(KIND_NAMES[n.kind]||n.kind)}</span>${n.planned?'<span class="chip plan">без кода</span>':""}<span class="t">${esc(n.label)}</span></div>`;
   h+=`<div class="mt">${esc(nodeMeta(n))}</div>`;
   if(!hideMeta){
     if(n.description){
@@ -266,7 +268,7 @@ function cardHtml(n,opts={}){
       h+=`<div class="sec"><div class="lbl">${n.kind==="endpoint"?"домен":"домен (наследуется)"}</div><div class="body">${esc(n.domain)}</div></div>`;
     }
   }
-  const cls=`card k-${n.kind}${opts.method?" method-"+opts.method.toLowerCase():""}${opts.nested?" nested":""}${selectedNode===n.id?" sel":""}`;
+  const cls=`card k-${n.kind}${n.planned?" planned":""}${opts.method?" method-"+opts.method.toLowerCase():""}${opts.nested?" nested":""}${selectedNode===n.id?" sel":""}`;
   return {cls,html:h,c};
 }
 function periphLayoutKey(scope,pid){return `${scope}|${pid}`}
@@ -386,7 +388,23 @@ function bindViewport(canvasId,view,apply){
   window.addEventListener("mouseup",()=>{drag=null;c.classList.remove("grabbing")});
   c.addEventListener("dblclick",()=>fitView(c,view,apply));
 }
-function applyTransform(viewId,view){const v=$(viewId);if(v)v.style.transform=`translate(${view.x}px,${view.y}px) scale(${view.k})`;$("zoomLabel").textContent=Math.round(view.k*100)+"%"}
+function applyTransform(viewId,view){
+  const v=$(viewId);if(v)v.style.transform=`translate(${view.x}px,${view.y}px) scale(${view.k})`;
+  $("zoomLabel").textContent=Math.round(view.k*100)+"%";
+  if(viewId==="createView")updateCreateZoneScales();
+}
+function updateCreateZoneScales(){
+  const stage=$("createStage");if(!stage)return;
+  const k=createView.k||1;
+  const baseF=Math.max(.75,Math.min(1.6,k))/k;
+  stage.querySelectorAll(".create-zone").forEach(zone=>{
+    const lab=zone.querySelector(".zlab");if(!lab)return;
+    const maxF=Math.max(.35,(zone.offsetWidth-18)/Math.max(1,lab.offsetWidth));
+    const f=Math.min(baseF,maxF);
+    lab.style.transformOrigin="left center";
+    lab.style.transform=`scale(${f})`;
+  });
+}
 
 /* ---------- перемещение узлов ---------- */
 /* ---------- единый контроллер перемещения ---------- */
@@ -582,13 +600,16 @@ function renderMap(){
     items.forEach((n,i)=>{
       const d=n.details||{};
       const card=document.createElement("div");
-      card.className=`card method-${method.toLowerCase()}`;card.dataset.id=n.id;
+      card.className=`card method-${method.toLowerCase()}${n.planned?" planned":""}`;card.dataset.id=n.id;
       const saved=mapPos.get(n.id);
       const lx=saved?saved.x:14+(i%2)*292;
       const ly=saved?saved.y:38+Math.floor(i/2)*94;
       card.style.left=lx+"px";card.style.top=ly+"px";
-      card.innerHTML=`<div class="hd"><span class="grip" title="перетащить">⠿</span><span class="t">${esc(method)} ${esc(urlOfEndpoint(n))}</span></div>`+
-        `<div class="mt">${esc(d.function_name||"")}</div>`;
+      const url=urlOfEndpoint(n);
+      const title=url?`${method} ${url}`:`${method} · ${n.label}`;
+      const sub=url?(d.function_name||""):"URL неизвестен";
+      card.innerHTML=`<div class="hd"><span class="grip" title="перетащить">⠿</span>${n.planned?'<span class="chip plan">без кода</span>':""}<span class="t">${esc(title)}</span></div>`+
+        `<div class="mt">${esc(sub)}</div>`;
       card.onclick=ev=>{ev.stopPropagation();if(Date.now()-justDraggedAt<250)return;openEndpointScenario(n.id)};
       zone.appendChild(card);
       enableNodeDrag(card,"map",n.id,lx,ly,mapView,
@@ -906,7 +927,7 @@ function renderInspector(){
     foot.textContent="Правки сохраняются при потере фокуса.";return;
   }
   const n=byId[selectedNode];
-  chips.innerHTML=`<span class="chip acc">${esc(KIND_NAMES[n.kind]||n.kind)}</span><span class="chip">${esc(n.file_path)}:${n.line}</span>`;
+  chips.innerHTML=`<span class="chip acc">${esc(KIND_NAMES[n.kind]||n.kind)}</span>${n.planned?'<span class="chip plan">без кода</span>':""}<span class="chip">${esc(n.file_path)}${n.planned?"":":"+n.line}</span>`;
   let h="";
   h+=`<div class="kv"><span>якорь</span><b>${esc(anchorText(n))}</b></div>`;
   h+=`<div class="field"><label>Описание</label><textarea id="fDesc" rows="5">${esc(n.description)}</textarea></div>`;
@@ -915,6 +936,9 @@ function renderInspector(){
     h+=`<div class="field"><label>Домен</label><input id="fDomain" value="${esc(n.domain)}" placeholder="например, orders"><div class="note">Домен назначается только эндпоинту; остальные узлы наследуют его автоматически.</div></div>`;
   }else{
     h+=`<div class="field"><label>Домен (наследуется)</label><input value="${esc(n.domain)}" disabled><div class="note">Домен нельзя назначить этому узлу: он наследуется от связанных эндпоинтов.</div></div>`;
+  }
+  if(n.planned){
+    h+=`<div class="field"><div class="note">Этот узел существует только в метаданных: кода с таким якорем ещё нет. Правки сохраняются в файл метаданных.</div></div>`;
   }
   if((n.peripherals||[]).length){
     h+=`<div class="field"><label>Периферийные узлы</label><div class="hint" style="line-height:1.6">`+
@@ -934,7 +958,7 @@ function anchorText(n){
   if(n.kind==="endpoint")return d.function_name||"";
   if(n.kind==="scenario"||n.kind==="model")return d.class_name||"";
   if(n.kind==="test")return d.test_name||"";
-  if(n.kind==="io")return `${d.scenario_class}._db.${d.method}:${n.line}`;
+  if(n.kind==="io")return n.planned?`${d.scenario_class}._db.${d.method}`:`${d.scenario_class}._db.${d.method}:${n.line}`;
   return "";
 }
 async function saveMetadata(){
@@ -1137,8 +1161,6 @@ function addCreateNode(kind){
   };
   createState.nodes.push(node);
   renderCreateGraph();
-  const card=[...document.querySelectorAll("#createStage .create-card[data-cid]")].find(c=>c.dataset.cid===node.id);
-  if(card)revealElement($("createCanvas"),createView,card,()=>applyTransform("createView",createView));
 }
 function deleteCreateNode(id){
   createState.nodes=createState.nodes.filter(n=>n.id!==id);

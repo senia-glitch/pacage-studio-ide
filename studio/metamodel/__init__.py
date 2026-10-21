@@ -77,6 +77,8 @@ class Node(BaseModel):
     domain: str = ""
     # Периферийные узлы: методы/классы/файлы внутри узла (§4.3).
     peripherals: list[dict] = Field(default_factory=list)
+    # Узел существует только в метаданных: кода с таким якорем ещё нет.
+    planned: bool = False
 
 
 class Edge(BaseModel):
@@ -138,5 +140,6 @@ def node_anchor(node: Node) -> str:
     if node.kind == "io":
         scenario_class = str(details.get("scenario_class") or "")
         method = str(details.get("method") or "")
-        return f"{scenario_class}._db.{method}:{node.line}"
+        base = f"{scenario_class}._db.{method}"
+        return base if node.line <= 0 else f"{base}:{node.line}"
     return ""

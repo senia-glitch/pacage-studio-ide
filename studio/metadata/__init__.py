@@ -34,6 +34,7 @@ SECTIONS = ("description", "acceptance", "domain", "edge")
 
 START_RE = re.compile(r"^\s*#\s*studio:\s*([a-z]+)\s+start\s*$")
 END_RE = re.compile(r"^\s*#\s*studio:\s*([a-z]+)\s+end\s*$")
+NOTE_RE = re.compile(r"^\s*#\s*Желаемое имя/якорь:")
 
 HTTP_METHODS = ("get", "post", "put", "patch", "delete")
 
@@ -530,6 +531,25 @@ def update_text_metadata(
     return "\n".join(result)
 
 
+def update_planned_text_metadata(
+    text: str,
+    description: str,
+    acceptance: list[str],
+    domain: str,
+) -> str:
+    """Файл-план без якоря кода: блоки пишутся в начало, пометка и edge сохраняются."""
+    lines = text.splitlines()
+    note_lines = [line for line in lines if NOTE_RE.match(line)]
+    keep_edges: list[str] = []
+    for block in parse_blocks(lines):
+        if block.section == "edge":
+            keep_edges.extend(lines[block.start : block.end + 1])
+    result = list(note_lines)
+    result.extend(_metadata_lines(description, acceptance, domain, ""))
+    result.extend(keep_edges)
+    return "\n".join(result) + "\n"
+
+
 def save_node_metadata(
     project_root: Path,
     node: Node,
@@ -548,7 +568,11 @@ def save_node_metadata(
         text = target.read_text(encoding="utf-8")
     except OSError as exc:
         raise MetadataError(f"{node.file_path}: файл не читается") from exc
-    updated = update_text_metadata(text, node.file_path, node, description, acceptance, domain)
+    effective_domain = domain if node.kind == "endpoint" else ""
+    if node.planned:
+        updated = update_planned_text_metadata(text, description, acceptance, effective_domain)
+    else:
+        updated = update_text_metadata(text, node.file_path, node, description, acceptance, domain)
     if updated == text:
         return False
     if not atomic_write(target, updated):

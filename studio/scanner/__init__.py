@@ -31,6 +31,7 @@ from studio.metamodel import (
 from studio.scanner.ast_utils import clear_cache
 from studio.scanner.indexer import Index, build_index, scenario_node_id
 from studio.scanner.peripherals import attach_peripherals
+from studio.scanner.planned import scan_planned
 from studio.scanner.resolver import (
     resolve_dispatch,
     resolve_io_and_tables,
@@ -335,8 +336,11 @@ def scan(project_root: Path) -> Graph:
     attach_tests(graph, env, index)
     attach_peripherals(graph, env, index)
     specs = scan_metadata(graph, env.project_root)
+    scan_planned(graph, env)
     apply_metadata_edges(graph, specs)
     compute_domains(graph)
+    graph.endpoints = sorted(n.id for n in graph.nodes if n.kind == "endpoint")
+    graph.scenarios = sorted(n.id for n in graph.nodes if n.kind == "scenario")
     build_scenario_paths(graph)
     graph.nodes.sort(key=lambda n: n.id)
     graph.edges.sort(key=lambda e: e.id)
