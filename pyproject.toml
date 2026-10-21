@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pacage-studio"
-version = "3.1.0"
+version = "3.2.0"
 description = "Офлайн-карта пути HTTP-запроса по AST: endpoint → scenario → io → model"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,6 +13,7 @@ authors = [{name="studio"}]
 license = {text="MIT"}
 
 [project.optional-dependencies]
+full = ["fastbase[full] @ git+https://github.com/senia-glitch/fastapi-transport.git"]
 dev = ["pytest>=8"]
 
 [project.scripts]

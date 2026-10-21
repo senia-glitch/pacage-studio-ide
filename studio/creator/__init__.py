@@ -82,13 +82,11 @@ def _parse_nodes(data: dict) -> list[NodeSpec]:
                 raise CreateError("для io-узла нужен сценарий")
             details = {"scenario": scenario, "method": check}
         if kind == "endpoint":
-            method = str(details.get("http_method") or raw.get("http_method") or "get").lower()
-            if method not in ("get", "post", "put", "patch", "delete"):
+            method = str(details.get("http_method") or raw.get("http_method") or "").strip().lower()
+            if method and method not in ("get", "post", "put", "patch", "delete"):
                 raise CreateError(f"неизвестный HTTP-метод: {method!r}")
             path = str(details.get("path") or raw.get("path") or "").strip()
-            if not path:
-                raise CreateError("для эндпоинта нужен путь")
-            if not path.startswith("/"):
+            if path and not path.startswith("/"):
                 path = "/" + path
             details = {"http_method": method, "path": path}
         if name in names:
@@ -205,6 +203,10 @@ def plan_creation(
             acceptance=node.acceptance,
             domain=domain,
             edges=edges_by_source.get(node.name, []),
+            anchor_note=(
+                f"Желаемое имя/якорь: {node.anchor} — не утверждено, "
+                "можно изменить при написании кода."
+            ),
         )
         files.append((rel, node.name, node.kind, content))
     return files, created

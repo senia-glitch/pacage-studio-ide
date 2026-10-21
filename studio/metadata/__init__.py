@@ -577,9 +577,12 @@ def render_metadata_file(
     domain: str,
     edges: list[tuple[str, str, str]] | None = None,
     only_metadata: bool = True,
+    anchor_note: str = "",
 ) -> str:
     """Файл, содержащий только метаданные (код не генерируется)."""
     lines: list[str] = []
+    if anchor_note.strip():
+        lines.append(f"# {anchor_note.strip()}")
     lines.extend(_metadata_lines(description, acceptance, domain, ""))
     for edge_from, edge_to, kind in edges or []:
         lines.extend(render_edge_block(edge_from, edge_to, kind))

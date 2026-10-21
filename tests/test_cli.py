@@ -49,12 +49,44 @@ def test_help(demo: Path, capsys):
 
 def test_старые_команды_убраны():
     parser = cli.build_parser()
-    for command in ("scaffold", "metadata", "reset", "export"):
+    for command in ("scaffold", "metadata", "reset"):
         try:
             parser.parse_args([command])
         except SystemExit:
             continue
         raise AssertionError(f"команда {command} не должна поддерживаться")
+
+
+def test_install_full_запускает_pip(demo: Path, monkeypatch, capsys):
+    called = {}
+
+    class Result:
+        returncode = 0
+
+    def fake_run(command):
+        called["command"] = command
+        return Result()
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    assert cli.main(["install-full", "--project", str(demo)]) == 0
+    command = called["command"]
+    assert command[0] == cli.sys.executable
+    assert command[1:4] == ["-m", "pip", "install"]
+    assert "--upgrade" in command
+    assert "fastbase[full] @ git+https://github.com/senia-glitch/fastapi-transport.git" in command
+
+
+def test_export_создаёт_документ(demo: Path, capsys):
+    from studio.exporter import EXPORT_FILENAME
+
+    assert cli.main(["export", "--project", str(demo)]) == 0
+    target = demo / EXPORT_FILENAME
+    assert target.is_file()
+    text = target.read_text(encoding="utf-8")
+    assert "Правила ручного редактирования метаданных" in text
+    assert "## Полные сценарии" in text
+    assert "## Неполные узлы" in text
+    assert text.index("## Полные сценарии") < text.index("## Неполные узлы")
 
 
 def test_параметр_project_без_команды(demo: Path, monkeypatch):

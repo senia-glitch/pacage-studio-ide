@@ -7,11 +7,13 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
 from studio import log as slog
 from studio import store
+from studio.exporter import EXPORT_FILENAME, build_document
 from studio.scanner import scan
 from studio.server import serve
 
@@ -52,6 +54,43 @@ def _endpoint_label(graph, endpoint_id: str) -> str:
     method = str(details.get("http_method", "")).upper()
     path = details.get("url_path") or details.get("path") or "/"
     return f"{method} {path}".strip()
+
+
+def cmd_export(args) -> int:
+    root = _root(args)
+    slog.start_run(root, "export")
+    slog.step(f"проект: {root}")
+    graph = scan(root)
+    content = build_document(graph)
+    target = root / EXPORT_FILENAME
+    try:
+        target.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        print(f"export: не удалось записать {target}: {exc}")
+        return 1
+    print(f"export: {target}")
+    return 0
+
+
+def cmd_install_full(args) -> int:
+    root = _root(args)
+    slog.start_run(root, "install-full")
+    command = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--upgrade",
+        "fastbase[full] @ git+https://github.com/senia-glitch/fastapi-transport.git",
+    ]
+    slog.step("pip install fastbase[full]")
+    print("studio install-full: " + " ".join(command))
+    try:
+        result = subprocess.run(command)
+    except OSError as exc:
+        print(f"install-full: ошибка запуска pip: {exc}")
+        return 1
+    return int(result.returncode)
 
 
 def cmd_list(args) -> int:
@@ -120,6 +159,8 @@ def cmd_help(args) -> int:
     print("                                       автоскан и интерфейс")
     print("  scan  [--project .]                  код → .studio/graph.json")
     print("  list  [--project .]                  сценарии в терминале")
+    print("  export [--project .]                 метаданные → STUDIO_METADATA.md")
+    print("  install-full [--project .]           установить/обновить fastbase[full]")
     print("  help                                 этот экран")
     print()
     print("Без команды studio запускает dev.")
@@ -151,6 +192,14 @@ def build_parser() -> argparse.ArgumentParser:
     list_p = sub.add_parser("list", help="список сценариев в терминале")
     _add_project(list_p)
     list_p.set_defaults(f=cmd_list)
+
+    export_p = sub.add_parser("export", help="метаданные → STUDIO_METADATA.md")
+    _add_project(export_p)
+    export_p.set_defaults(f=cmd_export)
+
+    install_p = sub.add_parser("install-full", help="установить/обновить fastbase[full]")
+    _add_project(install_p)
+    install_p.set_defaults(f=cmd_install_full)
 
     help_p = sub.add_parser("help", help="показать все команды")
     _add_project(help_p)

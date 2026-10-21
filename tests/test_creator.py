@@ -121,3 +121,23 @@ def test_модель_из_файла_конструктора_становит�
     node = next(n for n in graph.nodes if n.kind == "model" and n.details["tablename"] == "refunds")
     assert node.description == "Модель."
     assert node.file_path == model.path
+
+
+def test_endpoint_без_метода_и_пути(demo: Path):
+    payload = {
+        "nodes": [
+            {"kind": "endpoint", "name": "unfinished", "description": "Без маршрута.", "details": {}},
+        ]
+    }
+    created = create_metadata_files(payload, read_env(demo))
+    text = (demo / created[0].path).read_text(encoding="utf-8")
+    assert "Желаемое имя/якорь: unfinished" in text
+    assert "studio: description start" in text
+
+
+def test_имя_якоря_помечено_как_желаемое(demo: Path):
+    created = create_metadata_files(_payload(), read_env(demo))
+    for item in created:
+        text = (demo / item.path).read_text(encoding="utf-8")
+        assert "не утверждено" in text
+        assert "можно изменить" in text

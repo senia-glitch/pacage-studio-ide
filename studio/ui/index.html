@@ -37,6 +37,8 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index
 .zone .zlab{position:absolute;top:4px;left:10px;font-size:11px;font-weight:700;letter-spacing:.4px;color:var(--dim);background:#2a2b30;padding:1px 10px;border-radius:6px;border:1px solid var(--line);white-space:nowrap;z-index:2}
 .map-zone,.scen-zone,.create-zone{pointer-events:auto}
 .map-zone>.zlab,.scen-zone>.zlab,.create-zone>.zlab{cursor:move;color:var(--txt)}
+.zone-add{flex:none;background:transparent;border:1px solid var(--line);color:var(--txt);border-radius:4px;padding:0 5px;font-size:13px;line-height:15px;cursor:pointer}
+.zone-add:hover{border-color:var(--acc);color:var(--acc)}
 .zone.zone-dragging{box-shadow:0 0 0 1px var(--acc),0 8px 26px #0008}
 .zone.map-fastbase{background:rgba(90,160,255,.055)}
 .zone.map-method{background:rgba(120,130,160,.055)}
@@ -95,6 +97,10 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index
 .field textarea,.field input,.field select{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--txt);padding:5px 8px;font-size:12px;font-family:inherit}
 .field textarea{resize:vertical}
 .field .note{font-size:10.5px;color:#7c7d85;margin-top:3px}
+.tip-wrap{position:relative}
+.tip-wrap::after{content:attr(data-tip);display:none;position:absolute;left:0;top:calc(100% + 6px);width:286px;padding:7px 9px;border-radius:7px;background:#1a1b1e;border:1px solid var(--acc);color:var(--txt);font-size:10.5px;line-height:1.45;white-space:normal;z-index:120;box-shadow:0 8px 24px #000b;pointer-events:none}
+.tip-wrap:hover::after{display:block}
+.create-card .cbody .tip-wrap input{width:100%}
 .chips{display:inline-flex;gap:4px;flex-wrap:wrap}
 .chip{font-size:9.5px;padding:1px 6px;border-radius:8px;background:#3a3b40;color:#c2c2ca}
 .chip.acc{background:#4a3a28;color:var(--acc)}
@@ -175,14 +181,6 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index
       <div class="createbar">
         <span class="hint">Конструктор создаёт только метаданные: один файл на узел, без кода.</span>
         <span class="spacer"></span>
-        <select id="createKind">
-          <option value="endpoint">эндпоинт</option>
-          <option value="scenario">сценарий</option>
-          <option value="io">io</option>
-          <option value="model">модель</option>
-          <option value="test">тест</option>
-        </select>
-        <button id="addCreateNode" type="button">+ узел</button>
         <button id="createClear" type="button">Очистить</button>
         <button id="createSubmit" class="primary" type="button">Создать</button>
       </div>
@@ -219,6 +217,7 @@ let scenView={x:30,y:30,k:1},mapView={x:30,y:30,k:1},createView={x:30,y:30,k:1};
 let scenBoxes={},mapBoxes={};
 const mapPos=new Map(),scenPos=new Map(),periphPos=new Map(),listOpen=new Map();
 let scenPeripheralEdges=[];
+let incompleteZoneMoved=false;
 const mapFastbase={x:40,y:40},mapMethods=new Map(),scenZonePos=new Map();
 let justDraggedAt=0;
 const createState={nodes:[],edges:[],seq:1,zones:{}};
@@ -270,9 +269,9 @@ function cardHtml(n,opts={}){
   const cls=`card k-${n.kind}${opts.method?" method-"+opts.method.toLowerCase():""}${opts.nested?" nested":""}${selectedNode===n.id?" sel":""}`;
   return {cls,html:h,c};
 }
-function periphLayoutKey(pid){return `${selectedScenario}|${pid}`}
-function makeCard(n,x,y,opts={},parent=null){
-  const key=`${selectedScenario}|${n.id}`;
+function periphLayoutKey(scope,pid){return `${scope}|${pid}`}
+function makeCard(n,x,y,opts={},parent=null,scope=selectedScenario){
+  const key=`${scope}|${n.id}`;
   const saved=scenPos.get(key);
   if(saved){x=saved.x;y=saved.y}
   const spec=cardHtml(n,opts);
@@ -282,11 +281,11 @@ function makeCard(n,x,y,opts={},parent=null){
   e.onclick=ev=>{ev.stopPropagation();onCardClick(n.id)};
   (parent||$("scenStage")).appendChild(e);
   enableNodeDrag(e,"scen",key,x,y,scenView,
-    (nx,ny)=>scenMoveNode(e,key,nx,ny),
+    (nx,ny)=>scenMoveNode(e,key,scope,nx,ny),
     ()=>{recomputeScenarioSizes();redrawScenarioEdges()});
   return e;
 }
-function scenMoveNode(card,key,nx,ny){
+function scenMoveNode(card,key,scope,nx,ny){
   const zone=card.parentElement;if(!zone)return;
   const cx=Math.max(14,nx),cy=Math.max(34,ny);
   const oldX=parseFloat(card.style.left)||0,oldY=parseFloat(card.style.top)||0;
@@ -306,20 +305,41 @@ function scenMoveNode(card,key,nx,ny){
   periphs.forEach((pc,index)=>{
     const p=proposed[index+1];
     pc.style.left=p.x+"px";pc.style.top=p.y+"px";
-    periphPos.set(periphLayoutKey(pc.dataset.id),{x:p.x,y:p.y});
+    periphPos.set(periphLayoutKey(scope,pc.dataset.id),{x:p.x,y:p.y});
   });
   recomputeScenarioSizes();redrawScenarioEdges();
 }
-function scenMovePeriph(card,key,nx,ny){
+function scenMovePeriph(card,key,scope,nx,ny){
   const zone=card.parentElement;if(!zone)return;
   const cx=Math.max(14,nx),cy=Math.max(34,ny);
   if(proposedOverlap(zone,[card],[{el:card,x:cx,y:cy}]))return;
   if(zoneOverlaps(zone,proposedZoneRect(zone,areaSize(zone,new Map([[card,{x:cx,y:cy}]]))),scenZones()))return;
   card.style.left=cx+"px";card.style.top=cy+"px";
-  periphPos.set(periphLayoutKey(card.dataset.id),{x:cx,y:cy});
+  periphPos.set(periphLayoutKey(scope,card.dataset.id),{x:cx,y:cy});
   recomputeScenarioSizes();redrawScenarioEdges();
 }
 function scenZones(){return[...$("scenStage").querySelectorAll(".scen-zone")]}
+function incompleteNodes(){
+  const nodes=G.nodes||[];
+  const endpoints=nodes.filter(n=>n.kind==="endpoint").map(n=>n.id);
+  const adjacency=new Map();
+  (G.edges||[]).forEach(edge=>{
+    if(!adjacency.has(edge.from_node))adjacency.set(edge.from_node,new Set());
+    if(!adjacency.has(edge.to_node))adjacency.set(edge.to_node,new Set());
+    adjacency.get(edge.from_node).add(edge.to_node);
+    adjacency.get(edge.to_node).add(edge.from_node);
+  });
+  const seen=new Set(endpoints);
+  const queue=[...endpoints];
+  while(queue.length){
+    const id=queue.shift();
+    for(const next of adjacency.get(id)||[]){
+      if(seen.has(next))continue;
+      seen.add(next);queue.push(next);
+    }
+  }
+  return nodes.filter(n=>!seen.has(n.id));
+}
 function onCardClick(id){
   if(Date.now()-justDraggedAt<250)return;
   const n=byId[id];if(!n)return;
@@ -417,6 +437,19 @@ function fitView(canvas,view,apply){
   const w=stage.offsetWidth||1,h=stage.offsetHeight||1;
   const k=Math.min(2,Math.max(.2,Math.min((cw-60)/w,(ch-60)/h)));
   view.k=k;view.x=(cw-w*k)/2;view.y=(ch-h*k)/2;apply();
+}
+function revealElement(canvas,view,el,apply){
+  const stage=canvas.querySelector(".stage");
+  if(!stage||!el)return;
+  const p=offsetInStage(el,stage);
+  const w=el.offsetWidth||1,h=el.offsetHeight||1;
+  const cw=canvas.clientWidth,ch=canvas.clientHeight,margin=40;
+  const left=-view.x/(view.k||1),top=-view.y/(view.k||1);
+  const right=left+cw/(view.k||1),bottom=top+ch/(view.k||1);
+  if(p.x>=left+margin&&p.y>=top+margin&&p.x+w<=right-margin&&p.y+h<=bottom-margin)return;
+  view.x=cw/2-(p.x+w/2)*(view.k||1);
+  view.y=ch/2-(p.y+h/2)*(view.k||1);
+  apply();
 }
 function sizeStage(stage,svg){
   let w=900,h=600;
@@ -683,6 +716,30 @@ function fillScenarioSelect(){
     });
     list.appendChild(mDet);
   });
+  const incomplete=incompleteNodes();
+  const incDet=document.createElement("details");
+  incDet.dataset.key="incomplete";incDet.dataset.level="method";
+  incDet.open=listOpen.has("incomplete")?listOpen.get("incomplete"):true;
+  const incSum=document.createElement("summary");
+  incSum.innerHTML=`Неполные <span class="hint">· ${incomplete.length}</span>`;
+  incDet.appendChild(incSum);
+  if(!incomplete.length){
+    const empty=document.createElement("div");empty.className="hint";empty.style.padding="3px 8px 4px 14px";empty.textContent="(нет)";
+    incDet.appendChild(empty);
+  }
+  incomplete.slice().sort((a,b)=>KIND_NAMES[a.kind].localeCompare(KIND_NAMES[b.kind])||a.label.localeCompare(b.label)).forEach(n=>{
+    const e=document.createElement("div");
+    e.className="sitem";e.title=n.id;
+    e.innerHTML=`<span class="hint">${esc(KIND_NAMES[n.kind]||n.kind)}</span> · ${esc(n.label)}`;
+    e.onclick=()=>focusIncompleteNode(n.id);
+    incDet.appendChild(e);
+  });
+  list.appendChild(incDet);
+}
+function focusIncompleteNode(id){
+  selectedNode=id;renderScenario();renderInspector();
+  const el=[...document.querySelectorAll("#scenStage .card[data-id]")].find(e=>e.dataset.id===id);
+  if(el)revealElement($("scenCanvas"),scenView,el,()=>applyTransform("scenView",scenView));
 }
 function scenarioEdges(ids){
   const set=new Set(ids);
@@ -702,12 +759,12 @@ function recomputeScenarioSizes(){
   });
   sizeStage(stage,svg);
 }
-function renderPeripherals(zone,parentCard,node){
+function renderPeripherals(zone,parentCard,node,scope){
   let cursor=(parseFloat(parentCard.style.top)||0)+parentCard.offsetHeight+10;
   const left=(parseFloat(parentCard.style.left)||0)+18;
   (node.peripherals||[]).forEach((item,index)=>{
     const pid=`periph:${node.id}:${index}`;
-    const key=periphLayoutKey(pid);
+    const key=periphLayoutKey(scope,pid);
     const saved=periphPos.get(key);
     const x=saved?saved.x:left;
     const y=saved?saved.y:cursor;
@@ -720,7 +777,7 @@ function renderPeripherals(zone,parentCard,node){
     pc.onclick=ev=>{ev.stopPropagation();if(Date.now()-justDraggedAt<250)return;selectedNode=node.id;renderScenario();renderInspector()};
     zone.appendChild(pc);
     enableNodeDrag(pc,"scen",key,x,y,scenView,
-      (nx,ny)=>scenMovePeriph(pc,key,nx,ny),
+      (nx,ny)=>scenMovePeriph(pc,key,scope,nx,ny),
       ()=>{recomputeScenarioSizes();redrawScenarioEdges()});
     scenPeripheralEdges.push({
       from_node:node.id,
@@ -742,14 +799,14 @@ function renderScenario(){
   if(!selectedScenario)selectedScenario=G.scenarios[0];
   const path=G.scenario_paths[selectedScenario];
   if(!path){const e=document.createElement("div");e.className="empty";e.textContent="У сценария нет пути.";stage.appendChild(e);applyTransform("scenView",scenView);return}
-  const defs=[["endpoint","эндпоинт",30],["scenario","сценарий",380],["io","io",730],["model","модель",1080],["tests","тесты",1430]];
+  const defs=[["endpoint","эндпоинт",30],["scenario","сценарий",380],["io","io",730],["model","модель",1080],["tests","тесты",1430],["incomplete","неполные",30]];
   const layers={};
   defs.forEach(([kind,title,defaultX])=>{
     const zone=document.createElement("div");
     zone.className="zone scen-zone";zone.dataset.layer=kind;
-    const key=`${selectedScenario}|zone|${kind}`;
+    const key=kind==="incomplete"?"incomplete|zone":`${selectedScenario}|zone|${kind}`;
     let pos=scenZonePos.get(key);
-    if(!pos){pos={x:defaultX,y:40};scenZonePos.set(key,pos)}
+    if(!pos){pos={x:defaultX,y:kind==="incomplete"?620:40};scenZonePos.set(key,pos)}
     zone.style.left=pos.x+"px";zone.style.top=pos.y+"px";
     zone.style.width="240px";zone.style.height="70px";
     const lab=document.createElement("div");lab.className="zlab";
@@ -761,7 +818,9 @@ function renderScenario(){
         const rect={x:cx,y:cy,w:zone.offsetWidth,h:zone.offsetHeight};
         if(zoneOverlaps(zone,rect,scenZones()))return;
         zone.style.left=cx+"px";zone.style.top=cy+"px";
-        scenZonePos.set(key,{x:cx,y:cy});redrawScenarioEdges();
+        scenZonePos.set(key,{x:cx,y:cy});
+        if(kind==="incomplete")incompleteZoneMoved=true;
+        redrawScenarioEdges();
       },
       ()=>{
         scenZonePos.set(key,{x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0});
@@ -769,15 +828,15 @@ function renderScenario(){
       });
   });
   const nextY={};
-  const add=(id,layer,x,y,opts)=>{
+  const add=(id,layer,x,y,opts,scope)=>{
     if(!id||!byId[id])return null;
-    const card=makeCard(byId[id],x,y,opts,layers[layer]);
-    renderPeripherals(layers[layer],card,byId[id]);
+    const card=makeCard(byId[id],x,y,opts,layers[layer],scope);
+    renderPeripherals(layers[layer],card,byId[id],scope);
     return card;
   };
   const stack=(id,layer,opts)=>{
     const y=nextY[layer]===undefined?38:nextY[layer];
-    const card=add(id,layer,14,y,opts);
+    const card=add(id,layer,14,y,opts,selectedScenario);
     if(card){
       let bottom=(parseFloat(card.style.top)||y)+card.offsetHeight;
       layers[layer].querySelectorAll(".periph-node").forEach(pc=>{
@@ -789,15 +848,31 @@ function renderScenario(){
   };
   if(path.endpoint){
     stack(path.endpoint,"endpoint",{});
+    stack(path.scenario,"scenario",{});
+    (path.called_scenarios||[]).forEach(id=>{if(id!==selectedScenario)stack(id,"scenario",{nested:true})});
+    (path.io_calls||[]).forEach(id=>stack(id,"io",{}));
+    (path.models||[]).forEach(id=>stack(id,"model",{}));
+    (path.tests||[]).forEach(id=>stack(id,"tests",{}));
   }else{
     const note=document.createElement("div");note.className="hint";note.style.position="absolute";note.style.left="14px";note.style.top="42px";
-    note.textContent="нет эндпоинта";layers.endpoint.appendChild(note);
+    note.textContent="нет эндпоинта — смотрите область «неполные»";layers.endpoint.appendChild(note);
   }
-  stack(path.scenario,"scenario",{});
-  (path.called_scenarios||[]).forEach(id=>{if(id!==selectedScenario)stack(id,"scenario",{nested:true})});
-  (path.io_calls||[]).forEach(id=>stack(id,"io",{}));
-  (path.models||[]).forEach(id=>stack(id,"model",{}));
-  (path.tests||[]).forEach(id=>stack(id,"tests",{}));
+  const columnX={scenario:14,io:330,model:646,test:962,endpoint:14};
+  const columnY={};
+  incompleteNodes()
+    .slice()
+    .sort((a,b)=>(KIND_NAMES[a.kind]||"").localeCompare(KIND_NAMES[b.kind]||"")||a.label.localeCompare(b.label))
+    .forEach(n=>{
+      const layer=layers.incomplete;
+      const x=columnX[n.kind]!==undefined?columnX[n.kind]:14;
+      const y=columnY[n.kind]===undefined?38:columnY[n.kind];
+      const card=add(n.id,"incomplete",x,y,{}, "incomplete");
+      let bottom=(parseFloat(card.style.top)||y)+card.offsetHeight;
+      layer.querySelectorAll(".periph-node").forEach(pc=>{
+        if(pc.dataset.parentId===card.dataset.id)bottom=Math.max(bottom,(parseFloat(pc.style.top)||0)+pc.offsetHeight);
+      });
+      columnY[n.kind]=bottom+12;
+    });
   defs.forEach(([kind])=>{
     const zone=layers[kind];
     const count=zone.querySelectorAll(".card[data-id]").length;
@@ -805,6 +880,18 @@ function renderScenario(){
     if(hint)hint.textContent="· "+count;
   });
   recomputeScenarioSizes();
+  if(!incompleteZoneMoved){
+    let bottom=40;
+    defs.forEach(([kind])=>{
+      if(kind==="incomplete")return;
+      const zone=layers[kind];
+      bottom=Math.max(bottom,(parseFloat(zone.style.top)||0)+zone.offsetHeight);
+    });
+    layers.incomplete.style.left="30px";
+    layers.incomplete.style.top=(bottom+40)+"px";
+    scenZonePos.set("incomplete|zone",{x:30,y:bottom+40});
+    recomputeScenarioSizes();
+  }
   redrawScenarioEdges();
   applyTransform("scenView",scenView);
   renderInspector();
@@ -936,8 +1023,9 @@ function renderCreateGraph(){
     zone.style.left=pos.x+"px";zone.style.top=pos.y+"px";
     zone.style.width="240px";zone.style.height="70px";
     const lab=document.createElement("div");lab.className="zlab";
-    lab.innerHTML=`<span class="grip" title="перетащить">⠿</span>${esc(title)} <span class="hint">· 0</span>`;
+    lab.innerHTML=`<span class="grip" title="перетащить">⠿</span>${esc(title)} <span class="hint">· 0</span><button type="button" class="zone-add" data-kind="${kind}" title="Добавить узел">+</button>`;
     zone.appendChild(lab);stage.appendChild(zone);zones[kind]=zone;
+    lab.querySelector(".zone-add").onclick=ev=>{ev.stopPropagation();addCreateNode(kind)};
     enableZoneDrag(zone,createView,
       (nx,ny)=>{
         const cx=Math.max(10,nx),cy=Math.max(10,ny);
@@ -970,9 +1058,9 @@ function createCardElement(node,zone){
   e.className=`card create-card k-${node.kind}`;
   e.dataset.cid=node.id;e.dataset.kind=node.kind;
   e.style.left=node.x+"px";e.style.top=node.y+"px";
-  const http=String((node.details||{}).http_method||"post").toUpperCase();
+  const http=String((node.details||{}).http_method||"").toUpperCase();
   const extra=node.kind==="endpoint"
-    ? `<label>HTTP и путь</label><div class="two"><select data-f="http">${["GET","POST","PUT","PATCH","DELETE"].map(m=>`<option ${m===http?"selected":""}>${m}</option>`).join("")}</select><input data-f="path" value="${esc((node.details||{}).path||"")}" placeholder="/path"></div>`+
+    ? `<label>HTTP и путь (необязательно)</label><div class="two"><select data-f="http"><option value="" ${http===""?"selected":""}>не указан</option>${["GET","POST","PUT","PATCH","DELETE"].map(m=>`<option value="${m}" ${m===http?"selected":""}>${m}</option>`).join("")}</select><input data-f="path" value="${esc((node.details||{}).path||"")}" placeholder="/path (необязательно)"></div>`+
       `<label>Домен</label><input data-f="domain" value="${esc(node.domain||"")}" placeholder="orders">`
     : node.kind==="io"
       ? `<label>Сценарий (class name)</label><input data-f="scenario" value="${esc((node.details||{}).scenario||"")}" placeholder="CreateOrderScenario">`
@@ -980,7 +1068,7 @@ function createCardElement(node,zone){
   e.innerHTML=`<div class="hd"><span class="grip" title="перетащить">⠿</span><span class="chip">${esc(KIND_NAMES[node.kind]||node.kind)}</span><span class="t">${esc(createNodeLabel(node))}</span><button type="button" class="del" title="удалить узел">×</button></div>`+
     `<div class="cbody">`+
       `<label>Вид узла</label><select data-f="kind">${CREATE_KINDS.map(k=>`<option value="${k}" ${k===node.kind?"selected":""}>${KIND_NAMES[k]}</option>`).join("")}</select>`+
-      `<label>Имя / якорь</label><input data-f="name" value="${esc(node.name||"")}" placeholder="имя элемента кода">`+
+      `<label>Имя / якорь</label><div class="tip-wrap" data-tip="Имя элемента кода, к которому привяжутся метаданные: функция для эндпоинта, класс для сценария/модели, тест-функция для теста, метод порта для io. Когда код появится, узел будет найден по этому имени."><input data-f="name" value="${esc(node.name||"")}" placeholder="имя элемента кода"></div>`+
       `<label>Описание</label><textarea data-f="description" rows="2" placeholder="описание узла">${esc(node.description||"")}</textarea>`+
       `<label>Критерии приёмки (по одной на строку)</label><textarea data-f="acceptance" rows="2" placeholder="- критерий">${esc(node.acceptance||"")}</textarea>`+
       extra+
@@ -1040,15 +1128,17 @@ function nextCreateY(kind){
   }
   return y;
 }
-function addCreateNode(){
-  const kind=($("createKind")&&$("createKind").value)||"scenario";
+function addCreateNode(kind){
+  if(!CREATE_KINDS.includes(kind))return;
   const node={
     id:"c"+(createState.seq++),kind,name:"",description:"",acceptance:"",domain:"",
-    details:{http_method:"post",path:"",scenario:""},
+    details:{http_method:"",path:"",scenario:""},
     x:14,y:nextCreateY(kind)
   };
   createState.nodes.push(node);
   renderCreateGraph();
+  const card=[...document.querySelectorAll("#createStage .create-card[data-cid]")].find(c=>c.dataset.cid===node.id);
+  if(card)revealElement($("createCanvas"),createView,card,()=>applyTransform("createView",createView));
 }
 function deleteCreateNode(id){
   createState.nodes=createState.nodes.filter(n=>n.id!==id);
@@ -1173,7 +1263,6 @@ async function boot(){
     try{applyGraph(await api("/api/rescan","POST",{}));if(tab==="map")renderMap();else if(tab==="scenario")renderScenario();toast("карта обновлена")}
     catch(e){toast("ошибка скана: "+e.message)}
   };
-  $("addCreateNode").onclick=addCreateNode;
   $("createClear").onclick=()=>{
     if(!createState.nodes.length)return;
     if(!confirm("Очистить предпросмотр? Файлы ещё не созданы."))return;

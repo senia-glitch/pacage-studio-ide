@@ -80,3 +80,22 @@ def test_пустой_клик_и_esc_снимают_выделение():
     assert 'ev.key==="Escape"' in HTML
     assert "selectedNode=null" in HTML
 
+
+def test_добавление_узлов_из_областей():
+    assert 'class="zone-add"' in HTML
+    assert "addCreateNode(kind)" in HTML
+    assert 'id="createKind"' not in HTML
+    assert 'id="addCreateNode"' not in HTML
+
+
+def test_подсказка_к_имени_якорю():
+    assert "tip-wrap" in HTML
+    assert "Имя элемента кода" in HTML
+
+
+def test_раздел_неполных():
+    assert "incompleteNodes" in HTML
+    assert "Неполные" in HTML
+    assert 'data-layer="incomplete"' in HTML or '"incomplete","неполные"' in HTML
+
+
