@@ -71,7 +71,8 @@ def test_области_и_периферийные_узлы():
     assert "map-method" in HTML
     assert "scen-zone" in HTML
     assert "create-zone" in HTML
-    assert "periph-card" in HTML
+    assert "periph-node" in HTML
+    assert "scenPeripheralEdges" in HTML
     assert "enableZoneDrag" in HTML
 
 

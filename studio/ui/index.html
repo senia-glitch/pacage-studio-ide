@@ -42,13 +42,19 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index
 .zone.map-method{background:rgba(120,130,160,.055)}
 .zone.scen-zone{background:rgba(120,130,160,.045)}
 .zone.create-zone{background:rgba(120,130,160,.045)}
-.periph-card{position:absolute;width:232px;background:#2a2b30;border:1px dashed #5a6478;border-radius:8px;padding:4px 8px;font-size:10.5px;color:#b8b8c0;z-index:2;pointer-events:none}
-.periph-card .ph{font-weight:700;font-size:10px;color:#d7d7db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.periph-card .pf{font-size:9.5px;color:#8a8b93;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card{position:absolute;width:var(--w);background:#313236;border:1px solid var(--line);border-radius:10px;box-shadow:0 4px 14px #0008;user-select:none;cursor:pointer;transition:border-color .12s,box-shadow .12s;z-index:3}
 .card:hover{border-color:var(--acc);box-shadow:0 6px 20px #000c}
 .card.sel{outline:2px solid var(--acc)}
 .card .hd{padding:6px 9px;font-weight:700;border-bottom:2px solid var(--c,#888);background:rgba(255,255,255,.03);border-radius:10px 10px 0 0;display:flex;gap:6px;align-items:center;min-width:0}
+.card .hd .grip,.zone .zlab .grip{flex:none;color:#8a8b93;cursor:grab;font-size:12px;line-height:1;letter-spacing:0;user-select:none}
+.card .hd,.zone .zlab{touch-action:none}
+.card .hd .grip:hover,.zone .zlab .grip:hover{color:var(--acc)}
+.card.dragging,.zone.zone-dragging,.zone.dragging{opacity:.96;box-shadow:0 10px 30px #000c;z-index:60!important}
+.card.dragging{cursor:grabbing}
+.periph-node{width:252px;background:#2a2b30}
+.periph-node .hd{border-bottom-color:#5a6478}
+.periph-node .hd .chip{background:#3f4046;color:#b8b8c0}
+.periph-node .mt{white-space:normal;line-height:1.35}
 .card .hd .chip{flex:none;font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:#c9c9d0;background:#3a3b40;border-radius:3px;padding:0 4px}
 .card .hd .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .card .mt{padding:5px 9px 6px;font-size:10.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -211,7 +217,8 @@ const CREATE_LAYER_X={endpoint:40,scenario:400,io:760,model:1120,test:1480};
 let G=null,byId={},tab="map",selectedScenario=null,selectedNode=null,hideMeta=false;
 let scenView={x:30,y:30,k:1},mapView={x:30,y:30,k:1},createView={x:30,y:30,k:1};
 let scenBoxes={},mapBoxes={};
-const mapPos=new Map(),scenPos=new Map(),listOpen=new Map();
+const mapPos=new Map(),scenPos=new Map(),periphPos=new Map(),listOpen=new Map();
+let scenPeripheralEdges=[];
 const mapFastbase={x:40,y:40},mapMethods=new Map(),scenZonePos=new Map();
 let justDraggedAt=0;
 const createState={nodes:[],edges:[],seq:1,zones:{}};
@@ -247,7 +254,7 @@ function nodeMeta(n){
 }
 function cardHtml(n,opts={}){
   const c=opts.method?METHOD_COLORS[opts.method]:KIND_COLORS[n.kind]||"#888";
-  let h=`<div class="hd"><span class="chip">${esc(KIND_NAMES[n.kind]||n.kind)}</span><span class="t">${esc(n.label)}</span></div>`;
+  let h=`<div class="hd"><span class="grip" title="перетащить">⠿</span><span class="chip">${esc(KIND_NAMES[n.kind]||n.kind)}</span><span class="t">${esc(n.label)}</span></div>`;
   h+=`<div class="mt">${esc(nodeMeta(n))}</div>`;
   if(!hideMeta){
     if(n.description){
@@ -263,6 +270,7 @@ function cardHtml(n,opts={}){
   const cls=`card k-${n.kind}${opts.method?" method-"+opts.method.toLowerCase():""}${opts.nested?" nested":""}${selectedNode===n.id?" sel":""}`;
   return {cls,html:h,c};
 }
+function periphLayoutKey(pid){return `${selectedScenario}|${pid}`}
 function makeCard(n,x,y,opts={},parent=null){
   const key=`${selectedScenario}|${n.id}`;
   const saved=scenPos.get(key);
@@ -273,50 +281,45 @@ function makeCard(n,x,y,opts={},parent=null){
   e.innerHTML=spec.html;
   e.onclick=ev=>{ev.stopPropagation();onCardClick(n.id)};
   (parent||$("scenStage")).appendChild(e);
-  let last={x,y};
   enableNodeDrag(e,"scen",key,x,y,scenView,
-    (nx,ny)=>{
-      const cx=Math.max(14,nx),cy=Math.max(34,ny);
-      const oldX=parseFloat(e.style.left)||0,oldY=parseFloat(e.style.top)||0;
-      e.style.left=cx+"px";e.style.top=cy+"px";
-      movePeripherals(parent||$("scenStage"),n.id,cx-oldX,cy-oldY);
-      if(scenNodeOverlap(e)){
-        e.style.left=last.x+"px";e.style.top=last.y+"px";
-        movePeripherals(parent||$("scenStage"),n.id,last.x-cx,last.y-cy);
-        return;
-      }
-      last={x:cx,y:cy};
-      scenPos.set(key,last);
-      recomputeScenarioSizes();
-      redrawScenarioEdges();
-    },
-    ()=>{
-      scenPos.set(key,last);
-      settleZoneOverlaps(scenZones(),zone=>{
-        const layer=zone.dataset.layer;
-        scenZonePos.set(`${selectedScenario}|zone|${layer}`,{x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0});
-      });
-      recomputeScenarioSizes();redrawScenarioEdges();
-    });
+    (nx,ny)=>scenMoveNode(e,key,nx,ny),
+    ()=>{recomputeScenarioSizes();redrawScenarioEdges()});
   return e;
 }
-function movePeripherals(zone,parentId,dx,dy){
-  zone.querySelectorAll(".periph-card").forEach(pc=>{
-    if(pc.dataset.parent!==parentId)return;
-    pc.style.left=(parseFloat(pc.style.left)||0)+dx+"px";
-    pc.style.top=(parseFloat(pc.style.top)||0)+dy+"px";
+function scenMoveNode(card,key,nx,ny){
+  const zone=card.parentElement;if(!zone)return;
+  const cx=Math.max(14,nx),cy=Math.max(34,ny);
+  const oldX=parseFloat(card.style.left)||0,oldY=parseFloat(card.style.top)||0;
+  const dx=cx-oldX,dy=cy-oldY;
+  const moving=[card],proposed=[{el:card,x:cx,y:cy}];
+  const periphs=[...zone.querySelectorAll(".periph-node")].filter(pc=>pc.dataset.parentId===card.dataset.id);
+  for(const pc of periphs){
+    const px=(parseFloat(pc.style.left)||0)+dx,py=(parseFloat(pc.style.top)||0)+dy;
+    if(px<14||py<34)return;
+    moving.push(pc);proposed.push({el:pc,x:px,y:py});
+  }
+  if(proposedOverlap(zone,moving,proposed))return;
+  const overrides=new Map(proposed.map(p=>[p.el,{x:p.x,y:p.y}]));
+  if(zoneOverlaps(zone,proposedZoneRect(zone,areaSize(zone,overrides)),scenZones()))return;
+  card.style.left=cx+"px";card.style.top=cy+"px";
+  scenPos.set(key,{x:cx,y:cy});
+  periphs.forEach((pc,index)=>{
+    const p=proposed[index+1];
+    pc.style.left=p.x+"px";pc.style.top=p.y+"px";
+    periphPos.set(periphLayoutKey(pc.dataset.id),{x:p.x,y:p.y});
   });
+  recomputeScenarioSizes();redrawScenarioEdges();
 }
-function scenNodeOverlap(card){
-  const zone=card.parentElement;if(!zone)return false;
-  const r=styleRect(card);
-  return[...zone.querySelectorAll(".card[data-id]")].some(other=>other!==card&&rectsOverlap(r,styleRect(other),8));
+function scenMovePeriph(card,key,nx,ny){
+  const zone=card.parentElement;if(!zone)return;
+  const cx=Math.max(14,nx),cy=Math.max(34,ny);
+  if(proposedOverlap(zone,[card],[{el:card,x:cx,y:cy}]))return;
+  if(zoneOverlaps(zone,proposedZoneRect(zone,areaSize(zone,new Map([[card,{x:cx,y:cy}]]))),scenZones()))return;
+  card.style.left=cx+"px";card.style.top=cy+"px";
+  periphPos.set(periphLayoutKey(card.dataset.id),{x:cx,y:cy});
+  recomputeScenarioSizes();redrawScenarioEdges();
 }
 function scenZones(){return[...$("scenStage").querySelectorAll(".scen-zone")]}
-function scenZoneOverlap(zone){
-  const r=styleRect(zone);
-  return scenZones().some(other=>other!==zone&&rectsOverlap(r,styleRect(other),8));
-}
 function onCardClick(id){
   if(Date.now()-justDraggedAt<250)return;
   const n=byId[id];if(!n)return;
@@ -366,60 +369,46 @@ function bindViewport(canvasId,view,apply){
 function applyTransform(viewId,view){const v=$(viewId);if(v)v.style.transform=`translate(${view.x}px,${view.y}px) scale(${view.k})`;$("zoomLabel").textContent=Math.round(view.k*100)+"%"}
 
 /* ---------- перемещение узлов ---------- */
-function enableZoneDrag(zone,view,onMove,onEnd){
-  const handle=zone.querySelector(".zlab");
+/* ---------- единый контроллер перемещения ---------- */
+function bindDrag(el,handle,view,onMove,onEnd){
   if(!handle)return;
-  handle.addEventListener("mousedown",ev=>{
+  handle.addEventListener("pointerdown",ev=>{
     if(ev.button!==0)return;
+    if(el.classList.contains("dragging"))return;
+    if(ev.target.closest("button,input,select,textarea,.connector,.no-drag"))return;
     ev.preventDefault();ev.stopPropagation();
+    try{handle.setPointerCapture(ev.pointerId)}catch(_){}
     const sx=ev.clientX,sy=ev.clientY;
-    const left=parseFloat(zone.style.left)||0,top=parseFloat(zone.style.top)||0;
+    const startX=parseFloat(el.style.left)||0,startY=parseFloat(el.style.top)||0;
     let moved=false;
-    zone.classList.add("zone-dragging");
+    el.classList.add("dragging");
     const move=e=>{
-      const dx=(e.clientX-sx)/(view.k||1),dy=(e.clientY-sy)/(view.k||1);
-      if(Math.abs(dx)+Math.abs(dy)>2)moved=true;
-      const nx=left+dx,ny=top+dy;
-      zone.style.left=nx+"px";zone.style.top=ny+"px";
+      const nx=startX+(e.clientX-sx)/(view.k||1);
+      const ny=startY+(e.clientY-sy)/(view.k||1);
+      if(Math.abs(e.clientX-sx)+Math.abs(e.clientY-sy)>2)moved=true;
       onMove(nx,ny);
     };
     const up=()=>{
-      window.removeEventListener("mousemove",move);
-      window.removeEventListener("mouseup",up);
-      zone.classList.remove("zone-dragging");
+      handle.removeEventListener("pointermove",move);
+      handle.removeEventListener("pointerup",up);
+      handle.removeEventListener("pointercancel",up);
+      try{handle.releasePointerCapture(ev.pointerId)}catch(_){}
+      el.classList.remove("dragging");
       if(moved)justDraggedAt=Date.now();
-      if(onEnd)onEnd(left,top);
+      if(onEnd)onEnd(moved);
     };
-    window.addEventListener("mousemove",move);
-    window.addEventListener("mouseup",up);
+    handle.addEventListener("pointermove",move);
+    handle.addEventListener("pointerup",up);
+    handle.addEventListener("pointercancel",up);
   });
 }
-
+function enableZoneDrag(zone,view,onMove,onEnd){
+  const handle=zone.querySelector(".zlab");
+  bindDrag(zone,handle,view,onMove,()=>onEnd&&onEnd());
+}
 function enableNodeDrag(card,scope,key,x,y,view,onMove,onEnd){
-  const hd=card.querySelector(".hd");
-  if(!hd)return;
-  hd.addEventListener("mousedown",ev=>{
-    if(ev.button!==0)return;
-    if(ev.target.closest("button,input,select,textarea,.connector"))return;
-    ev.preventDefault();ev.stopPropagation();
-    const sx=ev.clientX,sy=ev.clientY;
-    let moved=false;
-    const move=e=>{
-      const dx=(e.clientX-sx)/(view.k||1),dy=(e.clientY-sy)/(view.k||1);
-      if(Math.abs(dx)+Math.abs(dy)>2)moved=true;
-      const nx=x+dx,ny=y+dy;
-      card.style.left=nx+"px";card.style.top=ny+"px";
-      onMove(nx,ny);
-    };
-    const up=()=>{
-      window.removeEventListener("mousemove",move);
-      window.removeEventListener("mouseup",up);
-      if(moved)justDraggedAt=Date.now();
-      if(onEnd)onEnd(x,y);
-    };
-    window.addEventListener("mousemove",move);
-    window.addEventListener("mouseup",up);
-  });
+  const handle=card.querySelector(".hd");
+  bindDrag(card,handle,view,onMove,()=>onEnd&&onEnd());
 }
 function fitView(canvas,view,apply){
   const stage=canvas.querySelector(".stage");
@@ -452,7 +441,8 @@ function drawEdges(svg,boxes,edges){
     const x1=a.x+a.w,y1=a.y+a.h/2,x2=b.x-6,y2=b.y+b.h/2;
     const d=`M${x1},${y1} C${(x1+x2)/2},${y1} ${(x1+x2)/2},${y2} ${x2},${y2}`;
     const mx=(x1+x2)/2,my=(y1+y2)/2-5;
-    return `<path d="${d}" fill="none" stroke="${EDGE_COLORS[e.kind]||"#9a9aa2"}" stroke-width="1.7" marker-end="url(#ar-${e.kind})"/>`+
+    const dash=e.kind==="uses"||e.kind==="depends"?' stroke-dasharray="6,4"':"";
+    return `<path d="${d}" fill="none" stroke="${EDGE_COLORS[e.kind]||"#9a9aa2"}" stroke-width="1.7"${dash} marker-end="url(#ar-${e.kind})"/>`+
       `<text class="elab" x="${mx}" y="${my}" text-anchor="middle">${esc(EDGE_NAMES[e.kind]||e.kind)}</text>`;
   }).join("");
   svg.innerHTML=defs+paths;
@@ -473,21 +463,30 @@ function measure(stage){
 function rectsOverlap(a,b,pad=6){
   return a.x<b.x+b.w+pad&&a.x+a.w+pad>b.x&&a.y<b.y+b.h+pad&&a.y+a.h+pad>b.y;
 }
-function settleZoneOverlaps(zones,update,gap=10){
-  const ordered=zones.slice().sort((a,b)=>{const ra=styleRect(a),rb=styleRect(b);return ra.x-rb.x||ra.y-rb.y});
-  let changed=true,guard=0;
-  while(changed&&guard++<20){
-    changed=false;
-    for(let i=0;i<ordered.length;i++){
-      for(let j=i+1;j<ordered.length;j++){
-        const a=styleRect(ordered[i]),b=styleRect(ordered[j]);
-        if(!rectsOverlap(a,b,gap))continue;
-        ordered[j].style.left=(a.x+a.w+gap)+"px";
-        if(update)update(ordered[j]);
-        changed=true;
-      }
-    }
-  }
+function areaSize(zone,overrides){
+  let w=240,h=70;
+  zone.querySelectorAll(".card[data-id],.create-card[data-cid]").forEach(el=>{
+    const ov=overrides&&overrides.get(el);
+    const x=ov?ov.x:(parseFloat(el.style.left)||0);
+    const y=ov?ov.y:(parseFloat(el.style.top)||0);
+    w=Math.max(w,x+el.offsetWidth+14);
+    h=Math.max(h,y+el.offsetHeight+14);
+  });
+  return{w,h};
+}
+function proposedOverlap(zone,movingEls,proposed){
+  const moving=new Set(movingEls);
+  const others=[...zone.querySelectorAll(".card[data-id],.create-card[data-cid]")].filter(el=>!moving.has(el));
+  return proposed.some(p=>{
+    const a={x:p.x,y:p.y,w:p.el.offsetWidth,h:p.el.offsetHeight};
+    return others.some(other=>rectsOverlap(a,styleRect(other),6));
+  });
+}
+function zoneOverlaps(zone,rect,zones){
+  return zones.some(other=>other!==zone&&rectsOverlap(rect,styleRect(other),10));
+}
+function proposedZoneRect(zone,size){
+  return{x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0,w:size.w,h:size.h};
 }
 
 /* ---------- Карта ---------- */
@@ -514,15 +513,6 @@ function recomputeMapSizes(){
   fast.style.width=fw+"px";fast.style.height=fh+"px";
   sizeStage(stage,svg);
 }
-function mapNodeOverlap(card){
-  const zone=card.closest(".map-method");if(!zone)return false;
-  const r=styleRect(card);
-  return[...zone.querySelectorAll(".card[data-id]")].some(other=>other!==card&&rectsOverlap(r,styleRect(other),8));
-}
-function mapZoneOverlap(zone){
-  const r=styleRect(zone);
-  return mapMethodZones().some(other=>other!==zone&&rectsOverlap(r,styleRect(other),10));
-}
 function renderMap(){
   const stage=$("mapStage"),svg=$("mapEdges");
   clearStage(stage,svg);mapBoxes={};
@@ -544,7 +534,7 @@ function renderMap(){
   fast.style.left=mapFastbase.x+"px";fast.style.top=mapFastbase.y+"px";
   fast.style.width="320px";fast.style.height="120px";
   const fastLab=document.createElement("div");fastLab.className="zlab";
-  fastLab.innerHTML='<b style="color:var(--acc)">fastbase</b>';fast.appendChild(fastLab);
+  fastLab.innerHTML='<span class="grip" title="перетащить">⠿</span><b style="color:var(--acc)">fastbase</b>';fast.appendChild(fastLab);
   stage.appendChild(fast);
 
   const zones={};
@@ -554,7 +544,7 @@ function renderMap(){
     zone.className="zone map-zone map-method";zone.dataset.method=method;
     zone.style.left="0px";zone.style.top="38px";zone.style.width="240px";zone.style.height="70px";
     const lab=document.createElement("div");lab.className="zlab";
-    lab.innerHTML=`<span class="method-dot" style="background:${METHOD_COLORS[method]||"#9a9aa2"}"></span>${esc(method)} <span class="hint">· ${items.length}</span>`;
+    lab.innerHTML=`<span class="grip" title="перетащить">⠿</span><span class="method-dot" style="background:${METHOD_COLORS[method]||"#9a9aa2"}"></span>${esc(method)} <span class="hint">· ${items.length}</span>`;
     zone.appendChild(lab);fast.appendChild(zone);zones[method]=zone;
     items.forEach((n,i)=>{
       const d=n.details||{};
@@ -564,32 +554,22 @@ function renderMap(){
       const lx=saved?saved.x:14+(i%2)*292;
       const ly=saved?saved.y:38+Math.floor(i/2)*94;
       card.style.left=lx+"px";card.style.top=ly+"px";
-      card.innerHTML=`<div class="hd"><span class="t">${esc(method)} ${esc(urlOfEndpoint(n))}</span></div>`+
+      card.innerHTML=`<div class="hd"><span class="grip" title="перетащить">⠿</span><span class="t">${esc(method)} ${esc(urlOfEndpoint(n))}</span></div>`+
         `<div class="mt">${esc(d.function_name||"")}</div>`;
       card.onclick=ev=>{ev.stopPropagation();if(Date.now()-justDraggedAt<250)return;openEndpointScenario(n.id)};
       zone.appendChild(card);
-      let last={x:lx,y:ly};
       enableNodeDrag(card,"map",n.id,lx,ly,mapView,
         (nx,ny)=>{
           const cx=Math.max(14,nx),cy=Math.max(38,ny);
+          const proposed=[{el:card,x:cx,y:cy}];
+          if(proposedOverlap(zone,[card],proposed))return;
+          const size=areaSize(zone,new Map([[card,{x:cx,y:cy}]]));
+          if(zoneOverlaps(zone,proposedZoneRect(zone,size),mapMethodZones()))return;
           card.style.left=cx+"px";card.style.top=cy+"px";
-          if(mapNodeOverlap(card)){
-            card.style.left=last.x+"px";card.style.top=last.y+"px";return;
-          }
-          last={x:cx,y:cy};
-          mapPos.set(n.id,last);recomputeMapSizes();
+          mapPos.set(n.id,{x:cx,y:cy});recomputeMapSizes();
         },
-        (startX,startY)=>{
-          if(mapNodeOverlap(card)){
-            card.style.left=last.x+"px";card.style.top=last.y+"px";
-            mapPos.set(n.id,last);toast("Узлы не могут пересекаться");
-          }else{
-            mapPos.set(n.id,{x:parseFloat(card.style.left)||0,y:parseFloat(card.style.top)||0});
-          }
-          settleZoneOverlaps(mapMethodZones(),zone=>{
-            const method=zone.dataset.method;
-            mapMethods.set(method,{x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0});
-          });
+        ()=>{
+          mapPos.set(n.id,{x:parseFloat(card.style.left)||0,y:parseFloat(card.style.top)||0});
           recomputeMapSizes();
         });
     });
@@ -605,29 +585,23 @@ function renderMap(){
   recomputeMapSizes();
   methods.forEach(method=>{
     const zone=zones[method];
-    let last={x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0};
     enableZoneDrag(zone,mapView,
       (nx,ny)=>{
         const cx=Math.max(16,nx),cy=Math.max(38,ny);
+        const rect={x:cx,y:cy,w:zone.offsetWidth,h:zone.offsetHeight};
+        if(zoneOverlaps(zone,rect,mapMethodZones()))return;
         zone.style.left=cx+"px";zone.style.top=cy+"px";
-        if(mapZoneOverlap(zone)){
-          zone.style.left=last.x+"px";zone.style.top=last.y+"px";return;
-        }
-        last={x:cx,y:cy};
-        mapMethods.set(method,last);recomputeMapSizes();
+        mapMethods.set(method,{x:cx,y:cy});recomputeMapSizes();
       },
       ()=>{
-        if(mapZoneOverlap(zone)){
-          zone.style.left=last.x+"px";zone.style.top=last.y+"px";
-          toast("Области не могут пересекаться");
-        }
-        mapMethods.set(method,last);recomputeMapSizes();
+        mapMethods.set(method,{x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0});
+        recomputeMapSizes();
       });
   });
   enableZoneDrag(fast,mapView,
     (nx,ny)=>{
       const cx=Math.max(20,nx),cy=Math.max(20,ny);
-      if(cx!==nx||cy!==ny){fast.style.left=cx+"px";fast.style.top=cy+"px"}
+      fast.style.left=cx+"px";fast.style.top=cy+"px";
       mapFastbase.x=cx;mapFastbase.y=cy;
     },
     ()=>{mapFastbase.x=parseFloat(fast.style.left)||40;mapFastbase.y=parseFloat(fast.style.top)||40;sizeStage(stage,svg)});
@@ -710,45 +684,57 @@ function fillScenarioSelect(){
     list.appendChild(mDet);
   });
 }
-function visibleEdges(ids){
+function scenarioEdges(ids){
   const set=new Set(ids);
-  return (G.edges||[]).filter(e=>set.has(e.from_node)&&set.has(e.to_node));
+  const base=(G.edges||[]).filter(e=>set.has(e.from_node)&&set.has(e.to_node));
+  return base.concat(scenPeripheralEdges.filter(e=>set.has(e.from_node)&&set.has(e.to_node)));
 }
 function redrawScenarioEdges(){
   const stage=$("scenStage"),svg=$("scenEdges");
   scenBoxes=measure(stage);
-  drawEdges(svg,scenBoxes,visibleEdges(Object.keys(scenBoxes)));
+  drawEdges(svg,scenBoxes,scenarioEdges(Object.keys(scenBoxes)));
 }
 function recomputeScenarioSizes(){
   const stage=$("scenStage"),svg=$("scenEdges");
   stage.querySelectorAll(".scen-zone").forEach(zone=>{
-    let w=240,h=70;
-    zone.querySelectorAll(".card[data-id],.periph-card").forEach(el=>{
-      const r=styleRect(el);
-      w=Math.max(w,r.x+r.w+14);h=Math.max(h,r.y+r.h+14);
-    });
-    zone.style.width=w+"px";zone.style.height=h+"px";
+    const size=areaSize(zone);
+    zone.style.width=size.w+"px";zone.style.height=size.h+"px";
   });
   sizeStage(stage,svg);
 }
 function renderPeripherals(zone,parentCard,node){
-  let cursor=(parseFloat(parentCard.style.top)||0)+parentCard.offsetHeight+8;
+  let cursor=(parseFloat(parentCard.style.top)||0)+parentCard.offsetHeight+10;
   const left=(parseFloat(parentCard.style.left)||0)+18;
-  (node.peripherals||[]).forEach(item=>{
+  (node.peripherals||[]).forEach((item,index)=>{
+    const pid=`periph:${node.id}:${index}`;
+    const key=periphLayoutKey(pid);
+    const saved=periphPos.get(key);
+    const x=saved?saved.x:left;
+    const y=saved?saved.y:cursor;
     const pc=document.createElement("div");
-    pc.className="periph-card";pc.dataset.parent=node.id;
-    pc.style.left=left+"px";pc.style.top=cursor+"px";
+    pc.className="card periph-node";pc.dataset.id=pid;pc.dataset.parentId=node.id;
+    pc.style.left=x+"px";pc.style.top=y+"px";pc.title=item.name||"";
     const symbols=(item.symbols||[]).join(", ");
-    pc.innerHTML=`<div class="ph">${esc(symbols||item.name||"")}</div>`+
-      `<div class="pf">${esc(ROLE_NAMES[item.role]||item.role||"")} · ${esc(item.name||"")}</div>`;
+    pc.innerHTML=`<div class="hd"><span class="grip" title="перетащить">⠿</span><span class="chip">периферийный</span><span class="t">${esc(symbols||item.name||"")}</span></div>`+
+      `<div class="mt">${esc(ROLE_NAMES[item.role]||item.role||"")} · ${esc(item.name||"")}</div>`;
+    pc.onclick=ev=>{ev.stopPropagation();if(Date.now()-justDraggedAt<250)return;selectedNode=node.id;renderScenario();renderInspector()};
     zone.appendChild(pc);
-    cursor+=pc.offsetHeight+6;
+    enableNodeDrag(pc,"scen",key,x,y,scenView,
+      (nx,ny)=>scenMovePeriph(pc,key,nx,ny),
+      ()=>{recomputeScenarioSizes();redrawScenarioEdges()});
+    scenPeripheralEdges.push({
+      from_node:node.id,
+      to_node:pid,
+      kind:item.role==="dependency"?"depends":"uses",
+      label:ROLE_NAMES[item.role]||item.role||"",
+    });
+    cursor=Math.max(cursor,y+pc.offsetHeight+8);
   });
 }
 function renderScenario(){
   fillScenarioSelect();
   const stage=$("scenStage"),svg=$("scenEdges");
-  clearStage(stage,svg);scenBoxes={};
+  clearStage(stage,svg);scenBoxes={};scenPeripheralEdges=[];
   if(!G.scenarios.length){
     const e=document.createElement("div");e.className="empty";e.innerHTML="Сценариев не найдено.<br>Запустите скан проекта.";stage.appendChild(e);
     stage.style.width="900px";stage.style.height="500px";applyTransform("scenView",scenView);renderInspector();return;
@@ -767,25 +753,18 @@ function renderScenario(){
     zone.style.left=pos.x+"px";zone.style.top=pos.y+"px";
     zone.style.width="240px";zone.style.height="70px";
     const lab=document.createElement("div");lab.className="zlab";
-    lab.innerHTML=`${esc(title)} <span class="hint">· 0</span>`;
+    lab.innerHTML=`<span class="grip" title="перетащить">⠿</span>${esc(title)} <span class="hint">· 0</span>`;
     zone.appendChild(lab);stage.appendChild(zone);layers[kind]=zone;
-    let last={x:pos.x,y:pos.y};
     enableZoneDrag(zone,scenView,
       (nx,ny)=>{
         const cx=Math.max(10,nx),cy=Math.max(10,ny);
+        const rect={x:cx,y:cy,w:zone.offsetWidth,h:zone.offsetHeight};
+        if(zoneOverlaps(zone,rect,scenZones()))return;
         zone.style.left=cx+"px";zone.style.top=cy+"px";
-        if(scenZoneOverlap(zone)){
-          zone.style.left=last.x+"px";zone.style.top=last.y+"px";return;
-        }
-        last={x:cx,y:cy};
-        scenZonePos.set(key,last);redrawScenarioEdges();
+        scenZonePos.set(key,{x:cx,y:cy});redrawScenarioEdges();
       },
       ()=>{
-        if(scenZoneOverlap(zone)){
-          zone.style.left=last.x+"px";zone.style.top=last.y+"px";
-          toast("Области не могут пересекаться");
-        }
-        scenZonePos.set(key,last);
+        scenZonePos.set(key,{x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0});
         recomputeScenarioSizes();redrawScenarioEdges();
       });
   });
@@ -799,7 +778,13 @@ function renderScenario(){
   const stack=(id,layer,opts)=>{
     const y=nextY[layer]===undefined?38:nextY[layer];
     const card=add(id,layer,14,y,opts);
-    if(card)nextY[layer]=(parseFloat(card.style.top)||y)+card.offsetHeight+12;
+    if(card){
+      let bottom=(parseFloat(card.style.top)||y)+card.offsetHeight;
+      layers[layer].querySelectorAll(".periph-node").forEach(pc=>{
+        if(pc.dataset.parentId===card.dataset.id)bottom=Math.max(bottom,(parseFloat(pc.style.top)||0)+pc.offsetHeight);
+      });
+      nextY[layer]=bottom+12;
+    }
     return card;
   };
   if(path.endpoint){
@@ -818,11 +803,6 @@ function renderScenario(){
     const count=zone.querySelectorAll(".card[data-id]").length;
     const hint=zone.querySelector(".zlab .hint");
     if(hint)hint.textContent="· "+count;
-  });
-  recomputeScenarioSizes();
-  settleZoneOverlaps(scenZones(),zone=>{
-    const layer=zone.dataset.layer;
-    scenZonePos.set(`${selectedScenario}|zone|${layer}`,{x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0});
   });
   recomputeScenarioSizes();
   redrawScenarioEdges();
@@ -900,25 +880,12 @@ function createBoxes(){
 function recomputeCreateSizes(){
   const stage=$("createStage"),svg=$("createEdges");
   stage.querySelectorAll(".create-zone").forEach(zone=>{
-    let w=240,h=70;
-    zone.querySelectorAll(".create-card[data-cid]").forEach(card=>{
-      const r=styleRect(card);
-      w=Math.max(w,r.x+r.w+14);h=Math.max(h,r.y+r.h+14);
-    });
-    zone.style.width=w+"px";zone.style.height=h+"px";
+    const size=areaSize(zone);
+    zone.style.width=size.w+"px";zone.style.height=size.h+"px";
   });
   sizeStage(stage,svg);
 }
 function createZones(){return[...$("createStage").querySelectorAll(".create-zone")]}
-function createZoneOverlap(zone){
-  const r=styleRect(zone);
-  return createZones().some(other=>other!==zone&&rectsOverlap(r,styleRect(other),8));
-}
-function createNodeOverlap(card){
-  const zone=card.parentElement;if(!zone)return false;
-  const r=styleRect(card);
-  return[...zone.querySelectorAll(".create-card[data-cid]")].some(other=>other!==card&&rectsOverlap(r,styleRect(other),8));
-}
 function drawCreateEdges(){
   const svg=$("createEdges");
   if(!svg)return;
@@ -969,25 +936,18 @@ function renderCreateGraph(){
     zone.style.left=pos.x+"px";zone.style.top=pos.y+"px";
     zone.style.width="240px";zone.style.height="70px";
     const lab=document.createElement("div");lab.className="zlab";
-    lab.innerHTML=`${esc(title)} <span class="hint">· 0</span>`;
+    lab.innerHTML=`<span class="grip" title="перетащить">⠿</span>${esc(title)} <span class="hint">· 0</span>`;
     zone.appendChild(lab);stage.appendChild(zone);zones[kind]=zone;
-    let last={x:pos.x,y:pos.y};
     enableZoneDrag(zone,createView,
       (nx,ny)=>{
         const cx=Math.max(10,nx),cy=Math.max(10,ny);
+        const rect={x:cx,y:cy,w:zone.offsetWidth,h:zone.offsetHeight};
+        if(zoneOverlaps(zone,rect,createZones()))return;
         zone.style.left=cx+"px";zone.style.top=cy+"px";
-        if(createZoneOverlap(zone)){
-          zone.style.left=last.x+"px";zone.style.top=last.y+"px";return;
-        }
-        last={x:cx,y:cy};
-        createState.zones[kind]=last;drawCreateEdges();
+        createState.zones[kind]={x:cx,y:cy};drawCreateEdges();
       },
       ()=>{
-        if(createZoneOverlap(zone)){
-          zone.style.left=last.x+"px";zone.style.top=last.y+"px";
-          toast("Области не могут пересекаться");
-        }
-        createState.zones[kind]=last;
+        createState.zones[kind]={x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0};
         recomputeCreateSizes();drawCreateEdges();
       });
   });
@@ -999,11 +959,6 @@ function renderCreateGraph(){
     const zone=zones[kind];
     const hint=zone.querySelector(".zlab .hint");
     if(hint)hint.textContent="· "+zone.querySelectorAll(".create-card[data-cid]").length;
-  });
-  recomputeCreateSizes();
-  settleZoneOverlaps(createZones(),zone=>{
-    const kind=zone.dataset.kind;
-    createState.zones[kind]={x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0};
   });
   recomputeCreateSizes();
   drawCreateEdges();
@@ -1022,7 +977,7 @@ function createCardElement(node,zone){
     : node.kind==="io"
       ? `<label>Сценарий (class name)</label><input data-f="scenario" value="${esc((node.details||{}).scenario||"")}" placeholder="CreateOrderScenario">`
       : "";
-  e.innerHTML=`<div class="hd"><span class="chip">${esc(KIND_NAMES[node.kind]||node.kind)}</span><span class="t">${esc(createNodeLabel(node))}</span><button type="button" class="del" title="удалить узел">×</button></div>`+
+  e.innerHTML=`<div class="hd"><span class="grip" title="перетащить">⠿</span><span class="chip">${esc(KIND_NAMES[node.kind]||node.kind)}</span><span class="t">${esc(createNodeLabel(node))}</span><button type="button" class="del" title="удалить узел">×</button></div>`+
     `<div class="cbody">`+
       `<label>Вид узла</label><select data-f="kind">${CREATE_KINDS.map(k=>`<option value="${k}" ${k===node.kind?"selected":""}>${KIND_NAMES[k]}</option>`).join("")}</select>`+
       `<label>Имя / якорь</label><input data-f="name" value="${esc(node.name||"")}" placeholder="имя элемента кода">`+
@@ -1035,8 +990,7 @@ function createCardElement(node,zone){
   e.querySelector('[data-f="kind"]').onchange=ev=>{
     node.kind=ev.target.value;
     node.x=14;
-    const siblings=createState.nodes.filter(n=>n.kind===node.kind&&n.id!==node.id);
-    node.y=38+siblings.length*280;
+    node.y=nextCreateY(node.kind);
     renderCreateGraph();
   };
   const bind=(sel,key,after)=>{
@@ -1062,39 +1016,36 @@ function createCardElement(node,zone){
     scEl.addEventListener("input",()=>{node.details.scenario=scEl.value});
   }
   e.querySelector(".connector").addEventListener("mousedown",ev=>startCreateConnection(ev,node,e));
-  let last={x:node.x,y:node.y};
   enableNodeDrag(e,"create",node.id,node.x,node.y,createView,
     (nx,ny)=>{
+      const zone=e.parentElement;if(!zone)return;
       const cx=Math.max(14,nx),cy=Math.max(34,ny);
+      if(proposedOverlap(zone,[e],[{el:e,x:cx,y:cy}]))return;
+      const size=areaSize(zone,new Map([[e,{x:cx,y:cy}]]));
+      if(zoneOverlaps(zone,proposedZoneRect(zone,size),createZones()))return;
       e.style.left=cx+"px";e.style.top=cy+"px";
-      if(createNodeOverlap(e)){
-        e.style.left=last.x+"px";e.style.top=last.y+"px";return;
-      }
-      last={x:cx,y:cy};
       node.x=cx;node.y=cy;
       recomputeCreateSizes();drawCreateEdges();
     },
-    ()=>{
-      if(createNodeOverlap(e)){
-        e.style.left=last.x+"px";e.style.top=last.y+"px";
-        toast("Узлы не могут пересекаться");
-      }
-      node.x=last.x;node.y=last.y;
-      settleZoneOverlaps(createZones(),zone=>{
-        const kind=zone.dataset.kind;
-        createState.zones[kind]={x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0};
-      });
-      recomputeCreateSizes();drawCreateEdges();
-    });
+    ()=>{recomputeCreateSizes();drawCreateEdges()});
   return e;
+}
+function nextCreateY(kind){
+  const zone=$("createStage").querySelector(`.create-zone[data-kind="${kind}"]`);
+  let y=38;
+  if(zone){
+    zone.querySelectorAll(".create-card[data-cid]").forEach(card=>{
+      y=Math.max(y,(parseFloat(card.style.top)||0)+card.offsetHeight+12);
+    });
+  }
+  return y;
 }
 function addCreateNode(){
   const kind=($("createKind")&&$("createKind").value)||"scenario";
-  const count=createState.nodes.filter(n=>n.kind===kind).length;
   const node={
     id:"c"+(createState.seq++),kind,name:"",description:"",acceptance:"",domain:"",
     details:{http_method:"post",path:"",scenario:""},
-    x:14,y:38+count*280
+    x:14,y:nextCreateY(kind)
   };
   createState.nodes.push(node);
   renderCreateGraph();
@@ -1207,7 +1158,7 @@ async function boot(){
   $("scenCanvas").addEventListener("click",ev=>{
     if(tab!=="scenario")return;
     if(Date.now()-justDraggedAt<250)return;
-    if(ev.target.closest(".card")||ev.target.closest(".periph-card")||ev.target.closest(".zlab"))return;
+    if(ev.target.closest(".card")||ev.target.closest(".zlab"))return;
     if(selectedNode!==null){selectedNode=null;renderScenario()}
   });
   document.addEventListener("keydown",ev=>{
