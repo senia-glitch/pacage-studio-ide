@@ -17,8 +17,8 @@ def scan_and_save(root_dir, output_file="files_content.txt"):
             # Исключаем папку __pycache__ из дальнейшего обхода
             if '__pycache__' in dirnames:
                 dirnames.remove('__pycache__')
-            if 'venv' in dirnames:
-                dirnames.remove('venv')
+            if '.venv' in dirnames:
+                dirnames.remove('.venv')
             if 'frontend' in dirnames:
                 dirnames.remove('frontend')
             if 'удалить' in dirnames:
