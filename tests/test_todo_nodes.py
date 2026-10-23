@@ -57,6 +57,12 @@ def build_todo_matrix(root: Path) -> None:
         "# kind: uses\n"
         "# studio: edge end\n",
     )
+    _write(
+        root,
+        "app/scenarios/broken_plan.py",
+        "# Желаемое имя/якорь: BrokenPlan\n"
+        "def broken(:\n",
+    )
 
 
 def test_all_planned_nodes_present_in_matrix(demo: Path):
@@ -75,9 +81,11 @@ def test_all_planned_nodes_present_in_matrix(demo: Path):
         ("test", "test_refund"),
         ("scenario", "UnlinkedScenario"),
         ("scenario", "UnresolvedScenario"),
+        ("scenario", "BrokenPlan"),
     }
     assert expected == anchors
     assert any(d.code == "W_EDGE_UNRESOLVED" for d in graph.diagnostics)
+    assert any(d.code == "E_SYNTAX" and d.file.endswith("broken_plan.py") for d in graph.diagnostics)
     assert any(node.planned and not node.description for node in graph.nodes)
     assert any(node.planned and node.kind == "model" and not node.details.get("tablename") for node in graph.nodes)
     assert any(node.planned and node.kind == "test" for node in graph.nodes)

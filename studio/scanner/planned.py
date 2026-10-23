@@ -207,11 +207,11 @@ def scan_planned(
     snapshot = builder.snapshot() if builder is not None else graph
     existing_ids = {node.id for node in snapshot.nodes}
     for source in sources.files:
-        if source.tree is None:
-            continue
         rel = source.rel
         is_tests = rel == "tests" or rel.startswith("tests/")
-        if collect_anchors(source.tree, rel, is_tests, source.lines):
+        if source.tree is not None and collect_anchors(
+            source.tree, rel, is_tests, source.lines
+        ):
             continue
         anchor = parse_anchor_note(source.text)
         if not anchor:
