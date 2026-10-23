@@ -37,3 +37,34 @@ def mark_complete(graph: Graph) -> None:
             )
         else:
             node.complete = node.id in reachable
+
+
+def mark_todo_downstream(graph: Graph) -> None:
+    """Посчитать TODO-узлы ниже каждого эндпоинта тем же обходом, что complete."""
+    index = graph.index()
+    for node in graph.nodes:
+        node.todo_downstream = 0
+        if node.kind == "endpoint" and isinstance(node.details, dict):
+            node.details["todo_downstream"] = 0
+    for endpoint in (node for node in graph.nodes if node.kind == "endpoint"):
+        seen: set[str] = {endpoint.id}
+        queue: deque[str] = deque([endpoint.id])
+        count = 0
+        while queue:
+            current = queue.popleft()
+            for edge in index.out(current):
+                if edge.kind not in FLOW_EDGE_KINDS or edge.to_node in seen:
+                    continue
+                target = index.node(edge.to_node)
+                if target is None:
+                    continue
+                seen.add(target.id)
+                if target.planned:
+                    count += 1
+                queue.append(target.id)
+        endpoint.todo_downstream = count
+        if isinstance(endpoint.details, dict):
+            endpoint.details["todo_downstream"] = count
+
+
+__all__ = ["mark_complete", "mark_todo_downstream", "reachable_ids"]

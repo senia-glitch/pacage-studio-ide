@@ -47,6 +47,7 @@ class EndpointDetails(BaseModel):
     extra_routes: list[dict] = Field(default_factory=list)
     signature: str = ""
     doc: str = ""
+    todo_downstream: int = 0
 
 
 class ScenarioDetails(BaseModel):
@@ -102,6 +103,8 @@ class Node(BaseModel):
     peripherals: list[dict] = Field(default_factory=list)
     # Узел существует только в метаданных: кода с таким якорем ещё нет.
     planned: bool = False
+    # Сколько планируемых узлов достижимо от эндпоинта вниз по потоку.
+    todo_downstream: int = 0
     # Достижим из эндпоинта по направленным рёбрам потока (S4).
     complete: bool = True
     # sha1 исходных байтов файла на момент скана (S7).

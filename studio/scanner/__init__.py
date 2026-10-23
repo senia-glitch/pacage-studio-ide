@@ -35,7 +35,7 @@ from studio.scanner.indexer import (
     scenario_node_id,
 )
 from studio.scanner.peripherals import attach_peripherals
-from studio.scanner.reach import mark_complete
+from studio.scanner.reach import mark_complete, mark_todo_downstream
 from studio.scanner.resolver import (
     resolve_dispatch,
     resolve_io_and_tables,
@@ -328,6 +328,7 @@ def scan(project_root: Path) -> Graph:
     graph = builder.build()
     _phase(sink, "domains", lambda: compute_domains(graph))
     _phase(sink, "reach", lambda: mark_complete(graph))
+    _phase(sink, "todo_downstream", lambda: mark_todo_downstream(graph))
     _phase(sink, "paths", lambda: build_scenario_paths(graph))
 
     if not graph.endpoints and not graph.scenarios:

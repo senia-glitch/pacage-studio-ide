@@ -33,6 +33,7 @@ CODES: dict[str, str] = {
     "W_IO_DYNAMIC": "SQL или таблица не литерал",
     "W_IO_SAME_LINE": "несколько вызовов порта в одной строке",
     "W_TABLE_UNKNOWN": "таблица из io не найдена среди моделей",
+    "W_PLAN_UNKNOWN_KIND": "вид узла-плана не определён",
     "I_EMPTY_PROJECT": "источники не найдены",
 }
 

@@ -216,12 +216,34 @@ def scan_planned(
         anchor = parse_anchor_note(source.text)
         if not anchor:
             continue
+        note_line = next(
+            (index + 1 for index, line in enumerate(source.lines) if NOTE_RE.match(line)),
+            0,
+        )
         kind = _kind_for(rel, anchor, routes_prefix, core_prefix)
         if kind is None:
-            continue
+            kind = "io" if "._db." in anchor else "scenario"
+            if sink is not None:
+                sink.add(
+                    "W_PLAN_UNKNOWN_KIND",
+                    f"Вид узла-плана {anchor!r} не определён по расположению файла; "
+                    f"принят вид {kind!r}",
+                    file=rel,
+                    line=note_line,
+                    hint="Перенесите файл-план в routes/, scenarios/, models*.py или tests/.",
+                )
         fields = _read_fields(source.text)
         code_node = _find_code_node(snapshot, kind, anchor)
         if code_node is not None:
+            if sink is not None:
+                sink.add(
+                    "W_DUP_ANCHOR",
+                    f"План {anchor!r} совпал с реальным узлом "
+                    f"{code_node.file_path}:{code_node.line}; показан реальный узел",
+                    file=rel,
+                    line=note_line,
+                    hint="Удалите файл-план или переименуйте якорь, чтобы убрать предупреждение.",
+                )
             _merge_fields(code_node, fields)
             continue
         node = _planned_node(env, rel, kind, anchor, fields, source.sha1)

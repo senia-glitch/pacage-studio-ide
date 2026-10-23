@@ -19,12 +19,18 @@ class AnchorResolver:
         self.index = graph.index()
         self._bare: dict[str, list[str]] = defaultdict(list)
         self._qualified: dict[str, list[str]] = defaultdict(list)
+        self._bare_io_base: dict[str, list[str]] = defaultdict(list)
+        self._qualified_io_base: dict[str, list[str]] = defaultdict(list)
         for node in graph.nodes:
             anchor = node_anchor(node)
             if not anchor:
                 continue
             self._bare[anchor].append(node.id)
             self._qualified[f"{node.file_path}::{anchor}"].append(node.id)
+            if node.kind == "io" and "#" in anchor:
+                base = anchor.split("#", 1)[0]
+                self._bare_io_base[base].append(node.id)
+                self._qualified_io_base[f"{node.file_path}::{base}"].append(node.id)
 
     def resolve(
         self, text: str, prefer_file: str | None = None
@@ -52,13 +58,25 @@ class AnchorResolver:
             return None, "W_EDGE_AMBIGUOUS"
 
         legacy = self._legacy(anchor_text, rel if explicit_file else None)
-        if not legacy:
-            return None, "W_EDGE_UNRESOLVED"
-        best_distance = min(distance for distance, _node_id in legacy)
-        best = [node_id for distance, node_id in legacy if distance == best_distance]
-        if len(best) > 1:
+        if legacy:
+            best_distance = min(distance for distance, _node_id in legacy)
+            best = [node_id for distance, node_id in legacy if distance == best_distance]
+            if len(best) > 1:
+                return None, "W_EDGE_AMBIGUOUS"
+            return best[0], None
+
+        # Плановый io-якорь не содержит #n; после появления кода он должен
+        # продолжать указывать на этот же метод порта.
+        base_matches = (
+            self._qualified_io_base.get(f"{rel}::{anchor_text}", [])
+            if explicit_file
+            else self._bare_io_base.get(anchor_text, [])
+        )
+        if len(base_matches) == 1:
+            return base_matches[0], None
+        if len(base_matches) > 1:
             return None, "W_EDGE_AMBIGUOUS"
-        return best[0], None
+        return None, "W_EDGE_UNRESOLVED"
 
     def _legacy(self, text: str, rel: str | None) -> list[tuple[int, str]]:
         match = LEGACY_IO_RE.match(text)
