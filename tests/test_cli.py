@@ -1,17 +1,18 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from studio import cli, store
+from studio import __version__, cli, store
 
 
 def test_запуск_без_команды_открывает_интерфейс(demo: Path, monkeypatch):
     called = {}
 
-    def fake_serve(root, host="127.0.0.1", port=8777):
+    def fake_serve(root, **kwargs):
         called["root"] = Path(root)
-        called["host"] = host
-        called["port"] = port
+        called["host"] = kwargs.get("host")
+        called["port"] = kwargs.get("port")
 
     monkeypatch.setattr(cli, "serve", fake_serve)
     monkeypatch.chdir(demo)
@@ -30,15 +31,36 @@ def test_scan_пишет_граф(demo: Path, capsys):
     assert cli.main(["scan", "--project", str(demo)]) == 0
     assert store.graph_path(demo).is_file()
     out = capsys.readouterr().out
-    assert "endpoints 3" in out
+    assert "Эндпоинтов 3" in out
+    assert f"Проект: {demo}" in out
+
+
+def test_scan_json_только_json(demo: Path, capsys):
+    assert cli.main(["scan", "--project", str(demo), "--json"]) == 0
+    out = capsys.readouterr().out
+    data = json.loads(out)
+    assert data["counts"]["endpoints"] == 3
+    assert "diagnostics" in data
 
 
 def test_list_показывает_сценарии(demo: Path, capsys):
     cli.main(["scan", "--project", str(demo)])
+    capsys.readouterr()
     assert cli.main(["list", "--project", str(demo)]) == 0
     out = capsys.readouterr().out
     assert "create_order" in out
     assert "io:" in out
+
+
+def test_list_json(demo: Path, capsys):
+    assert cli.main(["list", "--project", str(demo), "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["groups"]
+
+
+def test_version(capsys):
+    assert cli.main(["--version"]) == 0
+    assert capsys.readouterr().out.strip() == __version__
 
 
 def test_help(demo: Path, capsys):
@@ -89,8 +111,52 @@ def test_export_создаёт_документ(demo: Path, capsys):
     assert text.index("## Полные сценарии") < text.index("## Неполные узлы")
 
 
+def test_export_out(demo: Path, capsys):
+    target = demo / "docs/out.md"
+    assert cli.main(["export", "--project", str(demo), "--out", str(target)]) == 0
+    assert target.is_file()
+
+
 def test_параметр_project_без_команды(demo: Path, monkeypatch):
     called = {}
     monkeypatch.setattr(cli, "serve", lambda root, **kw: called.setdefault("root", root))
     assert cli.main(["--project", str(demo)]) == 0
     assert called["root"] == demo
+
+
+def test_doctor_на_демо(demo: Path, capsys):
+    assert cli.main(["doctor", "--project", str(demo)]) == 0
+    out = capsys.readouterr().out
+    assert "pacage-studio" in out
+    assert "Источники:" in out
+    assert "Граф:" in out
+
+
+def test_doctor_json(demo: Path, capsys):
+    assert cli.main(["doctor", "--project", str(demo), "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["ok"] is True
+    assert data["graph"]["endpoints"] == 3
+
+
+def test_doctor_битый_файл_код_1(demo: Path, capsys):
+    (demo / "app/api/v1/routes/broken.py").write_text("def broken(:\n", encoding="utf-8")
+    assert cli.main(["doctor", "--project", str(demo), "--json"]) == 1
+    data = json.loads(capsys.readouterr().out)
+    assert any(item["code"] == "E_SYNTAX" for item in data["diagnostics"])
+
+
+def test_несуществующий_проект_код_2(capsys):
+    assert cli.main(["scan", "--project", "Z:/no/such/project"]) == 2
+    out = capsys.readouterr().out
+    assert "не найден" in out.lower()
+
+
+def test_поиск_корня_вверх(demo: Path, monkeypatch):
+    nested = demo / "app" / "scenarios"
+    monkeypatch.chdir(nested)
+    from studio.cli import _find_root
+
+    root, explicit = _find_root(None)
+    assert root == demo
+    assert explicit is False

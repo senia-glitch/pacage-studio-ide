@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>studio — карта пути запроса</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23232428'/%3E%3Cpath d='M16 5l9 5v12l-9 5-9-5V10z' fill='%23e8833a'/%3E%3C/svg%3E">
+
+<meta name="studio-token" content="">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+  <span class="logo" id="logoBtn" title="О проекте">⬢ studio</span>
+  <span class="tabs">
+    <button class="tabbtn on" data-tab="map" title="только эндпоинты fastbase, сгруппированные по домену и HTTP-методу">Карта</button>
+    <button class="tabbtn" data-tab="scenario" title="подробный путь одного сценария от эндпоинта до модели">Сценарий</button>
+    <button class="tabbtn" data-tab="create" title="конструктор нового сценария: только метаданные, без кода">Создание</button>
+  </span>
+  <span class="search-wrap"><input id="searchBox" type="search" placeholder="Поиск (/) — метод, URL, имя, домен" aria-label="Поиск"><span class="hint" id="searchCount"></span></span>
+  <select id="editorChoice" title="Редактор для «Открыть в редакторе»" aria-label="Редактор"></select>
+  <span id="liveDot" class="live off" title="нет связи со студией">●</span>
+  <button id="diagBtn" type="button" title="Диагностика">⚠ 0</button>
+  <span class="spacer"></span>
+  <label class="hint" title="визуально скрыть описания, критерии и домены на узлах"><input type="checkbox" id="hideMeta"> скрыть метаданные</label>
+  <span class="hint" id="zoomLabel">100%</span>
+  <button id="zOut" title="отдалить">−</button>
+  <button id="zIn" title="приблизить">+</button>
+  <button id="zFit" title="вписать карту в окно">вписать</button>
+  <button id="zReset" title="масштаб 100%">1:1</button>
+  <button id="rescan" title="перечитать код проекта и метаданные">Обновить из кода</button>
+</header>
+<main>
+  <section class="tab on" id="tab-map">
+    <div id="mapPane">
+      <div class="mapbar"><span>Границы пакета: <b>fastbase</b></span><span class="hint">показаны только эндпоинты; домен → HTTP-метод; клик открывает сценарий</span><span id="domainChips" class="chips"></span></div>
+      <div class="canvas" id="mapCanvas"><div class="view" id="mapView"><div class="stage" id="mapStage"><svg class="edges" id="mapEdges"></svg></div></div></div>
+    </div>
+  </section>
+  <section class="tab" id="tab-scenario">
+    <div id="scenWrap">
+      <aside id="scenList"></aside>
+      <div id="scenMain">
+        <div id="scenBar">
+          <span class="hint">Сценарий:</span>
+          <select id="scenSelect" style="min-width:260px"></select>
+          <span class="hint" id="scenHint">путь: endpoint → scenario → io → model; тесты — справа</span>
+        </div>
+        <div class="canvas" id="scenCanvas"><div class="view" id="scenView"><div class="stage" id="scenStage"><svg class="edges" id="scenEdges"></svg></div></div></div>
+      </div>
+      <aside id="inspector">
+        <div id="inspHead"><h3 style="margin:0;font-size:12px;color:var(--acc)">Метаданные узла</h3><div id="inspChips" class="chips" style="margin-top:5px"></div></div>
+        <div id="inspBody"><p class="hint">Выберите узел на карте сценария.</p></div>
+        <div id="inspFoot">Правки сохраняются при потере фокуса.</div>
+      </aside>
+    </div>
+  </section>
+  <section class="tab" id="tab-create">
+    <div id="createPane">
+      <div class="createbar">
+        <span class="hint">Конструктор создаёт только метаданные: один файл на узел, без кода.</span>
+        <span class="spacer"></span>
+        <button id="createClear" type="button">Очистить</button>
+        <button id="createSubmit" class="primary" type="button">Создать</button>
+      </div>
+      <div id="createWrap">
+        <div class="canvas" id="createCanvas"><div class="view" id="createView"><div class="stage" id="createStage"><svg class="edges" id="createEdges"></svg></div></div></div>
+        <aside id="createSide">
+          <h3>Связи</h3>
+          <p class="hint">Потяните за точку справа от узла и отпустите на другом узле. Связь пишется в метаданные при создании. Таблицы БД не выбираются — реализации ещё нет.</p>
+          <div id="createEdgeList"></div>
+        </aside>
+      </div>
+      <div id="createResult"></div>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

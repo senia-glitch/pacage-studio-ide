@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from collections import deque
+from pathlib import Path
 
 from studio.metamodel import Edge, Graph, Node, node_anchor
 
@@ -32,6 +33,8 @@ ROLE_NAMES = {
     "settings": "настройки",
     "utils": "утилита",
     "other": "прочее",
+    "method": "метод",
+    "function": "функция",
 }
 
 
@@ -66,110 +69,18 @@ def _edge_label(graph: Graph, edge: Edge) -> str:
     nodes = graph.by_id()
     source = nodes.get(edge.from_node)
     target = nodes.get(edge.to_node)
-    return f"`{_anchor(source) if source else edge.from_node}` —{edge.kind}→ `{_anchor(target) if target else edge.to_node}`"
-
-
-def _undirected_complete(graph: Graph) -> set[str]:
-    endpoints = {n.id for n in graph.nodes if n.kind == "endpoint"}
-    adjacency: dict[str, set[str]] = {}
-    for edge in graph.edges:
-        adjacency.setdefault(edge.from_node, set()).add(edge.to_node)
-        adjacency.setdefault(edge.to_node, set()).add(edge.from_node)
-    seen = set(endpoints)
-    queue = deque(endpoints)
-    while queue:
-        current = queue.popleft()
-        for neighbor in adjacency.get(current, ()):
-            if neighbor in seen:
-                continue
-            seen.add(neighbor)
-            queue.append(neighbor)
-    return seen
+    source_text = _anchor(source) if source else edge.from_node
+    target_text = _anchor(target) if target else edge.to_node
+    return f"`{source_text}` —{edge.kind}→ `{target_text}`"
 
 
 def _rules_section() -> list[str]:
-    return [
-        "## Правила ручного редактирования метаданных",
-        "",
-        "Метаданные пакета — это комментарии в коде с меткой `studio`.",
-        "Пакет читает только свои комментарии; остальной код и комментарии не трогает.",
-        "Имена и якоря в этом документе — желаемые: при написании кода их можно изменить.",
-        "",
-        "### 1. Разделы",
-        "",
-        "Разрешены ровно четыре раздела:",
-        "",
-        "- `description` — описание узла;",
-        "- `acceptance` — критерии приёмки;",
-        "- `domain` — доменное имя (назначается только эндпоинту);",
-        "- `edge` — связь между узлами.",
-        "",
-        "### 2. Формат маркеров",
-        "",
-        "```python",
-        "# studio: description start",
-        "# Текст описания.",
-        "# studio: description end",
-        "# studio: acceptance start",
-        "# - критерий 1",
-        "# - критерий 2",
-        "# studio: acceptance end",
-        "# studio: domain start",
-        "# orders, billing",
-        "# studio: domain end",
-        "```",
-        "",
-        "Правила:",
-        "",
-        "- метка пакета — `studio`;",
-        "- имя раздела — только из списка выше;",
-        "- каждый раздел обрамляется парой `start` / `end`;",
-        "- содержимое — построчно комментариями `# <текст>`;",
-        "- вложенность разделов запрещена;",
-        "- незакрытый блок не читается и считается мусором.",
-        "",
-        "### 3. Привязка к якорю",
-        "",
-        "Блок ставится над якорем — именем элемента кода:",
-        "",
-        "- `endpoint` — имя функции;",
-        "- `scenario` — имя класса;",
-        "- `model` — имя класса;",
-        "- `test` — имя тест-функции;",
-        "- `io` — имя метода порта со строкой: `CreateOrderScenario._db.create:5`.",
-        "",
-        "Для функций и классов блок ставится над декоратором (если он есть).",
-        "Для io-узла блок ставится над вызовом `self._db.<method>(...)` в `execute`.",
-        "Порядок блоков в файле не важен: блок привязывается к ближайшему якорю ниже.",
-        "",
-        "### 4. Связи",
-        "",
-        "Одна связь — один блок:",
-        "",
-        "```python",
-        "# studio: edge start",
-        "# from: <anchor_from>",
-        "# to: <anchor_to>",
-        "# kind: dispatch | scenario_call | port_call | table | tests | uses | depends",
-        "# studio: edge end",
-        "```",
-        "",
-        "### 5. Домены",
-        "",
-        "- домен назначается только у эндпоинта;",
-        "- остальные узлы наследуют домены связанных эндпоинтов;",
-        "- несколько доменов перечисляются через запятую;",
-        "- дубли доменов не показываются;",
-        "- наследованные домены пересчитываются при сохранении правок из UI.",
-        "",
-        "### 6. Сироты и сохранение",
-        "",
-        "- если якорь пропал, метаданные остаются в файле, но не показываются в UI;",
-        "- при следующем явном сохранении метаданных файла через форму блоки-сироты удаляются;",
-        "- форма при сохранении перезаписывает маркеры и становится истиной;",
-        "- пустой раздел удаляется вместе с парой маркеров.",
-        "",
-    ]
+    rules_path = Path(__file__).resolve().parent.parent / "metadata" / "rules.md"
+    try:
+        text = rules_path.read_text(encoding="utf-8")
+    except OSError:
+        text = "# Правила метаданных\n\nФайл studio/metadata/rules.md не найден.\n"
+    return text.rstrip("\n").splitlines() + [""]
 
 
 def _node_lines(graph: Graph, node: Node) -> list[str]:
@@ -184,6 +95,14 @@ def _node_lines(graph: Graph, node: Node) -> list[str]:
     else:
         lines.append("  - Критерии приёмки: не заполнено")
     lines.append(f"  - Домен: {_text(node.domain)}")
+    extra_routes = (node.details or {}).get("extra_routes") or []
+    if extra_routes:
+        routes_text = "; ".join(
+            f"{str(route.get('http_method') or '').upper()} "
+            f"{route.get('url_path') or route.get('path') or ''}"
+            for route in extra_routes
+        )
+        lines.append(f"  - Ещё маршруты: {routes_text}")
     if node.planned:
         lines.append("  - Код: ещё не написан (метаданные без кода)")
     if node.peripherals:
@@ -262,8 +181,7 @@ def _scenario_block(graph: Graph, scenario_id: str, endpoint_id: str) -> tuple[l
 
 
 def _incomplete_ids(graph: Graph) -> list[str]:
-    complete = _undirected_complete(graph)
-    return [n.id for n in graph.nodes if n.id not in complete]
+    return [n.id for n in graph.nodes if not n.complete]
 
 
 def _node_section_title(node: Node) -> str:
@@ -310,9 +228,8 @@ def build_document(graph: Graph) -> str:
                 key=lambda n: (_endpoint_url(n), n.label),
             ):
                 details = endpoint.details or {}
-                lines.append(
-                    f"##### {method} {_endpoint_url(endpoint)} — {details.get('function_name') or endpoint.label}"
-                )
+                title = details.get("function_name") or endpoint.label
+                lines.append(f"##### {method} {_endpoint_url(endpoint)} — {title}")
                 lines.append("")
                 lines.append(f"Файл эндпоинта: `{_where(endpoint)}`")
                 lines.append("")
@@ -336,7 +253,7 @@ def build_document(graph: Graph) -> str:
                         exported.add(endpoint.id)
                         exported.update(block_ids)
 
-    complete = _undirected_complete(graph)
+    complete = {node.id for node in graph.nodes if node.complete}
     extra_complete = sorted(
         (node_id for node_id in complete if node_id not in exported and node_id in nodes),
         key=lambda nid: (KIND_ORDER.get(nodes[nid].kind, 99), nodes[nid].label),

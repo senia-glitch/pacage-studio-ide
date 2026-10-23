@@ -2,14 +2,19 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.ruff_cache/
 *.egg-info/
 build/
 dist/
 .venv/
 venv/
+.coverage
+htmlcov/
 
-# Окружения и локальное
+# Секреты не коммитим
 .env
 
-# Артефакты studio (пересоздаются командами scan/save, в git не нужны)
+# Артефакты studio (пересоздаются scan/save, в git не нужны)
 .studio/
+graph.json
+studio.log

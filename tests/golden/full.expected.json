@@ -1,0 +1,51 @@
+{
+  "nodes": [
+    "endpoint:app/api/v1/routes/users.py:both",
+    "endpoint:app/api/v1/routes/users.py:create_user",
+    "io:app/scenarios/users.py:AuditScenario._db.create#1",
+    "io:app/scenarios/users.py:CreateUserScenario._db.query#1",
+    "model:models.py:Order",
+    "model:models.py:User",
+    "scenario:app/scenarios/users.py:AuditScenario",
+    "scenario:app/scenarios/users.py:CreateUserScenario",
+    "test:tests/test_users.py:TestUsers.test_audit",
+    "test:tests/test_users.py:TestUsers.test_create_by_url"
+  ],
+  "edges": [
+    "endpoint:app/api/v1/routes/users.py:create_user|dispatch|scenario:app/scenarios/users.py:CreateUserScenario",
+    "io:app/scenarios/users.py:AuditScenario._db.create#1|table|model:models.py:Order",
+    "io:app/scenarios/users.py:CreateUserScenario._db.query#1|table|model:models.py:Order",
+    "scenario:app/scenarios/users.py:AuditScenario|port_call|io:app/scenarios/users.py:AuditScenario._db.create#1",
+    "scenario:app/scenarios/users.py:CreateUserScenario|port_call|io:app/scenarios/users.py:CreateUserScenario._db.query#1",
+    "scenario:app/scenarios/users.py:CreateUserScenario|scenario_call|scenario:app/scenarios/users.py:AuditScenario",
+    "test:tests/test_users.py:TestUsers.test_audit|tests|scenario:app/scenarios/users.py:AuditScenario",
+    "test:tests/test_users.py:TestUsers.test_create_by_url|tests|endpoint:app/api/v1/routes/users.py:create_user"
+  ],
+  "domains": {
+    "endpoint:app/api/v1/routes/users.py:both": "",
+    "endpoint:app/api/v1/routes/users.py:create_user": "users",
+    "io:app/scenarios/users.py:AuditScenario._db.create#1": "users",
+    "io:app/scenarios/users.py:CreateUserScenario._db.query#1": "users",
+    "model:models.py:Order": "users",
+    "model:models.py:User": "",
+    "scenario:app/scenarios/users.py:AuditScenario": "users",
+    "scenario:app/scenarios/users.py:CreateUserScenario": "users",
+    "test:tests/test_users.py:TestUsers.test_audit": "users",
+    "test:tests/test_users.py:TestUsers.test_create_by_url": "users"
+  },
+  "complete": {
+    "endpoint:app/api/v1/routes/users.py:both": true,
+    "endpoint:app/api/v1/routes/users.py:create_user": true,
+    "io:app/scenarios/users.py:AuditScenario._db.create#1": true,
+    "io:app/scenarios/users.py:CreateUserScenario._db.query#1": true,
+    "model:models.py:Order": true,
+    "model:models.py:User": false,
+    "scenario:app/scenarios/users.py:AuditScenario": true,
+    "scenario:app/scenarios/users.py:CreateUserScenario": true,
+    "test:tests/test_users.py:TestUsers.test_audit": true,
+    "test:tests/test_users.py:TestUsers.test_create_by_url": true
+  },
+  "diagnostics": [
+    "W_TABLE_UNKNOWN"
+  ]
+}

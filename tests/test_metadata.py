@@ -8,7 +8,6 @@ from studio.metadata import (
     read_file_metadata,
     render_metadata_file,
     save_node_metadata,
-    update_text_metadata,
 )
 from studio.scanner import scan
 
@@ -128,7 +127,7 @@ def test_сохранение_описания_над_декоратором(dem
     node = next(
         n for n in graph.nodes if n.kind == "endpoint" and n.details["function_name"] == "list_orders"
     )
-    assert save_node_metadata(demo, node, "Новое описание.", ["критерий"], "") is True
+    assert save_node_metadata(demo, node, "Новое описание.", ["критерий"], "").changed is True
     text = (demo / node.file_path).read_text(encoding="utf-8")
     assert "# studio: description start\n# Новое описание." in text
     assert "# studio: acceptance start\n# - критерий" in text
@@ -146,7 +145,7 @@ def test_очищенный_раздел_удаляется_с_маркерам�
     node = next(
         n for n in graph.nodes if n.kind == "endpoint" and n.details["function_name"] == "create_order"
     )
-    assert save_node_metadata(demo, node, "", [], "") is True
+    assert save_node_metadata(demo, node, "", [], "").changed is True
     text = (demo / node.file_path).read_text(encoding="utf-8")
     assert "studio: description start" not in text
     assert "studio: acceptance start" not in text
@@ -174,7 +173,7 @@ def test_критерии_не_дублируют_маркер_списка(demo
 def test_описание_io_над_вызовом(demo: Path):
     graph = scan(demo)
     io = next(n for n in graph.nodes if n.kind == "io" and n.details["method"] == "create")
-    assert save_node_metadata(demo, io, "Пишет заказ.", ["строка 1"], "") is True
+    assert save_node_metadata(demo, io, "Пишет заказ.", ["строка 1"], "").changed is True
     lines = (demo / io.file_path).read_text(encoding="utf-8").splitlines()
     call_index = next(i for i, line in enumerate(lines) if "self._db.create" in line)
     start_index = max(

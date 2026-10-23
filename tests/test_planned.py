@@ -64,30 +64,45 @@ def test_плановая_модель_и_тест_в_графе(demo: Path):
     assert test.description == "Тест возврата."
 
 
-def test_метаданные_плана_сливаются_с_кодом(demo: Path):
-    payload = {"nodes": [{"kind": "scenario", "name": "ListOrdersScenario", "description": "Плановое описание."}]}
-    create_metadata_files(payload, read_env(demo))
-    graph = scan(demo)
-    nodes = [n for n in graph.nodes if n.kind == "scenario" and n.details["class_name"] == "ListOrdersScenario"]
-    assert len(nodes) == 1
-    assert nodes[0].planned is False
-    assert nodes[0].description == "Плановое описание."
+def test_имя_занято_существующим_узлом(demo: Path):
+    import pytest
+
+    from studio.creator import CreateError
+
+    payload = {
+        "nodes": [
+            {"kind": "scenario", "name": "ListOrdersScenario", "description": "Плановое описание."}
+        ]
+    }
+    with pytest.raises(CreateError, match="занято"):
+        create_metadata_files(payload, read_env(demo))
 
 
 def test_код_важнее_плана(demo: Path):
-    payload = {"nodes": [{"kind": "scenario", "name": "CreateOrderScenario", "description": "Из плана."}]}
-    create_metadata_files(payload, read_env(demo))
+    plan = demo / "app/scenarios/manual_plan.py"
+    plan.write_text(
+        "# Желаемое имя/якорь: CreateOrderScenario\n"
+        "# studio: description start\n"
+        "# Из плана.\n"
+        "# studio: description end\n",
+        encoding="utf-8",
+    )
     graph = scan(demo)
-    node = next(n for n in graph.nodes if n.kind == "scenario" and n.details["class_name"] == "CreateOrderScenario")
-    assert node.planned is False
-    assert node.description == "Сценарий создания заказа."
+    nodes = [
+        n
+        for n in graph.nodes
+        if n.kind == "scenario" and n.details["class_name"] == "CreateOrderScenario"
+    ]
+    assert len(nodes) == 1
+    assert nodes[0].planned is False
+    assert nodes[0].description == "Сценарий создания заказа."
 
 
 def test_сохранение_планового_узла_не_ломает_edges(demo: Path):
     create_metadata_files(_payload(), read_env(demo))
     graph = scan(demo)
     endpoint = next(n for n in graph.nodes if n.planned and n.kind == "endpoint")
-    assert save_node_metadata(demo, endpoint, "Обновлено.", ["Критерий"], "new-domain") is True
+    assert save_node_metadata(demo, endpoint, "Обновлено.", ["Критерий"], "new-domain").changed is True
     graph = scan(demo)
     endpoint = next(n for n in graph.nodes if n.planned and n.kind == "endpoint")
     assert endpoint.description == "Обновлено."

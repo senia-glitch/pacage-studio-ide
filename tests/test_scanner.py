@@ -53,7 +53,7 @@ def test_io_идентичность_и_связи(demo: Path):
     ios = [n for n in graph.nodes if n.kind == "io" and n.details["scenario_id"] == scenario.id]
     assert ios
     create_io = next(n for n in ios if n.details["method"] == "create")
-    assert create_io.id == f"io:{create_io.file_path}:CreateOrderScenario._db.create:{create_io.line}"
+    assert create_io.id == f"io:{create_io.file_path}:CreateOrderScenario._db.create#1"
     assert create_io.label == "_db.create(orders)"
     assert any(
         e.kind == "port_call" and e.from_node == scenario.id and e.to_node == create_io.id

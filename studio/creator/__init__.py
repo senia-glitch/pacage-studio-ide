@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import keyword
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,7 +14,7 @@ from pathlib import Path
 from studio._atomic import atomic_write
 from studio.env import ProjectEnv, dotted_to_path
 from studio.metadata import render_metadata_file
-from studio.metamodel import EDGE_KINDS, NODE_KINDS
+from studio.metamodel import EDGE_KINDS, NODE_KINDS, node_anchor
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -47,7 +49,7 @@ class CreatedFile:
 
 
 def _snake(name: str) -> str:
-    text = re.sub(r"(?<!^)(?=[A-Z])", "_", name)
+    text = re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "_", name)
     text = re.sub(r"[^A-Za-z0-9_]+", "_", text).strip("_").lower()
     return text or "node"
 
@@ -75,6 +77,8 @@ def _parse_nodes(data: dict) -> list[NodeSpec]:
             check = name
         if not _IDENT_RE.match(check):
             raise CreateError(f"недопустимое имя: {name!r}")
+        if keyword.iskeyword(check):
+            raise CreateError(f"имя {name!r} — ключевое слово Python")
         details = raw.get("details") if isinstance(raw.get("details"), dict) else {}
         if kind == "io":
             scenario = str(details.get("scenario") or raw.get("scenario") or "").strip()
@@ -166,6 +170,22 @@ def _parse_edges(
     return out
 
 
+def _existing_anchors(env: ProjectEnv) -> dict[str, str]:
+    """Якорь → описание существующего узла; ошибка скана не блокирует создание."""
+    from studio.scanner import scan
+
+    try:
+        graph = scan(env.project_root)
+    except Exception:  # noqa: BLE001 — конструктор не должен падать из-за скана
+        return {}
+    out: dict[str, str] = {}
+    for node in graph.nodes:
+        anchor = node_anchor(node)
+        if anchor and anchor not in out:
+            out[anchor] = f"{node.label} ({node.file_path})"
+    return out
+
+
 def plan_creation(
     data: dict, env: ProjectEnv
 ) -> tuple[list[tuple[str, str, str, str]], list[CreatedFile]]:
@@ -174,10 +194,16 @@ def plan_creation(
     by_name = {node.name: node for node in nodes}
     edges = _parse_edges(data, by_name)
     root = env.project_root
+    existing = _existing_anchors(env)
 
     paths: dict[str, NodeSpec] = {}
     created: list[CreatedFile] = []
+    anchors: dict[str, str] = {}
     for node in nodes:
+        if node.anchor in existing:
+            raise CreateError(
+                f"имя {node.anchor} занято узлом {existing[node.anchor]}"
+            )
         rel = _target_path(env, node)
         if rel in paths:
             raise CreateError(f"два узла претендуют на один файл: {rel}")
@@ -189,11 +215,25 @@ def plan_creation(
         if target.exists():
             raise CreateError(f"файл уже существует: {rel}")
         paths[rel] = node
+        anchors[rel] = node.anchor
         created.append(CreatedFile(path=rel, kind=node.kind, name=node.name))
 
+    counts: dict[str, int] = {}
+    for anchor in anchors.values():
+        counts[anchor] = counts.get(anchor, 0) + 1
+
+    def edge_anchor(rel: str) -> str:
+        anchor = anchors[rel]
+        if counts.get(anchor, 0) > 1 or anchor in existing:
+            return f"{rel}::{anchor}"
+        return anchor
+
     edges_by_source: dict[str, list[tuple[str, str, str]]] = {}
-    for source, _target, kind, anchor_from, anchor_to in edges:
-        edges_by_source.setdefault(source, []).append((anchor_from, anchor_to, kind))
+    rel_by_name = {node.name: rel for rel, node in paths.items()}
+    for source, target_name, kind, _anchor_from, _anchor_to in edges:
+        edges_by_source.setdefault(source, []).append(
+            (edge_anchor(rel_by_name[source]), edge_anchor(rel_by_name[target_name]), kind)
+        )
 
     files: list[tuple[str, str, str, str]] = []
     for rel, node in paths.items():
@@ -215,12 +255,21 @@ def plan_creation(
 def create_metadata_files(data: dict, env: ProjectEnv) -> list[CreatedFile]:
     files, created = plan_creation(data, env)
     root = env.project_root
-    for rel, _name, _kind, content in files:
-        target = root / rel
-        try:
+    written: list[Path] = []
+    try:
+        for rel, _name, _kind, content in files:
+            target = root / rel
             target.parent.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            raise CreateError(f"не удалось создать папку для {rel}") from exc
-        if not atomic_write(target, content):
-            raise CreateError(f"не удалось записать {rel}")
+            if target.exists():
+                raise CreateError(f"файл уже существует: {rel}")
+            if not atomic_write(target, content):
+                raise CreateError(f"не удалось записать {rel}")
+            written.append(target)
+    except (CreateError, OSError) as exc:
+        for target in reversed(written):
+            with contextlib.suppress(OSError):
+                target.unlink()
+        if isinstance(exc, CreateError):
+            raise
+        raise CreateError(f"не удалось создать файлы: {exc}") from exc
     return created

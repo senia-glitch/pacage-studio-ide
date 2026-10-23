@@ -1,0 +1,396 @@
+"""HTTP-приложение студии: роуты, безопасность, отдача статики."""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import urllib.parse
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from studio import log as slog
+from studio._constants import MAX_HTTP_BODY
+from studio.creator import CreateError
+from studio.metadata import MetadataError
+from studio.server.security import (
+    CSP,
+    SECURITY_HEADERS,
+    content_type,
+    host_allowed,
+    inject_token,
+    origin_allowed,
+    static_path,
+    token_ok,
+)
+from studio.server.state import NodeNotFound, ProjectState, UndoNotFound
+from studio.ui import INDEX, STATIC_DIR
+
+DEFAULT_PORT_START = 8777
+DEFAULT_PORT_END = 8796
+
+
+class PortInUse(Exception):
+    pass
+
+
+class _HTTPProblem(Exception):
+    def __init__(self, status: int, code: str, message: str):
+        self.status = status
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+def _state_of(ctx) -> ProjectState:
+    if isinstance(ctx, ProjectState):
+        return ctx
+    state = getattr(ctx, "state", None)
+    if isinstance(state, ProjectState):
+        return state
+    return ProjectState(Path(ctx.root))
+
+
+def make_handler(ctx):
+    state = _state_of(ctx)
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+        server_version = "studio"
+        sys_version = ""
+
+        # ------------------------------------------------------------ ответы
+
+        def log_message(self, fmt, *args) -> None:
+            if state.verbose:
+                slog.step("HTTP " + fmt % args)
+
+        def _common_headers(self, extra: dict | None = None) -> None:
+            for key, value in SECURITY_HEADERS.items():
+                self.send_header(key, value)
+            for key, value in (extra or {}).items():
+                self.send_header(key, value)
+
+        def _send_bytes(
+            self,
+            body: bytes,
+            code: int = 200,
+            ctype: str = "application/json; charset=utf-8",
+            extra: dict | None = None,
+        ) -> None:
+            try:
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                if not extra or "Cache-Control" not in extra:
+                    self.send_header("Cache-Control", "no-store")
+                self._common_headers(extra)
+                self.end_headers()
+                if body:
+                    self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+        def _json(self, payload, code: int = 200, extra: dict | None = None) -> None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self._send_bytes(body, code, "application/json; charset=utf-8", extra)
+
+        def _error(self, status: int, code: str, message: str, details=None) -> None:
+            error = {"code": code, "message": message}
+            if details is not None:
+                error["details"] = details
+            extra = {"Connection": "close"} if self.command == "POST" else None
+            if self.command == "POST":
+                self.close_connection = True
+            self._json({"error": error}, status, extra)
+
+        # --------------------------------------------------------- безопасность
+
+        def _discard_body(self) -> None:
+            """Прочитать тело, чтобы клиент успел получить ответ об ошибке."""
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return
+            if 0 < length <= MAX_HTTP_BODY:
+                with contextlib.suppress(OSError):
+                    self.rfile.read(length)
+
+        def _security(self) -> None:
+            host = self.headers.get("Host", "")
+            bound_port = int(self.server.server_address[1])
+            if not host_allowed(host, bound_port, state.host):
+                self._discard_body()
+                raise _HTTPProblem(403, "bad_host", "Неверный заголовок Host")
+            if not origin_allowed(self.headers.get("Origin"), host):
+                self._discard_body()
+                raise _HTTPProblem(403, "bad_origin", "Неверный Origin")
+            path = urllib.parse.urlsplit(self.path).path
+            if path.startswith("/api/") and not token_ok(
+                state.token, self.headers.get("X-Studio-Token")
+            ):
+                self._discard_body()
+                raise _HTTPProblem(403, "bad_token", "Нет или неверен X-Studio-Token")
+            if self.command == "POST":
+                ctype = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+                raw_length = self.headers.get("Content-Length")
+                if raw_length is None:
+                    raise _HTTPProblem(411, "length_required", "Нужен Content-Length")
+                try:
+                    length = int(raw_length)
+                except ValueError as exc:
+                    raise _HTTPProblem(
+                        411, "length_required", "Некорректный Content-Length"
+                    ) from exc
+                if length > MAX_HTTP_BODY:
+                    raise _HTTPProblem(413, "body_too_large", "Тело запроса больше 16 МБ")
+                if ctype != "application/json":
+                    self._discard_body()
+                    raise _HTTPProblem(
+                        415, "bad_content_type", "Нужен Content-Type: application/json"
+                    )
+
+        def _read_body(self) -> dict:
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length) if length > 0 else b""
+            try:
+                data = json.loads(raw.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise _HTTPProblem(400, "bad_json", "Тело запроса — не корректный JSON") from exc
+            if not isinstance(data, dict):
+                raise _HTTPProblem(400, "bad_json", "Тело запроса должно быть объектом JSON")
+            return data
+
+        def _guard(self, action) -> None:
+            try:
+                self._security()
+                action()
+            except _HTTPProblem as problem:
+                self._error(problem.status, problem.code, problem.message)
+            except NodeNotFound:
+                self._error(404, "node_not_found", "Узел не найден — обновите карту")
+            except MetadataError as exc:
+                status = {
+                    "invalid_input": 400,
+                    "node_not_found": 404,
+                    "anchor_not_found": 404,
+                    "file_changed": 409,
+                    "not_writable": 422,
+                    "file_missing": 404,
+                }.get(exc.code, 400)
+                code = "node_not_found" if exc.code == "anchor_not_found" else exc.code
+                self._error(status, code, exc.message, getattr(exc, "details", None))
+            except UndoNotFound:
+                self._error(404, "undo_not_found", "Запись для отмены не найдена")
+            except CreateError as exc:
+                self._error(409, "create_rejected", str(exc))
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            except Exception as exc:  # noqa: BLE001 — граница HTTP-запроса
+                slog.step(f"HTTP 500: {type(exc).__name__}: {exc}")
+                self._error(500, "internal", f"Внутренняя ошибка: {type(exc).__name__}")
+
+        def do_GET(self) -> None:
+            self._guard(self._get)
+
+        def do_POST(self) -> None:
+            self._guard(self._post)
+
+        def do_PUT(self) -> None:
+            self._guard(lambda: self._error(404, "not_found", "Не найдено"))
+
+        def do_DELETE(self) -> None:
+            self._guard(lambda: self._error(404, "not_found", "Не найдено"))
+
+        def do_PATCH(self) -> None:
+            self._guard(lambda: self._error(404, "not_found", "Не найдено"))
+
+        # ---------------------------------------------------------------- GET
+
+        def _get(self) -> None:
+            url = urllib.parse.urlsplit(self.path)
+            if url.path in ("/", "/index.html"):
+                try:
+                    html = INDEX.read_text(encoding="utf-8")
+                except OSError:
+                    return self._error(500, "ui_missing", "index.html не найден")
+                html = inject_token(html, state.token)
+                return self._send_bytes(
+                    html.encode("utf-8"),
+                    200,
+                    "text/html; charset=utf-8",
+                    {"Content-Security-Policy": CSP},
+                )
+            if url.path.startswith("/static/"):
+                candidate = static_path(STATIC_DIR, url.path)
+                if candidate is None:
+                    return self._error(404, "not_found", "Файл не найден")
+                try:
+                    body = candidate.read_bytes()
+                except OSError:
+                    return self._error(404, "not_found", "Файл не найден")
+                return self._send_bytes(
+                    body,
+                    200,
+                    content_type(candidate),
+                    {"Cache-Control": "no-cache", "Content-Security-Policy": CSP},
+                )
+            if url.path == "/api/graph":
+                graph = state.ensure_graph()
+                etag = f'"{state.revision}"'
+                if self.headers.get("If-None-Match") == etag:
+                    self.send_response(304)
+                    self.send_header("ETag", etag)
+                    self.send_header("X-Studio-Revision", str(state.revision))
+                    self._common_headers()
+                    self.end_headers()
+                    return
+                return self._json(
+                    graph.model_dump(),
+                    extra={"ETag": etag, "X-Studio-Revision": str(state.revision)},
+                )
+            if url.path == "/api/state":
+                state.ensure_graph()
+                return self._json(state.snapshot())
+            if url.path == "/api/wait":
+                query = urllib.parse.parse_qs(url.query)
+                try:
+                    rev = int((query.get("rev") or ["0"])[0])
+                except ValueError:
+                    rev = 0
+                return self._json({"revision": state.wait_for_change(rev)})
+            return self._error(404, "not_found", "Не найдено")
+
+        # --------------------------------------------------------------- POST
+
+        def _attach_current(self, exc: MetadataError, data: dict) -> None:
+            """Для 409 file_changed — что сейчас лежит в коде (S7)."""
+            try:
+                state.rescan("conflict")
+                node = state._resolve_node(str(data.get("node_id") or ""))
+                exc.details = {
+                    "current": {
+                        "description": node.description,
+                        "acceptance": list(node.acceptance),
+                        "domain": node.domain,
+                    }
+                }
+            except Exception:  # noqa: BLE001 — детали не обязательны для ответа
+                pass
+
+        def _post(self) -> None:
+            url = urllib.parse.urlsplit(self.path)
+            data = self._read_body()
+            if url.path == "/api/rescan":
+                graph = state.rescan("manual")
+                return self._json(graph.model_dump())
+            if url.path == "/api/metadata/node":
+                try:
+                    return self._json(state.save_metadata(data))
+                except MetadataError as exc:
+                    if exc.code == "file_changed":
+                        self._attach_current(exc, data)
+                    raise
+            if url.path == "/api/create":
+                return self._json(state.create(data))
+            if url.path == "/api/undo":
+                undo_id = str(data.get("undo_id") or "")
+                if not undo_id:
+                    raise _HTTPProblem(400, "invalid_input", "Нужен undo_id")
+                return self._json(state.undo(undo_id))
+            return self._error(404, "not_found", "Не найдено")
+
+    return Handler
+
+
+def _bind(host: str, port: int | None, handler) -> ThreadingHTTPServer:
+    if port is None:
+        for candidate in range(DEFAULT_PORT_START, DEFAULT_PORT_END + 1):
+            try:
+                return ThreadingHTTPServer((host, candidate), handler)
+            except OSError:
+                continue
+        raise PortInUse(
+            f"Порты {DEFAULT_PORT_START}–{DEFAULT_PORT_END} заняты. "
+            "Укажите другой: studio dev --port 8800"
+        )
+    try:
+        return ThreadingHTTPServer((host, port), handler)
+    except OSError as exc:
+        raise PortInUse(
+            f"Порт {port} занят. Укажите другой: studio dev --port 8800"
+        ) from exc
+
+
+def _print_summary(state: ProjectState, url: str) -> None:
+    graph = state.graph
+    counts = {"endpoint": 0, "scenario": 0, "io": 0, "model": 0}
+    warnings = 0
+    if graph is not None:
+        for node in graph.nodes:
+            if node.kind in counts:
+                counts[node.kind] += 1
+        warnings = sum(1 for d in graph.diagnostics if d.level != "info")
+    print(f"studio dev -> {url}")
+    print(f"Проект: {state.root}")
+    print(
+        f"Эндпоинтов {counts['endpoint']} · сценариев {counts['scenario']} · "
+        f"io {counts['io']} · моделей {counts['model']} · предупреждений {warnings}"
+    )
+    if warnings:
+        print("Подробности: studio doctor")
+    print("Ctrl+C — остановить")
+
+
+def serve(
+    project_root: Path,
+    host: str = "127.0.0.1",
+    port: int | None = None,
+    no_open: bool = False,
+    poll: float | None = None,
+    verbose: bool = False,
+) -> int:
+    root = Path(project_root).resolve()
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            "Внимание: сервер доступен по сети; токен защищает запись, "
+            "но трафик не шифруется."
+        )
+    poll_interval = poll
+    if poll_interval is None:
+        try:
+            poll_interval = float(os.environ.get("STUDIO_POLL") or 1.0)
+        except ValueError:
+            poll_interval = 1.0
+    state = ProjectState(root, poll_interval=poll_interval)
+    state.host = host
+    state.verbose = verbose
+    if not slog.is_active(root):
+        slog.start_run(root, f"dev {host}:{port or 'auto'}")
+    state.rescan("start")
+    server = _bind(host, port, make_handler(state))
+    bound_port = int(server.server_address[1])
+    url = f"http://{host}:{bound_port}"
+    _print_summary(state, url)
+    if not no_open and not os.environ.get("CI"):
+        with contextlib.suppress(Exception):
+            webbrowser.open(url)
+    state.start_watcher()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("Остановлено")
+    finally:
+        state.stop_watcher()
+        server.server_close()
+    return bound_port
+
+
+__all__ = [
+    "DEFAULT_PORT_END",
+    "DEFAULT_PORT_START",
+    "PortInUse",
+    "make_handler",
+    "serve",
+]

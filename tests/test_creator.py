@@ -103,7 +103,7 @@ def test_связь_на_несуществующий_узел(demo: Path):
 def test_после_создания_скан_не_падает(demo: Path):
     create_metadata_files(_payload(), read_env(demo))
     graph = scan(demo)
-    assert graph.version == 5
+    assert graph.version == 6
 
 
 def test_модель_из_файла_конструктора_становится_узлом(demo: Path):

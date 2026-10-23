@@ -28,7 +28,7 @@ def test_семь_типов_связей():
 
 
 def test_версия_схемы():
-    assert Graph().version == 5
+    assert Graph().version == 6
 
 
 def test_якоря_узлов():
@@ -77,4 +77,4 @@ def test_якоря_узлов():
             line=7,
             details={"scenario_class": "C", "method": "create"},
         )
-    ) == "C._db.create:7"
+    ) == "C._db.create"

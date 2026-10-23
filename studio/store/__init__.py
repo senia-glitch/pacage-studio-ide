@@ -1,7 +1,7 @@
 """Чтение/запись `.studio/`: graph.json и служебные файлы.
 
 Граф — артефакт сканирования: его можно удалить, studio пересоберёт его сам.
-Версия схемы, отличная от GRAPH_VERSION (5), не читается.
+Старая версия схемы не читается и пересоздаётся автоматически.
 """
 
 from __future__ import annotations
@@ -9,12 +9,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from studio._atomic import atomic_write
 from studio.metamodel import Graph
 
 STUDIO_DIR = ".studio"
 GRAPH_NAME = "graph.json"
 
-GRAPH_VERSION = 5
+GRAPH_VERSION = 6
 
 
 def studio_dir(project_root: Path) -> Path:
@@ -37,7 +38,7 @@ def ensure_layout(project_root: Path) -> Path:
         existing = []
     missing = [ln for ln in lines if ln not in existing]
     if missing:
-        gitignore.write_text("\n".join(existing + missing) + "\n", encoding="utf-8")
+        atomic_write(gitignore, "\n".join(existing + missing) + "\n")
     return sd
 
 
@@ -53,15 +54,14 @@ def read_graph(project_root: Path) -> Graph | None:
         return None
     try:
         return Graph.model_validate(data)
-    except Exception:
+    except Exception:  # noqa: BLE001 — битый artifact не должен ронять studio
         return None
 
 
 def write_graph(project_root: Path, graph: Graph) -> Path:
     ensure_layout(project_root)
     path = graph_path(project_root)
-    path.write_text(
-        json.dumps(graph.model_dump(), indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    payload = json.dumps(graph.model_dump(), indent=2, ensure_ascii=False) + "\n"
+    if not atomic_write(path, payload):
+        raise OSError(f"не удалось записать {path}")
     return path

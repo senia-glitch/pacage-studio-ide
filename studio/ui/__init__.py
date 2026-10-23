@@ -2,4 +2,6 @@
 
 from pathlib import Path
 
-INDEX = Path(__file__).parent / "index.html"
+UI_DIR = Path(__file__).parent
+STATIC_DIR = UI_DIR / "static"
+INDEX = STATIC_DIR / "index.html"
