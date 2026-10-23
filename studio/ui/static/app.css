@@ -180,3 +180,22 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index
 .brief-stats{font-size:10.5px;color:var(--dim);margin:4px 0}
 .brief-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-top:8px}
 .brief-status-row{border-bottom:1px solid var(--line);padding:6px 0;display:flex;gap:8px;align-items:flex-start}
+
+.card.node--todo{border-style:dashed;background:rgba(232,163,90,.06)}
+.card.node--todo .hd .t{color:#f0c58d}
+.chip.todo{background:#4a3a28;color:#f0b56a;border:1px dashed #7a5a30}
+.chip.todo.no-desc{background:#4a2424;color:#ff9b9b;border-color:#7a3030}
+.chip.todo-chain{background:#28364a;color:#8ab4ff;border:1px dashed #3a5a80;cursor:pointer}
+.plan-line{padding:2px 9px 3px;font-size:10px;color:#b89a72;border-bottom:1px solid #3a3b40;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.insp-todo{margin:0 0 8px;padding:7px 8px;border:1px dashed #7a5a30;border-radius:6px;background:rgba(232,163,90,.08);color:#f0c58d;font-size:11.5px;line-height:1.4}
+.todo-chip-wrap{position:relative;display:inline-flex;align-items:center}
+.todo-menu-btn{padding:1px 4px;min-width:18px}
+.todo-menu-panel{position:absolute;top:100%;right:0;z-index:220;margin-top:4px;background:var(--panel);border:1px solid var(--acc);border-radius:6px;box-shadow:0 8px 24px #000b;padding:4px;white-space:nowrap}
+.todo-menu-panel[hidden]{display:none}
+.todo-menu-panel button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--txt);padding:5px 8px;font:11px inherit;cursor:pointer}
+.todo-menu-panel button:hover{background:var(--panel2)}
+#briefBtn.on{background:#4a3a28;border-color:var(--acc);color:var(--acc)}
+body.todo-highlight .card:not(.node--todo){opacity:.33;filter:saturate(.4)}
+body.todo-highlight .card.node--todo{box-shadow:0 0 0 1px #7a5a30}
+.off-group-title{position:absolute;left:14px;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--dim)}
+.map-offpath .card{max-width:250px}

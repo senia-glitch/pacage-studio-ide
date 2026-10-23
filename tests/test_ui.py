@@ -17,7 +17,7 @@ def test_три_вкладки_одного_окна():
 
 
 def test_интерфейс_на_русском():
-    for text in ("без домена", "эндпоинт", "сценарий", "модель", "критерии"):
+    for text in ("Без домена", "эндпоинт", "сценарий", "модель", "критерии"):
         assert text in (HTML + LEGACY)
 
 
@@ -56,6 +56,22 @@ def test_есть_ключевые_возможности():
 
 def test_есть_тз_для_агента():
     assert 'id="briefBtn"' in HTML
+    assert 'id="todoMenuPanel"' in HTML
+    assert 'id="todoBriefAction"' in HTML
     assert "openBriefDialog" in LEGACY
     assert "/api/brief" in LEGACY
     assert "Выполнено" in LEGACY
+
+
+def test_todo_узлы_явно_видны():
+    todo_js = (STATIC / "js/todo.js").read_text(encoding="utf-8")
+    assert "TODO · нет кода" in todo_js
+    assert "TODO · нет описания" in todo_js
+    assert "placeNode" in LEGACY
+    assert "groupOffPath" in LEGACY
+    assert "Вне путей запроса" in LEGACY
+    assert "в цепочке TODO" in LEGACY
+    assert "node--todo" in LEGACY
+    assert "Кода пока нет. Файл-план" in LEGACY
+    assert "Что сделать" in LEGACY
+    assert "todoHighlight" in LEGACY

@@ -6,7 +6,6 @@ import {
   plannedStats,
   shortPrompt,
   statusText,
-  verifyLabel,
 } from "./briefmodel.js";
 import {
   enableNodeDrag as enableNodeDragImpl,
@@ -29,6 +28,17 @@ import {
   zoneOverlaps as geometryZoneOverlaps,
 } from "./geometry.js";
 import {matchesAll, searchNodes} from "./search.js";
+import {
+  OFF_PATH_KINDS,
+  OFF_PATH_TITLES,
+  anchorOf,
+  groupOffPath,
+  isTodo,
+  offPathCount,
+  placeNode,
+  planPath,
+  todoBadge,
+} from "./todo.js";
 import {cleanPositions, createStorage, storageKey} from "./storage.js";
 import {nextState, saveLabel} from "./savestate.js";
 import {$, esc, toast} from "./util.js";
@@ -45,9 +55,9 @@ const ROLE_NAMES={schema:"схема",dependency:"зависимость",except
 const KIND_COLORS={endpoint:"#5aa0ff",scenario:"#e8833a",io:"#7fc97f",model:"#bb9af7",test:"#c9a86a"};
 const EDGE_COLORS={dispatch:"#5aa0ff",scenario_call:"#e8833a",port_call:"#7fc97f",table:"#bb9af7",tests:"#c9a86a",uses:"#9a9aa2",depends:"#9a9aa2"};
 const EDGE_NAMES={dispatch:"вызов сценария",scenario_call:"вызов сценария",port_call:"порт БД",table:"таблица",tests:"тест",uses:"использует",depends:"зависит"};
-const METHOD_COLORS={GET:"#5aa0ff",POST:"#7fc97f",PUT:"#e8833a",PATCH:"#bb9af7",DELETE:"#ff5d5d","ДРУГОЙ":"#9a9aa2","БЕЗ МЕТОДА":"#9a9aa2"};
-const NO_DOMAIN="без домена";
-const NO_METHOD="без метода";
+const METHOD_COLORS={GET:"#5aa0ff",POST:"#7fc97f",PUT:"#e8833a",PATCH:"#bb9af7",DELETE:"#ff5d5d","ДРУГОЙ":"#9a9aa2","Метод не указан":"#9a9aa2"};
+const NO_DOMAIN="Без домена";
+const NO_METHOD="Метод не указан";
 const CARD_W=280,GAPY=24,PAD=30;
 const CREATE_KINDS=["endpoint","scenario","io","model","test"];
 const CREATE_LAYER_X={endpoint:40,scenario:400,io:760,model:1120,test:1480};
@@ -58,8 +68,8 @@ let scenBoxes={},mapBoxes={};
 const mapPos=new Map(),scenPos=new Map(),periphPos=new Map(),listOpen=new Map();
 let scenPeripheralEdges=[];
 let incompleteZoneMoved=false;
-const mapFastbase={x:40,y:40},mapMethods=new Map(),scenZonePos=new Map();
-let justDraggedAt=0;
+const mapFastbase={x:40,y:40},mapOffpath={x:40,y:420},mapMethods=new Map(),scenZonePos=new Map();
+let justDraggedAt=0,todoHighlight=false;
 const createState={nodes:[],edges:[],seq:1,zones:{}};
 let createConnect=null;
 let studioRevision=0,liveFailures=0,liveStarted=false,dragging=false;
@@ -72,13 +82,50 @@ let briefReport=null,briefLast=null,briefStatusTimer=null,briefPreview=null;
 try{editorTemplate=localStorage.getItem("studio:editor-template")||"";editorId=localStorage.getItem("studio:editor")||"vscode"}catch(_){ }
 
 
-function applyGraph(g){G=g||{};byId={};(G.nodes||[]).forEach(n=>byId[n.id]=n);
+function sameAnchor(left,right){return String(left||"").replace(/#\d+$/,"")===String(right||"").replace(/#\d+$/,"")}
+function migrateTodoState(previous,current){
+  if(!previous||!previous.nodes||!current||!current.nodes)return;
+  const previousSelected=selectedNode,previousScenario=selectedScenario;
+  const oldById={};(previous.nodes||[]).forEach(n=>oldById[n.id]=n);
+  const newByAnchor={};(current.nodes||[]).forEach(n=>{
+    if(n.planned)return;
+    const key=`${n.kind}|${anchorOf(n)}`;
+    if(!newByAnchor[key])newByAnchor[key]=n;
+  });
+  for(const old of previous.nodes||[]){
+    if(!old.planned||byId[old.id])continue;
+    const key=`${old.kind}|${anchorOf(old)}`;
+    let match=newByAnchor[key];
+    if(!match&&old.kind==="io"){
+      match=(current.nodes||[]).find(n=>!n.planned&&n.kind==="io"&&sameAnchor(anchorOf(n),anchorOf(old)));
+    }
+    if(!match)continue;
+    if(previousSelected===old.id)selectedNode=match.id;
+    if(previousScenario===old.id)selectedScenario=match.id;
+    if(mapPos.has(old.id))mapPos.set(match.id,mapPos.get(old.id));
+    for(const [posKey,value] of [...scenPos.entries()]){
+      const parts=posKey.split("|");
+      if(parts[parts.length-1]===old.id){
+        scenPos.set([...parts.slice(0,-1),match.id].join("|"),value);
+      }
+    }
+    for(const [posKey,value] of [...periphPos.entries()]){
+      if(posKey.includes(`periph:${old.id}:`)){
+        periphPos.set(posKey.replace(`periph:${old.id}:`,`periph:${match.id}:`),value);
+      }
+    }
+  }
+}
+function applyGraph(g){
+  const previous=G;
+  G=g||{};byId={};(G.nodes||[]).forEach(n=>byId[n.id]=n);
+  migrateTodoState(previous,G);
   if(selectedScenario&&!G.scenario_paths?.[selectedScenario])selectedScenario=null;
   if(selectedNode&&!byId[selectedNode])selectedNode=null;
   updateBriefBadge();
   scheduleBriefStatus();
 }
-function methodOfEndpoint(n){const m=String((n.details||{}).http_method||"").toUpperCase();return m||"БЕЗ МЕТОДА"}
+function methodOfEndpoint(n){const m=String((n.details||{}).http_method||"").toUpperCase();return m||NO_METHOD}
 function urlOfEndpoint(n){const d=n.details||{};return d.url_path||d.path||""}
 function endpointLabel(n){
   const d=n.details||{};
@@ -92,10 +139,27 @@ function nodeMeta(n){
   if(n.kind==="test")return d.module||"";
   return d.class_name||d.name||"";
 }
+function todoBadgeHtml(n){
+  const badge=todoBadge(n);if(!badge)return "";
+  const extra=badge.variant==="нет описания"?" no-desc":"";
+  return `<span class="chip todo${extra}" title="${esc(badge.text)}">${esc(badge.text)}</span>`;
+}
+function planLineHtml(n){
+  const path=planPath(n);
+  return path?`<div class="plan-line">план: ${esc(path)}</div>`:"";
+}
+function todoDownstreamHtml(n){
+  const count=Number(n.todo_downstream||(n.details||{}).todo_downstream||0);
+  if(n.kind!=="endpoint"||!count)return "";
+  return `<button type="button" class="chip todo-chain" title="Открыть цепочку с планируемыми узлами">в цепочке TODO: ${count}</button>`;
+}
+function nodeTodoClass(n){return isTodo(n)?" node--todo":""}
+function domainOfNode(n){return String(n.domain||"").trim()||NO_DOMAIN}
 function cardHtml(n,opts={}){
   const c=opts.method?METHOD_COLORS[opts.method]:KIND_COLORS[n.kind]||"#888";
   const extra=(n.details&&n.details.extra_routes||[]).length;
-  let h=`<div class="hd"><span class="grip" title="перетащить">⠿</span><span class="chip">${esc(KIND_NAMES[n.kind]||n.kind)}</span>${n.planned?'<span class="chip plan">без кода</span>':""}${extra?`<span class="chip" title="Ещё маршруты: ${extra}">+${extra}</span>`:""}<span class="t">${esc(n.label)}</span><button class="open-editor" type="button" title="Открыть в редакторе" aria-label="Открыть в редакторе">↗</button></div>`;
+  let h=`<div class="hd"><span class="grip" title="перетащить">⠿</span><span class="chip">${esc(KIND_NAMES[n.kind]||n.kind)}</span>${todoBadgeHtml(n)}${extra?`<span class="chip" title="Ещё маршруты: ${extra}">+${extra}</span>`:""}<span class="t">${esc(n.label)}</span><button class="open-editor" type="button" title="Открыть в редакторе" aria-label="Открыть в редакторе">↗</button></div>`;
+  h+=planLineHtml(n);
   h+=`<div class="mt">${esc(nodeMeta(n))}</div>`;
   if(!hideMeta){
     if(n.description){
@@ -108,7 +172,7 @@ function cardHtml(n,opts={}){
       h+=`<div class="sec"><div class="lbl">${n.kind==="endpoint"?"домен":"домен (наследуется)"}</div><div class="body">${esc(n.domain)}</div></div>`;
     }
   }
-  const cls=`card k-${n.kind}${n.planned?" planned":""}${opts.method?" method-"+opts.method.toLowerCase():""}${opts.nested?" nested":""}${selectedNode===n.id?" sel":""}`;
+  const cls=`card k-${n.kind}${n.planned?" planned":""}${nodeTodoClass(n)}${opts.method?" method-"+opts.method.toLowerCase():""}${opts.nested?" nested":""}${selectedNode===n.id?" sel":""}`;
   return {cls,html:h,c};
 }
 function periphLayoutKey(scope,pid){return `${scope}|${pid}`}
@@ -169,7 +233,7 @@ function scenMovePeriph(card,key,scope,nx,ny){
 }
 function scenZones(){return[...$("scenStage").querySelectorAll(".scen-zone")]}
 function incompleteNodes(){
-  return (G.nodes||[]).filter(n=>n.complete===false);
+  return (G.nodes||[]).filter(n=>placeNode(n,G).area==="offpath");
 }
 async function onCardClick(id){
   if(Date.now()-justDraggedAt<250)return;
@@ -251,7 +315,7 @@ function zoneOverlaps(zone,rect,zones){
 function styleRect(el){
   return{x:parseFloat(el.style.left)||0,y:parseFloat(el.style.top)||0,w:el.offsetWidth,h:el.offsetHeight};
 }
-function mapMethodZones(){return[...$("mapStage").querySelectorAll(".map-method")]}
+function mapZones(){return[...$("mapStage").querySelectorAll(".map-method,.map-offpath")]}
 function recomputeMapSizes(){
   const stage=$("mapStage"),svg=$("mapEdges"),fast=stage.querySelector(".map-fastbase");
   if(!fast)return;
@@ -269,6 +333,84 @@ function recomputeMapSizes(){
     fw=Math.max(fw,r.x+r.w+18);fh=Math.max(fh,r.y+r.h+18);
   });
   fast.style.width=fw+"px";fast.style.height=fh+"px";
+  sizeStage(stage,svg);
+}
+function offpathCard(zone,n,x,y){
+  const card=document.createElement("div");
+  card.className=`card k-${n.kind}${nodeTodoClass(n)}`;card.dataset.id=n.id;
+  const saved=mapPos.get(n.id);
+  const left=saved?saved.x:x,top=saved?saved.y:y;
+  card.style.left=left+"px";card.style.top=top+"px";card.title=n.id;
+  card.innerHTML=`<div class="hd"><span class="grip" title="перетащить">⠿</span><span class="chip">${esc(KIND_NAMES[n.kind]||n.kind)}</span>${todoBadgeHtml(n)}<span class="t">${esc(n.label)}</span><button class="open-editor" type="button" title="Открыть в редакторе" aria-label="Открыть в редакторе">↗</button></div>`+
+    planLineHtml(n)+`<div class="mt">${esc(nodeMeta(n)||"неполный узел")}</div>`+
+    (n.description?`<div class="sec"><div class="lbl">${isTodo(n)?"что сделать":"описание"}</div><div class="body">${esc(n.description)}</div></div>`:"");
+  card.tabIndex=0;card.setAttribute("role","button");card.setAttribute("aria-label",n.label);
+  card.onclick=ev=>{ev.stopPropagation();if(Date.now()-justDraggedAt<250)return;focusIncompleteNode(n.id)};
+  card.addEventListener("keydown",ev=>{
+    if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();focusIncompleteNode(n.id)}
+    if(ev.key.toLowerCase()==="o"){ev.preventDefault();openEditorForNode(n)}
+  });
+  const openBtn=card.querySelector(".open-editor");
+  if(openBtn)openBtn.onclick=ev=>{ev.stopPropagation();openEditorForNode(n)};
+  zone.appendChild(card);
+  enableNodeDrag(card,"map",n.id,left,top,mapView,
+    (nx,ny)=>{
+      const cx=Math.max(14,nx),cy=Math.max(38,ny);
+      if(proposedOverlap(zone,[card],[{el:card,x:cx,y:cy}]))return;
+      card.style.left=cx+"px";card.style.top=cy+"px";
+      mapPos.set(n.id,{x:cx,y:cy});recomputeMapSizes();
+      sizeStage($("mapStage"),$("mapEdges"));
+    },
+    ()=>{
+      mapPos.set(n.id,{x:parseFloat(card.style.left)||0,y:parseFloat(card.style.top)||0});
+      recomputeMapSizes();sizeStage($("mapStage"),$("mapEdges"));
+    });
+  return card;
+}
+function renderOffPathMap(stage,svg){
+  const groups=groupOffPath((G&&G.nodes)||[]);
+  const total=offPathCount(groups);
+  if(!total)return;
+  const zone=document.createElement("div");
+  zone.className="zone map-zone map-offpath";
+  zone.style.left=mapOffpath.x+"px";zone.style.top=mapOffpath.y+"px";
+  zone.style.width="280px";zone.style.height="80px";
+  const lab=document.createElement("div");lab.className="zlab";
+  lab.innerHTML=`<span class="grip" title="перетащить">⠿</span><b>Вне путей запроса (${total})</b>`;
+  zone.appendChild(lab);stage.appendChild(zone);
+  let cursor=38;
+  OFF_PATH_KINDS.forEach(kind=>{
+    const items=groups[kind]||[];
+    if(!items.length)return;
+    const title=document.createElement("div");
+    title.className="off-group-title";title.textContent=`${OFF_PATH_TITLES[kind]} · ${items.length}`;
+    title.style.top=cursor+"px";zone.appendChild(title);cursor+=18;
+    items.forEach(n=>{
+      const card=offpathCard(zone,n,14,cursor);
+      cursor=Math.max(cursor,(parseFloat(card.style.top)||cursor)+card.offsetHeight+10);
+    });
+    cursor+=4;
+  });
+  let width=260;
+  zone.querySelectorAll(".card[data-id]").forEach(card=>{
+    const r=styleRect(card);width=Math.max(width,r.x+r.w+18);
+  });
+  zone.style.width=width+"px";zone.style.height=(cursor+8)+"px";
+  enableZoneDrag(zone,mapView,
+    (nx,ny)=>{
+      const cx=Math.max(20,nx),cy=Math.max(20,ny);
+      const rect={x:cx,y:cy,w:zone.offsetWidth,h:zone.offsetHeight};
+      if(zoneOverlaps(zone,rect,mapZones()))return;
+      zone.style.left=cx+"px";zone.style.top=cy+"px";
+      mapOffpath.x=cx;mapOffpath.y=cy;sizeStage(stage,svg);
+    },
+    ()=>{mapOffpath.x=parseFloat(zone.style.left)||40;mapOffpath.y=parseFloat(zone.style.top)||420;sizeStage(stage,svg)});
+  mapBoxes=measure(stage);
+  const edges=(G.edges||[]).filter(e=>mapBoxes[e.from_node]&&mapBoxes[e.to_node]).map(e=>({
+    ...e,
+    todo:!!(byId[e.from_node]?.planned||byId[e.to_node]?.planned),
+  }));
+  drawEdges(svg,mapBoxes,edges);
   sizeStage(stage,svg);
 }
 function renderMap(){
@@ -293,7 +435,10 @@ function renderMap(){
         `сценарии: ${esc(env.core_discover||"app.scenarios")} · модели: ${esc(env.models||"models.py")}</span><br>`+
         `Поправьте FAT_ROUTES_PACKAGE в .env.fastbase или выполните <b>studio doctor</b>.`;
     }
-    stage.appendChild(e);stage.style.width="900px";stage.style.height="500px";applyTransform("mapView",mapView);return;
+    stage.appendChild(e);
+    renderOffPathMap(stage,svg);
+    if(!stage.querySelector(".map-offpath")){stage.style.width="900px";stage.style.height="500px"}
+    applyTransform("mapView",mapView);return;
   }
   const byMethod=new Map();
   endpoints.forEach(n=>{
@@ -322,17 +467,19 @@ function renderMap(){
     items.forEach((n,i)=>{
       const d=n.details||{};
       const card=document.createElement("div");
-      card.className=`card method-${method.toLowerCase()}${n.planned?" planned":""}`;card.dataset.id=n.id;
+      card.className=`card method-${method.toLowerCase()}${n.planned?" planned":""}${nodeTodoClass(n)}`;card.dataset.id=n.id;
       const saved=mapPos.get(n.id);
       const lx=saved?saved.x:14+(i%2)*292;
       const ly=saved?saved.y:38+Math.floor(i/2)*94;
       card.style.left=lx+"px";card.style.top=ly+"px";
       const url=urlOfEndpoint(n);
       const title=url?`${method} ${url}`:`${method} · ${n.label}`;
-      const sub=url?(d.function_name||""):"URL неизвестен";
-      card.innerHTML=`<div class="hd"><span class="grip" title="перетащить">⠿</span>${n.planned?'<span class="chip plan">без кода</span>':""}<span class="t">${esc(title)}</span><button class="open-editor" type="button" title="Открыть в редакторе" aria-label="Открыть в редакторе">↗</button></div>`+
-        `<div class="mt">${esc(sub)}</div>`;
+      const sub=[url?(d.function_name||""):"URL неизвестен",domainOfNode(n)].filter(Boolean).join(" · ");
+      card.innerHTML=`<div class="hd"><span class="grip" title="перетащить">⠿</span><span class="chip">${esc(KIND_NAMES[n.kind]||n.kind)}</span>${todoBadgeHtml(n)}${todoDownstreamHtml(n)}<span class="t">${esc(title)}</span><button class="open-editor" type="button" title="Открыть в редакторе" aria-label="Открыть в редакторе">↗</button></div>`+
+        planLineHtml(n)+`<div class="mt">${esc(sub)}</div>`;
       card.tabIndex=0;card.setAttribute("role","button");card.setAttribute("aria-label",title);
+      const chainBtn=card.querySelector(".todo-chain");
+      if(chainBtn)chainBtn.onclick=ev=>{ev.stopPropagation();openEndpointScenario(n.id)};
       card.onclick=ev=>{ev.stopPropagation();if(Date.now()-justDraggedAt<250)return;openEndpointScenario(n.id)};
       card.addEventListener("keydown",ev=>{if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();openEndpointScenario(n.id)}});
       const mapOpen=card.querySelector(".open-editor");
@@ -344,7 +491,7 @@ function renderMap(){
           const proposed=[{el:card,x:cx,y:cy}];
           if(proposedOverlap(zone,[card],proposed))return;
           const size=areaSize(zone,new Map([[card,{x:cx,y:cy}]]));
-          if(zoneOverlaps(zone,proposedZoneRect(zone,size),mapMethodZones()))return;
+          if(zoneOverlaps(zone,proposedZoneRect(zone,size),mapZones()))return;
           card.style.left=cx+"px";card.style.top=cy+"px";
           mapPos.set(n.id,{x:cx,y:cy});recomputeMapSizes();
         },
@@ -369,7 +516,7 @@ function renderMap(){
       (nx,ny)=>{
         const cx=Math.max(16,nx),cy=Math.max(38,ny);
         const rect={x:cx,y:cy,w:zone.offsetWidth,h:zone.offsetHeight};
-        if(zoneOverlaps(zone,rect,mapMethodZones()))return;
+        if(zoneOverlaps(zone,rect,mapZones()))return;
         zone.style.left=cx+"px";zone.style.top=cy+"px";
         mapMethods.set(method,{x:cx,y:cy});recomputeMapSizes();
       },
@@ -385,6 +532,7 @@ function renderMap(){
       mapFastbase.x=cx;mapFastbase.y=cy;
     },
     ()=>{mapFastbase.x=parseFloat(fast.style.left)||40;mapFastbase.y=parseFloat(fast.style.top)||40;sizeStage(stage,svg)});
+  renderOffPathMap(stage,svg);
   sizeStage(stage,svg);
   applyTransform("mapView",mapView);
 }
@@ -422,7 +570,7 @@ function fillScenarioSelect(){
     return !lastSearchQuery||matchesAll(lastSearchQuery,[n.label,n.domain,n.description,n.file_path]);
   });
   scenarios.forEach(id=>{const n=byId[id];if(!n)return;
-    const o=document.createElement("option");o.value=id;o.textContent=n.label;o.selected=id===selectedScenario;sel.appendChild(o)});
+    const o=document.createElement("option");o.value=id;o.textContent=n.label+(isTodo(n)?" [TODO]":"");o.selected=id===selectedScenario;sel.appendChild(o)});
   sel.onchange=()=>{selectedScenario=sel.value;selectedNode=null;renderScenario();renderInspector()};
   const list=$("scenList");
   list.querySelectorAll("details[data-key]").forEach(d=>listOpen.set(d.dataset.key,d.open));
@@ -471,7 +619,8 @@ function fillScenarioSelect(){
       items.forEach(id=>{
         const n=byId[id];if(!n)return;
         const e=document.createElement("div");
-        e.className="sitem"+(selectedScenario===id?" on":"");e.textContent=n.label;e.title=n.id;
+        e.className="sitem"+(selectedScenario===id?" on":"");e.title=n.id;
+        e.innerHTML=`${esc(n.label)}${todoBadgeHtml(n)}`;
         e.onclick=()=>{selectedScenario=id;selectedNode=null;renderScenario();renderInspector()};
         dDet.appendChild(e);
       });
@@ -493,7 +642,7 @@ function fillScenarioSelect(){
   incomplete.slice().sort((a,b)=>KIND_NAMES[a.kind].localeCompare(KIND_NAMES[b.kind])||a.label.localeCompare(b.label)).forEach(n=>{
     const e=document.createElement("div");
     e.className="sitem";e.title=n.id;
-    e.innerHTML=`<span class="hint">${esc(KIND_NAMES[n.kind]||n.kind)}</span> · ${esc(n.label)}`;
+    e.innerHTML=`<span class="hint">${esc(KIND_NAMES[n.kind]||n.kind)}</span> · ${esc(n.label)} ${todoBadgeHtml(n)}`;
     e.onclick=()=>focusIncompleteNode(n.id);
     incDet.appendChild(e);
   });
@@ -506,8 +655,9 @@ function focusIncompleteNode(id){
 }
 function scenarioEdges(ids){
   const set=new Set(ids);
-  const base=(G.edges||[]).filter(e=>set.has(e.from_node)&&set.has(e.to_node));
-  return base.concat(scenPeripheralEdges.filter(e=>set.has(e.from_node)&&set.has(e.to_node)));
+  const mark=edge=>({...edge,todo:!!(byId[edge.from_node]?.planned||byId[edge.to_node]?.planned)});
+  const base=(G.edges||[]).filter(e=>set.has(e.from_node)&&set.has(e.to_node)).map(mark);
+  return base.concat(scenPeripheralEdges.filter(e=>set.has(e.from_node)&&set.has(e.to_node)).map(mark));
 }
 function redrawScenarioEdges(){
   const stage=$("scenStage"),svg=$("scenEdges");
@@ -609,20 +759,30 @@ function renderScenario(){
     }
     return card;
   };
-  if(path.endpoint){
-    stack(path.endpoint,"endpoint",{});
-    stack(path.scenario,"scenario",{});
-    (path.called_scenarios||[]).forEach(id=>{if(id!==selectedScenario)stack(id,"scenario",{nested:true})});
-    (path.io_calls||[]).forEach(id=>stack(id,"io",{}));
-    (path.models||[]).forEach(id=>stack(id,"model",{}));
-    (path.tests||[]).forEach(id=>stack(id,"tests",{}));
-  }else{
+  if(path.endpoint)stack(path.endpoint,"endpoint",{});
+  else{
     const note=document.createElement("div");note.className="hint";note.style.position="absolute";note.style.left="14px";note.style.top="42px";
-    note.textContent="нет эндпоинта — смотрите область «неполные»";layers.endpoint.appendChild(note);
+    note.textContent="нет эндпоинта — узел в «неполных», но цепочка показана";layers.endpoint.appendChild(note);
   }
+  stack(path.scenario,"scenario",{});
+  (path.called_scenarios||[]).forEach(id=>{if(id!==selectedScenario)stack(id,"scenario",{nested:true})});
+  (path.io_calls||[]).forEach(id=>stack(id,"io",{}));
+  (path.models||[]).forEach(id=>stack(id,"model",{}));
+  (path.tests||[]).forEach(id=>stack(id,"tests",{}));
+  const shown=new Set([path.endpoint,path.scenario,...(path.called_scenarios||[]),...(path.io_calls||[]),...(path.models||[]),...(path.tests||[])].filter(Boolean));
+  (G.edges||[])
+    .filter(edge=>edge.from_node===selectedScenario||edge.to_node===selectedScenario)
+    .forEach(edge=>{
+      const otherId=edge.from_node===selectedScenario?edge.to_node:edge.from_node;
+      if(shown.has(otherId)||!byId[otherId])return;
+      const other=byId[otherId];
+      const layer=other.kind==="test"?"tests":other.kind;
+      if(layers[layer]){stack(otherId,layer,{nested:true});shown.add(otherId)}
+    });
   const columnX={scenario:14,io:330,model:646,test:962,endpoint:14};
   const columnY={};
   incompleteNodes()
+    .filter(n=>!shown.has(n.id))
     .slice()
     .sort((a,b)=>(KIND_NAMES[a.kind]||"").localeCompare(KIND_NAMES[b.kind]||"")||a.label.localeCompare(b.label))
     .forEach(n=>{
@@ -713,7 +873,7 @@ function currentPositions(){
 }
 function uiSnapshot(){
   return{
-    tab,selectedScenario,selectedNode,hideMeta,editor:editorId,editorTemplate,
+    tab,selectedScenario,selectedNode,hideMeta,todoHighlight,editor:editorId,editorTemplate,
     views:{map:mapView,scen:scenView,create:createView},
     positions:currentPositions(),
     listOpen:Object.fromEntries(listOpen),
@@ -734,6 +894,8 @@ function restoreUiState(saved){
   if(byId[saved.selectedNode])selectedNode=saved.selectedNode;
   if((G.scenario_paths||{})[saved.selectedScenario])selectedScenario=saved.selectedScenario;
   hideMeta=!!saved.hideMeta;
+  todoHighlight=!!saved.todoHighlight;
+  applyTodoHighlight();
   if(EDITORS.some(e=>e.id===saved.editor))editorId=saved.editor;
   if(typeof saved.editorTemplate==="string")editorTemplate=saved.editorTemplate;
   for(const key of ["map","scen","create"]){
@@ -887,11 +1049,24 @@ function openDiagnostics(){
 /* ---------- ТЗ для AI-агента ---------- */
 function updateBriefBadge(){
   const button=$("briefBtn");if(!button)return;
-  const info=verifyLabel(briefReport,G);
-  button.textContent=(info.urgent?"● ":"")+info.text;
-  button.title=info.title;
-  button.classList.toggle("err",!!info.urgent);
+  const stats=plannedStats(G);
+  const urgent=stats.unready>0;
+  let title=`Планируемых узлов: ${stats.total} · без описания: ${stats.unready}`;
+  if(briefReport&&Number(briefReport.total)>0)title+=` · ТЗ выполнено ${briefReport.done}/${briefReport.total}`;
+  button.textContent=`${urgent?"● ":""}TODO: ${stats.total}`;
+  button.title=title;
+  button.classList.toggle("err",urgent);
   button.classList.toggle("warn",false);
+  button.classList.toggle("on",todoHighlight);
+}
+function applyTodoHighlight(){
+  document.body.classList.toggle("todo-highlight",todoHighlight);
+  const button=$("briefBtn");if(button)button.classList.toggle("on",todoHighlight);
+}
+function toggleTodoHighlight(){
+  todoHighlight=!todoHighlight;
+  applyTodoHighlight();
+  schedulePersist();
 }
 function scheduleBriefStatus(){
   if(briefStatusTimer)clearTimeout(briefStatusTimer);
@@ -1168,8 +1343,9 @@ function renderInspector(){
     foot.textContent="Правки сохраняются при потере фокуса.";return;
   }
   const n=byId[selectedNode];
-  chips.innerHTML=`<span class="chip acc">${esc(KIND_NAMES[n.kind]||n.kind)}</span>${n.planned?'<span class="chip plan">без кода</span>':""}<span class="chip">${esc(n.file_path)}${n.planned?"":":"+n.line}</span>`;
+  chips.innerHTML=`<span class="chip acc">${esc(KIND_NAMES[n.kind]||n.kind)}</span>${todoBadgeHtml(n)}<span class="chip">${esc(n.file_path)}${n.planned?"":":"+n.line}</span>`;
   let h="";
+  if(n.planned)h+=`<div class="insp-todo">Кода пока нет. Файл-план: <b>${esc(n.file_path)}</b></div>`;
   h+=`<div class="kv"><span>якорь</span><b>${esc(anchorText(n))}</b></div>`;
   h+=`<div class="insp-actions"><button id="openEditorBtn" type="button">Открыть в редакторе</button><button id="copyLocBtn" type="button">Копировать путь:строка</button></div>`;
   h+=`<div class="note">Если ничего не произошло — выберите другой редактор в шапке или проверьте, что протокол редактора зарегистрирован.</div>`;
@@ -1179,8 +1355,8 @@ function renderInspector(){
       extraRoutes.map(route=>`${esc(String(route.http_method||"").toUpperCase())} ${esc(route.url_path||route.path||"")}`).join("<br>")+
       `</div></div>`;
   }
-  h+=`<div class="field"><label>Описание</label><textarea id="fDesc" rows="5">${esc(n.description)}</textarea></div>`;
-  h+=`<div class="field"><label>Критерии приёмки (по одному на строку)</label><textarea id="fAcc" rows="5">${esc((n.acceptance||[]).join("\n"))}</textarea></div>`;
+  h+=`<div class="field"><label>${isTodo(n)?"Что сделать":"Описание"}</label><textarea id="fDesc" rows="5">${esc(n.description)}</textarea></div>`;
+  h+=`<div class="field"><label>${isTodo(n)?"Что сделать: критерии приёмки":"Критерии приёмки (по одному на строку)"}</label><textarea id="fAcc" rows="5">${esc((n.acceptance||[]).join("\n"))}</textarea></div>`;
   if(n.kind==="endpoint"){
     h+=`<div class="field"><label>Домен</label><input id="fDomain" value="${esc(n.domain)}" placeholder="например, orders"><div class="note">Домен назначается только эндпоинту; остальные узлы наследуют его автоматически.</div></div>`;
   }else{
@@ -1524,6 +1700,21 @@ async function submitCreate(){
   }
 }
 
+/* ---------- чип TODO ---------- */
+function setTodoMenu(open){
+  const panel=$("todoMenuPanel");if(!panel)return;
+  panel.hidden=!open;
+}
+function initTodoChip(){
+  const chip=$("briefBtn"),menu=$("todoMenuBtn"),action=$("todoBriefAction");
+  if(chip)chip.onclick=toggleTodoHighlight;
+  if(menu)menu.onclick=ev=>{ev.stopPropagation();setTodoMenu($("todoMenuPanel").hidden)};
+  if(action)action.onclick=()=>{setTodoMenu(false);openBriefDialog()};
+  document.addEventListener("click",ev=>{
+    if(!ev.target.closest||!ev.target.closest(".todo-chip-wrap"))setTodoMenu(false);
+  });
+}
+
 /* ---------- инициализация ---------- */
 function activeView(){
   if(tab==="map")return{view:mapView,id:"mapView",canvas:$("mapCanvas")};
@@ -1578,7 +1769,7 @@ async function boot(){
     }catch(e){toast("ошибка скана: "+e.message)}
   };
   $("diagBtn").onclick=openDiagnostics;
-  if($("briefBtn"))$("briefBtn").onclick=()=>{if(briefReport&&briefReport.total>0)openBriefStatus();else openBriefDialog()};
+  initTodoChip();
   if($("logoBtn"))$("logoBtn").onclick=showAbout;
   $("createClear").onclick=()=>{
     if(!createState.nodes.length)return;

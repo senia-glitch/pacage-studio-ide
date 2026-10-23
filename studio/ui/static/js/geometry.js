@@ -47,8 +47,8 @@ export function groupByMethodDomain(endpoints) {
   const groups = new Map();
   for (const endpoint of endpoints || []) {
     const details = endpoint.details || {};
-    const method = String(details.http_method || "").toUpperCase() || "БЕЗ МЕТОДА";
-    const domain = String(endpoint.domain || "").trim() || "без домена";
+    const method = String(details.http_method || "").toUpperCase() || "Метод не указан";
+    const domain = String(endpoint.domain || "").trim() || "Без домена";
     if (!groups.has(method)) groups.set(method, new Map());
     const byDomain = groups.get(method);
     if (!byDomain.has(domain)) byDomain.set(domain, []);
