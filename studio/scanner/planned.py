@@ -150,7 +150,14 @@ def _planned_node(
             "response": None,
         }
     elif kind == "model":
-        details = {"tablename": "", "class_name": anchor, "source_file": rel}
+        details = {
+            "tablename": "",
+            "table": "",
+            "class_name": anchor,
+            "source_file": rel,
+            "fields": [],
+            "doc": "",
+        }
     elif kind == "test":
         details = {"test_name": anchor, "module": module}
     elif kind == "io":
@@ -174,6 +181,7 @@ def _planned_node(
         label=anchor,
         file_path=rel,
         line=0,
+        end_line=0,
         details=details,
         description=fields.get("description", ""),
         acceptance=list(fields.get("acceptance") or []),
@@ -197,6 +205,7 @@ def scan_planned(
 
     builder = graph if isinstance(graph, GraphBuilder) else None
     snapshot = builder.snapshot() if builder is not None else graph
+    existing_ids = {node.id for node in snapshot.nodes}
     for source in sources.files:
         if source.tree is None:
             continue
@@ -218,9 +227,9 @@ def scan_planned(
         node = _planned_node(env, rel, kind, anchor, fields, source.sha1)
         if builder is not None:
             builder.add_node(node)
-        else:
-            if not any(existing.id == node.id for existing in graph.nodes):
-                graph.nodes.append(node)
+        elif node.id not in existing_ids:
+            graph.nodes.append(node)
+            existing_ids.add(node.id)
         snapshot = builder.snapshot() if builder is not None else graph
 
     scenarios: dict[str, str] = {}

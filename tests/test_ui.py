@@ -39,6 +39,7 @@ def test_статика_на_месте():
     assert (STATIC / "app.css").is_file()
     assert (STATIC / "js/main.js").is_file()
     assert (STATIC / "js/legacy.js").is_file()
+    assert (STATIC / "js/briefmodel.js").is_file()
     assert '<meta name="studio-token" content="">' in HTML
 
 
@@ -51,3 +52,10 @@ def test_есть_ключевые_возможности():
     assert "Неполные" in LEGACY or "неполные" in LEGACY
     assert "inferEdgeKind" in LEGACY
     assert "enableNodeDrag" in LEGACY
+
+
+def test_есть_тз_для_агента():
+    assert 'id="briefBtn"' in HTML
+    assert "openBriefDialog" in LEGACY
+    assert "/api/brief" in LEGACY
+    assert "Выполнено" in LEGACY

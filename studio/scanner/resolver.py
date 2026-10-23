@@ -243,6 +243,7 @@ def resolve_io_and_tables(
                     label=_io_label(method, tables),
                     file_path=entry.file_path,
                     line=call.lineno,
+                    end_line=int(getattr(call.call, "end_lineno", call.lineno) or call.lineno),
                     details=IODetails(
                         method=method,
                         table=tables[0] if tables else None,

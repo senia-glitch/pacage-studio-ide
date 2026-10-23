@@ -117,6 +117,9 @@ def apply_metadata_edges(
         edge_id = f"{source}::{spec.kind}::{target}"
         if builder.has_edge(edge_id):
             continue
+        metadata_only = not any(
+            edge.from_node == source and edge.to_node == target for edge in builder.edges()
+        )
         builder.remove_edges_between(source, target)
         builder.add_edge(
             Edge(
@@ -125,6 +128,7 @@ def apply_metadata_edges(
                 to_node=target,
                 kind=spec.kind,
                 line=spec.line,
+                origin="metadata" if metadata_only else "code",
             )
         )
 

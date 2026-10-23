@@ -46,6 +46,7 @@ version = {attr = "studio.__version__"}
 [tool.setuptools.package-data]
 "studio.ui" = ["static/*.html", "static/*.css", "static/js/*.js", "static/js/package.json"]
 "studio.metadata" = ["rules.md"]
+"studio.agent" = ["rules.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

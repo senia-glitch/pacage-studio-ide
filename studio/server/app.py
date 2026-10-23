@@ -12,6 +12,7 @@ from pathlib import Path
 
 from studio import log as slog
 from studio._constants import MAX_HTTP_BODY
+from studio.agent import BriefError, BriefNotFound
 from studio.creator import CreateError
 from studio.metadata import MetadataError
 from studio.server.security import (
@@ -183,6 +184,11 @@ def make_handler(ctx):
                 self._error(status, code, exc.message, getattr(exc, "details", None))
             except UndoNotFound:
                 self._error(404, "undo_not_found", "Запись для отмены не найдена")
+            except BriefNotFound as exc:
+                self._error(404, "brief_not_found", exc.message)
+            except BriefError as exc:
+                status = 422 if exc.code == "not_writable" else 400
+                self._error(status, exc.code, exc.message)
             except CreateError as exc:
                 self._error(409, "create_rejected", str(exc))
             except (BrokenPipeError, ConnectionResetError):
@@ -260,6 +266,10 @@ def make_handler(ctx):
                 except ValueError:
                     rev = 0
                 return self._json({"revision": state.wait_for_change(rev)})
+            if url.path == "/api/verify":
+                query = urllib.parse.parse_qs(url.query)
+                target = (query.get("brief") or [None])[0]
+                return self._json(state.verify_brief(target))
             return self._error(404, "not_found", "Не найдено")
 
         # --------------------------------------------------------------- POST
@@ -294,6 +304,10 @@ def make_handler(ctx):
                     raise
             if url.path == "/api/create":
                 return self._json(state.create(data))
+            if url.path == "/api/brief":
+                return self._json(state.brief(data))
+            if url.path == "/api/brief/save":
+                return self._json(state.save_brief(data))
             if url.path == "/api/undo":
                 undo_id = str(data.get("undo_id") or "")
                 if not undo_id:

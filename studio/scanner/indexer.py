@@ -34,6 +34,61 @@ def _doc(*nodes: ast.AST | None) -> str | None:
     return "\n\n".join(parts) if parts else None
 
 
+def _first_doc_line(*nodes: ast.AST | None) -> str:
+    """Первая строка docstring (≤ 200 символов) — для карточек ТЗ (S12)."""
+    text = _doc(*nodes) or ""
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            return line[:200]
+    return ""
+
+
+def signature_of(
+    node: ast.AST, *, include_decorators: bool = False, extra: list[ast.AST] | None = None
+) -> str:
+    """Сигнатура без тела: декораторы + def/class + параметры (S12)."""
+    parts: list[str] = []
+    try:
+        decorators = getattr(node, "decorator_list", []) or [] if include_decorators else []
+        parts.extend(f"@{ast.unparse(dec)}" for dec in decorators)
+        if isinstance(node, ast.ClassDef):
+            bases = ", ".join(ast.unparse(base) for base in node.bases)
+            parts.append(f"class {node.name}({bases}):" if bases else f"class {node.name}:")
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
+            args = ast.unparse(node.args)
+            returns = f" -> {ast.unparse(node.returns)}" if node.returns else ""
+            parts.append(f"{prefix} {node.name}({args}){returns}:")
+        for item in extra or []:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                args = ast.unparse(item.args)
+                returns = f" -> {ast.unparse(item.returns)}" if item.returns else ""
+                prefix = "async def" if isinstance(item, ast.AsyncFunctionDef) else "def"
+                parts.append(f"{prefix} {item.name}({args}){returns}:")
+    except (ValueError, RecursionError, MemoryError, AttributeError):
+        return ""
+    return "\n".join(parts)
+
+
+def model_fields(node: ast.ClassDef) -> list[dict]:
+    """Поля модели: AnnAssign тела класса (name, annotation, default)."""
+    out: list[dict] = []
+    for item in node.body:
+        if not isinstance(item, ast.AnnAssign) or not isinstance(item.target, ast.Name):
+            continue
+        try:
+            annotation = ast.unparse(item.annotation)
+        except (ValueError, RecursionError, MemoryError):
+            annotation = ""
+        try:
+            default = ast.unparse(item.value) if item.value is not None else ""
+        except (ValueError, RecursionError, MemoryError):
+            default = ""
+        out.append({"name": item.target.id, "annotation": annotation, "default": default})
+    return out
+
+
 @dataclass
 class ScenarioEntry:
     name: str
@@ -45,6 +100,8 @@ class ScenarioEntry:
     response: str | None
     class_node: ast.ClassDef
     doc: str | None = None
+    end_line: int = 1
+    signature: str = ""
 
 
 @dataclass
@@ -54,6 +111,8 @@ class ModelEntry:
     file_path: str
     line: int
     doc: str | None = None
+    end_line: int = 1
+    fields: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -77,6 +136,8 @@ class EndpointEntry:
     url_path: str = ""
     nested_path: str = ""
     extra_routes: list[dict] = field(default_factory=list)
+    end_line: int = 1
+    signature: str = ""
 
 
 @dataclass
@@ -193,6 +254,8 @@ def index_scenarios(
                 response=kwarg_str_value(dec, "response"),
                 class_node=node,
                 doc=_doc(node, execute),
+                end_line=int(getattr(node, "end_lineno", node.lineno) or node.lineno),
+                signature=signature_of(node, extra=[execute] if execute is not None else None),
             )
     return out
 
@@ -250,6 +313,8 @@ def index_models(
             file_path=source.rel,
             line=node.lineno,
             doc=_doc(node),
+            end_line=int(getattr(node, "end_lineno", node.lineno) or node.lineno),
+            fields=model_fields(node),
         )
     return out
 
@@ -550,6 +615,8 @@ def index_endpoints(
                     url_path=_join_paths(*url_parts),
                     nested_path=router_prefix,
                     extra_routes=extra,
+                    end_line=int(getattr(node, "end_lineno", node.lineno) or node.lineno),
+                    signature=signature_of(node, include_decorators=True),
                 )
             )
     return out

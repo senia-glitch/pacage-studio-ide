@@ -38,7 +38,7 @@ from studio.metadata.writer import (
     update_text_metadata,
 )
 from studio.metamodel import Graph
-from studio.source import SourceSet, iter_source_paths, load_sources
+from studio.source import SourceSet, load_sources
 
 __all__ = [
     "Anchor",
@@ -71,9 +71,6 @@ __all__ = [
 _block_text = block_text
 
 
-def _source_files(root: Path) -> list[Path]:
-    """Список файлов-источников (совместимость); читает только studio.source."""
-    return iter_source_paths(read_env(root))
 
 
 def scan_metadata(

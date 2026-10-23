@@ -7,9 +7,13 @@ studio doctor                  # одна команда: что найдено 
 studio                         # скан + интерфейс, браузер откроется сам
 studio scan [--json]           # только пересобрать .studio/graph.json
 studio list [--json]           # сценарии в терминале
-studio export [--out PATH]     # STUDIO_METADATA.md
+studio brief [--stdout] [--only ANCHOR] [--scenario NAME]
+studio verify [BRIEF]          # проверить выполнение ТЗ
+studio export [--out PATH]     # устаревший псевдоним brief --map full
 studio install-full            # fastbase[full] в текущий venv
 ```
+
+Подробности о ТЗ для AI-агента — в [agent-brief.md](agent-brief.md).
 
 Остановка интерфейса — `Ctrl+C`. При старте пакет сканирует проект и только
 потом открывает браузер. Сервер слушает только loopback; запись защищена

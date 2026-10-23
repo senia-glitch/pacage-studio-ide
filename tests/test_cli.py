@@ -99,22 +99,22 @@ def test_install_full_запускает_pip(demo: Path, monkeypatch, capsys):
 
 
 def test_export_создаёт_документ(demo: Path, capsys):
-    from studio.exporter import EXPORT_FILENAME
-
     assert cli.main(["export", "--project", str(demo)]) == 0
-    target = demo / EXPORT_FILENAME
+    out = capsys.readouterr().out
+    assert "устарел" in out
+    target = demo / ".studio/agent-brief.md"
     assert target.is_file()
     text = target.read_text(encoding="utf-8")
-    assert "Правила ручного редактирования метаданных" in text
-    assert "## Полные сценарии" in text
-    assert "## Неполные узлы" in text
-    assert text.index("## Полные сценарии") < text.index("## Неполные узлы")
+    assert text.startswith("# ТЗ для AI-агента")
+    assert "## 2. Правила работы (обязательны)" in text
+    assert "## 5. Карта проекта" in text
 
 
 def test_export_out(demo: Path, capsys):
     target = demo / "docs/out.md"
     assert cli.main(["export", "--project", str(demo), "--out", str(target)]) == 0
     assert target.is_file()
+    assert target.read_text(encoding="utf-8").startswith("# ТЗ для AI-агента")
 
 
 def test_параметр_project_без_команды(demo: Path, monkeypatch):

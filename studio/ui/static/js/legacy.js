@@ -1,5 +1,14 @@
 import {api as apiRequest, onRevision, studioToken} from "./api.js";
 import {
+  briefRequest,
+  defaultMapMode,
+  plannedNodes,
+  plannedStats,
+  shortPrompt,
+  statusText,
+  verifyLabel,
+} from "./briefmodel.js";
+import {
   enableNodeDrag as enableNodeDragImpl,
   enableZoneDrag as enableZoneDragImpl,
 } from "./drag.js";
@@ -59,12 +68,15 @@ onRevision(value=>{studioRevision=Math.max(studioRevision,value)});
 const api=apiRequest;
 let uiStorage=null,saveState="idle",formDirty=false,persistTimer=null,lastSearchQuery="";
 let editorTemplate="",editorId="vscode",studioInfo=null;
+let briefReport=null,briefLast=null,briefStatusTimer=null,briefPreview=null;
 try{editorTemplate=localStorage.getItem("studio:editor-template")||"";editorId=localStorage.getItem("studio:editor")||"vscode"}catch(_){ }
 
 
 function applyGraph(g){G=g||{};byId={};(G.nodes||[]).forEach(n=>byId[n.id]=n);
   if(selectedScenario&&!G.scenario_paths?.[selectedScenario])selectedScenario=null;
   if(selectedNode&&!byId[selectedNode])selectedNode=null;
+  updateBriefBadge();
+  scheduleBriefStatus();
 }
 function methodOfEndpoint(n){const m=String((n.details||{}).http_method||"").toUpperCase();return m||"БЕЗ МЕТОДА"}
 function urlOfEndpoint(n){const d=n.details||{};return d.url_path||d.path||""}
@@ -872,6 +884,177 @@ function openDiagnostics(){
     };
   });
 }
+/* ---------- ТЗ для AI-агента ---------- */
+function updateBriefBadge(){
+  const button=$("briefBtn");if(!button)return;
+  const info=verifyLabel(briefReport,G);
+  button.textContent=(info.urgent?"● ":"")+info.text;
+  button.title=info.title;
+  button.classList.toggle("err",!!info.urgent);
+  button.classList.toggle("warn",false);
+}
+function scheduleBriefStatus(){
+  if(briefStatusTimer)clearTimeout(briefStatusTimer);
+  briefStatusTimer=setTimeout(refreshBriefStatus,300);
+}
+async function refreshBriefStatus(){
+  try{
+    briefReport=await api("/api/verify?brief=last");
+  }catch(e){
+    if(e.status===404)briefReport=null;else return;
+  }
+  updateBriefBadge();
+}
+function briefNodeChoice(node,selected){
+  const ready=!!String(node.description||"").trim();
+  const hint=ready?"готов к реализации":"нет описания — заполните в студии";
+  return `<label class="brief-node${ready?"":" disabled"}" title="${esc(node.id)}">
+    <input type="checkbox" data-bid="${esc(node.id)}" ${selected.has(node.id)&&ready?"checked":""} ${ready?"":"disabled"}>
+    <span><b>${esc(KIND_NAMES[node.kind]||node.kind)} ${esc(anchorText(node))}</b>
+    <small>${esc(node.file_path)} · ${esc(hint)}</small></span></label>`;
+}
+function briefStatusList(report){
+  if(!report||!report.items||!report.items.length)return '<p class="hint">Отчёт пуст.</p>';
+  return report.items.map(item=>{
+    const cls=item.status==="выполнено"?"ok":item.status==="частично"?"warn":"err";
+    const where=item.file?`<button class="link diag-open" data-file="${esc(item.file)}" data-line="${item.line||1}">${esc(item.file)}:${esc(item.line||1)}</button>`:"";
+    return `<div class="brief-status-row ${cls}"><span class="chip">T${esc(item.number)}</span><div><b>${esc(KIND_NAMES[item.kind]||item.kind)} ${esc(item.anchor)}</b> — ${esc(item.status)} ${where}<div class="hint">${esc(item.message||"")}</div></div></div>`;
+  }).join("");
+}
+function openBriefStatus(){
+  if(!briefReport){openBriefDialog();return}
+  modal("ТЗ для AI-агента",`<div class="brief-stats">Выполнено ${briefReport.done} из ${briefReport.total} · ${esc(statusText(briefReport))}</div>${briefStatusList(briefReport)}`,[
+    {label:"Открыть ТЗ",action:()=>openBriefDialog()},
+    {label:"Закрыть",cls:"primary",action:()=>{}},
+  ]);
+  document.querySelectorAll(".diag-open").forEach(button=>{
+    button.onclick=()=>openEditorForNode({file_path:button.dataset.file,line:Number(button.dataset.line)||1,planned:false});
+  });
+}
+async function openBriefDialog(){
+  await flushPending();
+  const nodes=plannedNodes(G);
+  const includeEmpty=false;
+  const selected=new Set(nodes.filter(node=>String(node.description||"").trim()).map(node=>node.id));
+  const mapMode=defaultMapMode(((G&&G.nodes)||[]).length);
+  const overlay=document.createElement("div");
+  overlay.className="studio-modal";
+  overlay.innerHTML=`<div class="modal-box brief-box"><h3>ТЗ для AI-агента</h3>
+    <div class="brief-layout">
+      <div class="brief-left">
+        <div class="brief-controls">
+          <label class="hint">Карта:
+            <select id="briefMap">
+              <option value="related">связанная</option>
+              <option value="full">вся</option>
+              <option value="compact">кратко</option>
+              <option value="none">нет</option>
+            </select>
+          </label>
+          <label class="hint"><input type="checkbox" id="briefEmpty"> включать узлы без описания</label>
+          <div class="hint">Планируемые узлы: ${nodes.length} · отмечены готовые.</div>
+        </div>
+        <div id="briefNodes">${nodes.length?nodes.map(node=>briefNodeChoice(node,selected)).join(""):'<p class="hint">Планируемых узлов нет. Добавьте их во вкладке «Создание».</p>'}</div>
+      </div>
+      <div class="brief-preview">
+        <div class="brief-stats" id="briefStats">Подготовка…</div>
+        <pre id="briefPreview">Собираю ТЗ…</pre>
+        <div class="hint">ТЗ содержит фрагменты вашего кода и описания. Перед отправкой во внешний AI-сервис это решает пользователь.</div>
+        <div class="brief-actions">
+          <button type="button" id="briefCopy">Скопировать ТЗ</button>
+          <button type="button" id="briefPrompt">Скопировать короткий промпт</button>
+          <button type="button" id="briefDownload">Скачать .md</button>
+          <button type="button" class="primary" id="briefSave">Сохранить в проект</button>
+          <button type="button" id="briefClose">Закрыть</button>
+        </div>
+      </div>
+    </div></div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click",ev=>{if(ev.target===overlay)overlay.remove()});
+  const mapSelect=overlay.querySelector("#briefMap");
+  mapSelect.value=briefLast&&briefLast.options&&briefLast.options.map||mapMode;
+  const emptyBox=overlay.querySelector("#briefEmpty");
+  let includeEmptyValue=includeEmpty;
+  emptyBox.checked=includeEmptyValue;
+  const preview=overlay.querySelector("#briefPreview");
+  const statsBox=overlay.querySelector("#briefStats");
+  briefPreview=preview;
+  let currentMarkdown="";
+  let currentPath=".studio/agent-brief.md";
+  const collect=()=>{
+    const chosen=[...overlay.querySelectorAll('#briefNodes input[data-bid]:checked')].map(input=>input.dataset.bid);
+    return briefRequest({selected:chosen,map:mapSelect.value,includeEmpty:includeEmptyValue});
+  };
+  const generate=async()=>{
+    statsBox.textContent="Собираю ТЗ…";
+    try{
+      const data=await api("/api/brief","POST",collect());
+      currentMarkdown=data.markdown||"";
+      briefLast=data;
+      preview.textContent=currentMarkdown;
+      const stats=data.stats||{};
+      statsBox.textContent=`Задач: ${stats.tasks||0} · не готово: ${stats.unready||0} · ${stats.chars||0} символов (~${stats.approx_tokens||0} токенов)`+
+        ((data.warnings||[]).length?` · предупреждений: ${data.warnings.length}`:"");
+      if((data.warnings||[]).length){
+        statsBox.title=data.warnings.join("\n");
+        statsBox.textContent+=" · подробности в подсказке";
+      }
+      if(data.brief_id){
+        try{briefReport=await api("/api/verify?brief="+encodeURIComponent(data.brief_id));}catch(_){}
+      }
+      updateBriefBadge();
+    }catch(e){
+      statsBox.textContent="Ошибка: "+e.message;
+    }
+  };
+  const scheduleGenerate=()=>{clearTimeout(overlay._timer);overlay._timer=setTimeout(generate,220)};
+  overlay.querySelectorAll('#briefNodes input[data-bid]').forEach(input=>input.onchange=scheduleGenerate);
+  mapSelect.onchange=scheduleGenerate;
+  emptyBox.onchange=()=>{
+    includeEmptyValue=emptyBox.checked;
+    nodes.forEach(node=>{
+      const input=[...overlay.querySelectorAll("#briefNodes input[data-bid]")].find(el=>el.dataset.bid===node.id);
+      if(!input)return;
+      const ready=!!String(node.description||"").trim();
+      if(!ready){
+        input.disabled=!includeEmptyValue;
+        if(includeEmptyValue)input.checked=true;
+      }
+    });
+    scheduleGenerate();
+  };
+  const copyText=(text,message)=>{
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(()=>toast(message)).catch(()=>toast("Не удалось скопировать"));
+      return;
+    }
+    const area=document.createElement("textarea");
+    area.value=text;area.style.position="fixed";area.style.opacity="0";document.body.appendChild(area);area.select();
+    try{document.execCommand("copy");toast(message)}catch(_){toast("Не удалось скопировать")}
+    area.remove();
+  };
+  overlay.querySelector("#briefCopy").onclick=()=>copyText(currentMarkdown||preview.textContent,"ТЗ скопировано");
+  overlay.querySelector("#briefPrompt").onclick=()=>copyText(shortPrompt(currentPath),"Промпт скопирован");
+  overlay.querySelector("#briefDownload").onclick=()=>{
+    const blob=new Blob([currentMarkdown||preview.textContent],{type:"text/markdown;charset=utf-8"});
+    const link=document.createElement("a");
+    link.href=URL.createObjectURL(blob);link.download="agent-brief.md";document.body.appendChild(link);link.click();link.remove();
+    setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+  };
+  overlay.querySelector("#briefSave").onclick=async()=>{
+    try{
+      const data=await api("/api/brief/save","POST",collect());
+      currentPath=data.path||currentPath;
+      toast("ТЗ сохранено: "+currentPath);
+      if(data.brief_id){
+        try{briefReport=await api("/api/verify?brief="+encodeURIComponent(data.brief_id));}catch(_){}
+        updateBriefBadge();
+      }
+    }catch(e){toast("Ошибка сохранения ТЗ: "+e.message)}
+  };
+  overlay.querySelector("#briefClose").onclick=()=>{clearTimeout(overlay._timer);overlay.remove()};
+  await generate();
+}
 function modal(title,bodyHtml,buttons){
   document.querySelectorAll(".studio-modal").forEach(el=>el.remove());
   const overlay=document.createElement("div");
@@ -1335,7 +1518,7 @@ async function submitCreate(){
     (data.created||[]).forEach(c=>lines.push(`  ${c.path}  — ${KIND_NAMES[c.kind]||c.kind} ${c.name}`));
     lines.push("");lines.push("Кода в файлах нет: это TODO для разработчика. После написания кода узлы появятся на карте.");
     result.textContent=lines.join("\n");
-    toast("файлы созданы");
+    toastAction("файлы созданы","Сформировать ТЗ",()=>openBriefDialog());
   }catch(e){
     result.style.display="block";result.textContent="Ошибка: "+e.message;
   }
@@ -1395,6 +1578,7 @@ async function boot(){
     }catch(e){toast("ошибка скана: "+e.message)}
   };
   $("diagBtn").onclick=openDiagnostics;
+  if($("briefBtn"))$("briefBtn").onclick=()=>{if(briefReport&&briefReport.total>0)openBriefStatus();else openBriefDialog()};
   if($("logoBtn"))$("logoBtn").onclick=showAbout;
   $("createClear").onclick=()=>{
     if(!createState.nodes.length)return;
@@ -1406,6 +1590,8 @@ async function boot(){
   $("createSubmit").onclick=submitCreate;
   initSearch();
   updateDiagBadge();
+  updateBriefBadge();
+  refreshBriefStatus();
   setLive(false);
   startLive();
   window.addEventListener("beforeunload",ev=>{

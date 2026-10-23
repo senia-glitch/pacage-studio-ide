@@ -13,13 +13,25 @@ from pathlib import Path
 from studio import log as slog
 from studio import store
 from studio._atomic import atomic_write_bytes
+from studio.agent import (
+    BriefOptions,
+    build_brief,
+    load_brief,
+    save_brief_sidecars,
+)
+from studio.agent import (
+    save_brief as save_brief_file,
+)
+from studio.agent import (
+    verify_brief as verify_brief_data,
+)
 from studio.creator import CreateError, create_metadata_files
 from studio.env import read_env
 from studio.metadata import MetadataError, save_node_metadata
 from studio.metamodel import Graph, Node
 from studio.scanner import scan
 from studio.scanner.anchors import AnchorResolver
-from studio.source import stat_fingerprint
+from studio.source import load_sources, stat_fingerprint
 
 HISTORY_LIMIT = 20
 DEFAULT_POLL = 1.0
@@ -198,6 +210,65 @@ class ProjectState:
                 ],
                 "graph": graph.model_dump(),
             }
+
+    # -------------------------------------------------------------- agent
+
+    @staticmethod
+    def _brief_options(data: dict) -> BriefOptions:
+        scope = str(data.get("scope") or "")
+        only = None
+        if scope not in ("all", "scenario") and "only" in data:
+            raw_only = data.get("only") or []
+            if isinstance(raw_only, str):
+                raw_only = [raw_only]
+            only = tuple(str(item) for item in raw_only if str(item).strip())
+        return BriefOptions(
+            map_mode=str(data.get("map") or ""),
+            only=only,
+            scenario=str(data.get("scenario") or ""),
+            include_empty=bool(data.get("include_empty")),
+        )
+
+    def _collect_brief(self, data: dict):
+        sources = load_sources(read_env(self.root))
+        return build_brief(self.ensure_graph(), sources, self._brief_options(data))
+
+    def brief(self, data: dict) -> dict:
+        with self.lock:
+            brief = self._collect_brief(data)
+            save_brief_sidecars(self.root, brief)
+            return {
+                "markdown": brief.markdown,
+                "brief_id": brief.brief_id,
+                "fingerprint": brief.fingerprint,
+                "stats": brief.stats,
+                "warnings": brief.warnings,
+                "tasks": [
+                    {
+                        "number": item["number"],
+                        "kind": item["kind"],
+                        "anchor": item["anchor"],
+                        "target_file": item["target_file"],
+                    }
+                    for item in brief.tasks
+                ],
+                "unready": brief.unready,
+            }
+
+    def save_brief(self, data: dict) -> dict:
+        with self.lock:
+            brief = self._collect_brief(data)
+            path = save_brief_file(self.root, brief)
+            return {
+                "path": path.as_posix(),
+                "brief_id": brief.brief_id,
+                "stats": brief.stats,
+            }
+
+    def verify_brief(self, target: str | None) -> dict:
+        with self.lock:
+            data = load_brief(self.root, target)
+            return verify_brief_data(self.ensure_graph(), data)
 
     def undo(self, undo_id: str) -> dict:
         with self.lock:

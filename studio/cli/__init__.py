@@ -12,12 +12,22 @@ from pathlib import Path
 
 from studio import __version__, store
 from studio import log as slog
-from studio._atomic import atomic_write
 from studio._constants import FASTBASE_FULL_SPEC
-from studio.exporter import EXPORT_FILENAME, build_document
+from studio.agent import (
+    BriefError,
+    BriefNotFound,
+    BriefOptions,
+    build_brief,
+    load_brief,
+    render_report,
+    save_brief,
+    save_brief_sidecars,
+    verify_brief,
+)
+from studio.env import read_env
 from studio.scanner import scan
 from studio.server import PortInUse, serve
-from studio.source import module_files, tests_files
+from studio.source import load_sources, module_files, tests_files
 
 PROJECT_MARKERS = (".env.fastbase", "app", "models.py")
 
@@ -66,8 +76,8 @@ def _diagnostics_payload(graph) -> list[dict]:
     return [diagnostic.model_dump() for diagnostic in graph.diagnostics]
 
 
-def _endpoint_label(graph, endpoint_id: str) -> str:
-    node = graph.by_id().get(endpoint_id)
+def _endpoint_label(graph, endpoint_id: str, nodes: dict | None = None) -> str:
+    node = (nodes if nodes is not None else graph.by_id()).get(endpoint_id)
     if node is None:
         return endpoint_id
     details = node.details
@@ -137,7 +147,9 @@ def cmd_list(args) -> int:
             "groups": [
                 {
                     "endpoint": endpoint_id,
-                    "label": _endpoint_label(graph, endpoint_id) if endpoint_id else "",
+                    "label": _endpoint_label(graph, endpoint_id, nodes)
+                    if endpoint_id
+                    else "",
                     "scenarios": [
                         {
                             "id": scenario_id,
@@ -169,7 +181,7 @@ def cmd_list(args) -> int:
         order.append(None)
     for endpoint_id in order:
         header = (
-            f"endpoint {_endpoint_label(graph, endpoint_id)}"
+            f"endpoint {_endpoint_label(graph, endpoint_id, nodes)}"
             if endpoint_id
             else "(без endpoint)"
         )
@@ -204,20 +216,127 @@ def cmd_list(args) -> int:
     return 0
 
 
-def cmd_export(args) -> int:
+def _brief_options(args) -> BriefOptions:
+    raw_only = getattr(args, "only", None)
+    return BriefOptions(
+        map_mode=str(getattr(args, "map", "") or ""),
+        only=tuple(str(item) for item in raw_only) if raw_only else None,
+        scenario=str(getattr(args, "scenario", "") or ""),
+        include_empty=bool(getattr(args, "include_empty", False)),
+    )
+
+
+def cmd_brief(args) -> int:
     root, explicit = _find_root(args.project)
-    slog.start_run(root, "export")
+    slog.start_run(root, "brief")
     graph = scan(root)
-    content = build_document(graph)
-    target = Path(args.out) if getattr(args, "out", None) else root / EXPORT_FILENAME
-    if not target.is_absolute():
-        target = Path.cwd() / target
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if not atomic_write(target, content):
-        raise CliError(f"Не удалось записать {target}")
+    try:
+        sources = load_sources(read_env(root))
+        brief = build_brief(graph, sources, _brief_options(args))
+    except BriefError as exc:
+        raise CliError(exc.message) from exc
+
+    if getattr(args, "json", False):
+        try:
+            save_brief_sidecars(root, brief)
+        except BriefError as exc:
+            raise CliError(exc.message) from exc
+        print(
+            json.dumps(
+                {
+                    "root": root.as_posix(),
+                    "markdown": brief.markdown,
+                    "brief_id": brief.brief_id,
+                    "fingerprint": brief.fingerprint,
+                    "stats": brief.stats,
+                    "warnings": brief.warnings,
+                    "tasks": [
+                        {
+                            "number": item["number"],
+                            "kind": item["kind"],
+                            "anchor": item["anchor"],
+                            "target_file": item["target_file"],
+                        }
+                        for item in brief.tasks
+                    ],
+                    "unready": brief.unready,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if getattr(args, "stdout", False):
+        try:
+            save_brief_sidecars(root, brief)
+        except BriefError as exc:
+            raise CliError(exc.message) from exc
+        print(brief.markdown, end="")
+        return 0
+    target = Path(args.out) if getattr(args, "out", None) else None
+    try:
+        path = save_brief(root, brief, target)
+    except BriefError as exc:
+        raise CliError(exc.message) from exc
+    try:
+        shown = path.resolve().relative_to(root.resolve()).as_posix()
+    except (OSError, ValueError):
+        shown = path.as_posix()
     _print_root(root, explicit)
-    print(f"export: {target}")
+    print(f"ТЗ: {shown}")
+    print(
+        f"Задач: {brief.stats['tasks']} · не готово: {brief.stats['unready']} · "
+        f"{brief.stats['chars']} символов (~{brief.stats['approx_tokens']} токенов)"
+    )
+    print(
+        "ТЗ содержит фрагменты вашего кода и описания — перед отправкой "
+        "во внешний AI-сервис это решает пользователь."
+    )
+    for warning in brief.warnings:
+        print(f"  ! {warning}")
+    if brief.tasks:
+        print(
+            "Прочитай и выполни ТЗ из файла "
+            f"{shown}, следуй его правилам"
+        )
+    else:
+        print("Нет узлов к реализации")
+    for item in brief.unready:
+        print(
+            f"  не готово: {item['kind']} {item['anchor']} — {item['file']}: "
+            + ", ".join(item["missing"])
+        )
     return 0
+
+
+def cmd_verify(args) -> int:
+    root, explicit = _find_root(args.project)
+    slog.start_run(root, "verify")
+    graph = scan(root)
+    try:
+        data = load_brief(root, getattr(args, "brief", None))
+    except BriefNotFound as exc:
+        raise CliError(exc.message, 2) from exc
+    report = verify_brief(graph, data)
+    if getattr(args, "json", False):
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return int(report["code"])
+    _print_root(root, explicit)
+    print(render_report(report))
+    return int(report["code"])
+
+
+def cmd_export(args) -> int:
+    root, _explicit = _find_root(args.project)
+    slog.start_run(root, "export")
+    print("studio export устарел: используйте studio brief --map full")
+    args.map = "full"
+    args.only = []
+    args.scenario = ""
+    args.include_empty = False
+    args.json = False
+    args.stdout = False
+    return cmd_brief(args)
 
 
 def _source_stats(root, graph, env) -> list[dict]:
@@ -295,6 +414,18 @@ def cmd_doctor(args) -> int:
                         or ", ".join(path.name for path in env.models_paths),
                     },
                     "graph": _graph_counts(graph),
+                    "brief": {
+                        "tasks": sum(
+                            1
+                            for node in graph.nodes
+                            if node.planned and (node.description or "").strip()
+                        ),
+                        "unready": sum(
+                            1
+                            for node in graph.nodes
+                            if node.planned and not (node.description or "").strip()
+                        ),
+                    },
                     "diagnostics": _diagnostics_payload(graph),
                     "ok": code == 0,
                 },
@@ -324,6 +455,9 @@ def cmd_doctor(args) -> int:
         f"Граф: узлов {len(graph.nodes)} · связей {len(graph.edges)} · "
         f"неполных {incomplete}"
     )
+    planned = [node for node in graph.nodes if node.planned]
+    ready = sum(1 for node in planned if (node.description or "").strip())
+    print(f"К реализации: {ready} · не готово: {len(planned) - ready}")
     print(f"Диагностика: {len(errors)} ошибок · {len(warnings)} предупреждений")
     for diagnostic in graph.diagnostics:
         where = f" {diagnostic.file}:{diagnostic.line}" if diagnostic.file else ""
@@ -377,7 +511,11 @@ def cmd_help(args) -> int:
     print("                                       автоскан и интерфейс")
     print("  scan  [--project .] [--json]       код → .studio/graph.json")
     print("  list  [--project .] [--json]       сценарии в терминале")
-    print("  export [--project .] [--out PATH]  метаданные → STUDIO_METADATA.md")
+    print("  brief [--out PATH | --stdout] [--only A ...] [--scenario NAME]")
+    print("        [--map full|related|compact|none] [--include-empty] [--json]")
+    print("                                       ТЗ для AI-агента")
+    print("  verify [BRIEF] [--json]            проверить выполнение ТЗ")
+    print("  export [--project .] [--out PATH]  устаревший псевдоним brief --map full")
     print("  doctor [--project .] [--json] [--strict]  диагностика одной командой")
     print("  install-full [--project .]         установить/обновить fastbase[full]")
     print("  help                               этот экран")
@@ -418,7 +556,25 @@ def build_parser() -> argparse.ArgumentParser:
     list_p.add_argument("--json", action="store_true")
     list_p.set_defaults(f=cmd_list)
 
-    export_p = sub.add_parser("export", help="метаданные → STUDIO_METADATA.md")
+    brief_p = sub.add_parser("brief", help="ТЗ для AI-агента")
+    _add_project(brief_p)
+    brief_out = brief_p.add_mutually_exclusive_group()
+    brief_out.add_argument("--out", default=None, help="куда записать markdown")
+    brief_out.add_argument("--stdout", action="store_true", help="печатать ТЗ в stdout")
+    brief_p.add_argument("--only", action="append", default=[], metavar="ANCHOR")
+    brief_p.add_argument("--scenario", default="", metavar="NAME")
+    brief_p.add_argument("--map", choices=["full", "related", "compact", "none"], default="")
+    brief_p.add_argument("--include-empty", action="store_true")
+    brief_p.add_argument("--json", action="store_true")
+    brief_p.set_defaults(f=cmd_brief)
+
+    verify_p = sub.add_parser("verify", help="проверить выполнение ТЗ")
+    _add_project(verify_p)
+    verify_p.add_argument("brief", nargs="?", default=None, help="файл, id или last")
+    verify_p.add_argument("--json", action="store_true")
+    verify_p.set_defaults(f=cmd_verify)
+
+    export_p = sub.add_parser("export", help="устаревший псевдоним brief --map full")
     _add_project(export_p)
     export_p.add_argument("--out", default=None)
     export_p.set_defaults(f=cmd_export)

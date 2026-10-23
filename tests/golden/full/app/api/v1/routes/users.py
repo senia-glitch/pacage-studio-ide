@@ -15,6 +15,7 @@ SCENARIO = "create_user"
 @router.post("/create")
 @router.get("/list")
 async def create_user():
+    """Создаёт пользователя."""
     await _helper()
 
 

@@ -64,6 +64,7 @@ def _put_core_nodes(builder: GraphBuilder, index: Index) -> None:
                 label=f"{entry.http_method.upper()} {entry.url_path or entry.path or '/'}",
                 file_path=entry.file_path,
                 line=entry.line,
+                end_line=entry.end_line,
                 details=EndpointDetails(
                     http_method=entry.http_method,
                     path=entry.path,
@@ -72,6 +73,8 @@ def _put_core_nodes(builder: GraphBuilder, index: Index) -> None:
                     tags=list(entry.tags),
                     url_path=entry.url_path,
                     extra_routes=list(entry.extra_routes),
+                    signature=entry.signature,
+                    doc=entry.doc or "",
                 ).model_dump(),
             )
         )
@@ -85,12 +88,15 @@ def _put_core_nodes(builder: GraphBuilder, index: Index) -> None:
                 label=entry.name,
                 file_path=entry.file_path,
                 line=entry.line,
+                end_line=entry.end_line,
                 details=ScenarioDetails(
                     name=entry.name,
                     class_name=entry.class_name,
                     module=entry.module,
                     dto=entry.dto,
                     response=entry.response,
+                    signature=entry.signature,
+                    doc=(entry.doc or "").splitlines()[0][:200] if entry.doc else "",
                 ).model_dump(),
             )
         )
@@ -103,10 +109,14 @@ def _put_core_nodes(builder: GraphBuilder, index: Index) -> None:
                 label=entry.class_name,
                 file_path=entry.file_path,
                 line=entry.line,
+                end_line=entry.end_line,
                 details=ModelDetails(
                     tablename=entry.tablename,
+                    table=entry.tablename,
                     class_name=entry.class_name,
                     source_file=entry.file_path,
+                    fields=list(entry.fields),
+                    doc=(entry.doc or "").splitlines()[0][:200] if entry.doc else "",
                 ).model_dump(),
             )
         )
@@ -123,9 +133,12 @@ def _attach_tests(builder: GraphBuilder, env: ProjectEnv, index: Index, sources:
                     label=entry.test_name,
                     file_path=entry.file_path,
                     line=entry.line,
+                    end_line=entry.end_line,
                     details=TestDetails(
                         test_name=entry.test_name,
                         module=entry.module,
+                        signature=entry.signature,
+                        doc=entry.doc,
                     ).model_dump(),
                 )
             )

@@ -23,7 +23,7 @@ from studio.scanner.ast_utils import (
     resolve_run_name,
     run_aliases,
 )
-from studio.scanner.indexer import EndpointEntry, Index, scenario_node_id
+from studio.scanner.indexer import EndpointEntry, Index, scenario_node_id, signature_of
 from studio.source import SourceSet
 
 TESTS_DIR = "tests"
@@ -41,6 +41,9 @@ class TestEntry:
     module: str = ""
     file_path: str = ""
     line: int = 1
+    end_line: int = 1
+    signature: str = ""
+    doc: str = ""
 
 
 def _bare_test_name(name: str) -> str:
@@ -221,6 +224,7 @@ def index_tests(
                     else:
                         endpoint_match = target_id
 
+            doc = ast.get_docstring(node, clean=True) or ""
             out.append(
                 TestEntry(
                     test_name=test_name,
@@ -232,6 +236,9 @@ def index_tests(
                     module=module,
                     file_path=source.rel,
                     line=node.lineno,
+                    end_line=int(getattr(node, "end_lineno", node.lineno) or node.lineno),
+                    signature=signature_of(node),
+                    doc=doc.splitlines()[0][:200] if doc else "",
                 )
             )
 

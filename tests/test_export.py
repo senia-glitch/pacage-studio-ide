@@ -24,43 +24,37 @@ def _append_incomplete(demo: Path) -> None:
     )
 
 
-def test_документ_содержит_правила_и_разделы(demo: Path):
+def test_документ_теперь_тз_для_агента(demo: Path):
     document = build_document(scan(demo))
-    assert document.startswith("# Метаданные проекта pacage-studio")
-    assert "Правила ручного редактирования метаданных" in document
+    assert document.startswith("# ТЗ для AI-агента")
+    assert "## 2. Правила работы (обязательны)" in document
     assert "studio: description start" in document
-    assert "studio: edge start" in document
-    assert "## Полные сценарии" in document
+    assert "## 5. Карта проекта" in document
     assert "### Домен: orders, billing" in document
-    assert "#### POST" in document
     assert "create_order" in document
     assert "app/api/v1/routes/orders.py:" in document
+    assert EXPORT_FILENAME.endswith(".md")
 
 
-def test_неполные_выводятся_в_конце(demo: Path):
+def test_неполные_видны_в_карте(demo: Path):
     _append_incomplete(demo)
     document = build_document(scan(demo))
-    complete_pos = document.index("## Полные сценарии")
-    incomplete_pos = document.index("## Неполные узлы")
-    assert complete_pos < incomplete_pos
-    tail = document[incomplete_pos:]
-    assert "LonelyScenario" in tail
-    assert "test_lonely" in tail
-    assert "lonely" not in document[complete_pos:incomplete_pos]
+    assert "### 5.5 Узлы вне путей запроса (неполные)" in document
+    assert "LonelyScenario" in document
+    assert "test_lonely" in document
 
 
-def test_пустые_метаданные_помечаются(demo: Path):
+def test_без_задач_есть_карта(demo: Path):
     document = build_document(scan(demo))
-    assert "Описание: не заполнено" in document
-    assert "Критерии приёмки: не заполнено" in document
+    assert "## 4. Задачи" not in document
+    assert "## 5. Карта проекта" in document
+    assert "_db.create#1" in document
+    assert "_db.update#1" in document
 
 
-def test_полный_сценарий_содержит_путь_и_связи(demo: Path):
+def test_модели_и_тесты_в_карте(demo: Path):
     document = build_document(scan(demo))
-    section = document.split("## Прочие полные узлы")[0]
-    assert "_db.create(orders)" in section or "create" in section
-    assert "_db.update(users)" in section
-    assert "—dispatch→" in section
-    assert "—port_call→" in section
-    assert "—table→" in section
-    assert EXPORT_FILENAME.endswith(".md")
+    assert "### 5.3 Модели и таблицы" in document
+    assert "`orders`" in document
+    assert "### 5.4 Тесты (что покрывают)" in document
+    assert "test_create_order" in document

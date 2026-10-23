@@ -24,8 +24,18 @@ def test_spec_сохранён_и_дополнен():
     spec = (ROOT / "docs/SPEC.md").read_text(encoding="utf-8")
     assert "Изменения 4.0" in spec
     assert "S11" in spec
+    assert "S12" in spec
     original = ROOT / "ТЗ этого пакета - истина для его рефакторинга.txt"
     assert original.is_file()
+
+
+def test_правила_и_документация_агента():
+    rules = (ROOT / "studio/agent/rules.md").read_text(encoding="utf-8")
+    assert rules.count("\n1. ") == 1
+    assert "14. Итоговый отчёт" in rules
+    docs = (ROOT / "docs/agent-brief.md").read_text(encoding="utf-8")
+    assert "studio brief" in docs
+    assert "studio verify" in docs
 
 
 def test_changelog_и_license():

@@ -45,6 +45,8 @@ class EndpointDetails(BaseModel):
     tags: list[str] = Field(default_factory=list)
     url_path: str = ""
     extra_routes: list[dict] = Field(default_factory=list)
+    signature: str = ""
+    doc: str = ""
 
 
 class ScenarioDetails(BaseModel):
@@ -53,6 +55,8 @@ class ScenarioDetails(BaseModel):
     module: str = ""
     dto: str | None = None
     response: str | None = None
+    signature: str = ""
+    doc: str = ""
 
 
 class IODetails(BaseModel):
@@ -68,13 +72,18 @@ class IODetails(BaseModel):
 
 class ModelDetails(BaseModel):
     tablename: str
+    table: str = ""
     class_name: str
     source_file: str
+    fields: list[dict] = Field(default_factory=list)
+    doc: str = ""
 
 
 class TestDetails(BaseModel):
     test_name: str
     module: str = ""
+    signature: str = ""
+    doc: str = ""
 
 
 class Node(BaseModel):
@@ -83,6 +92,8 @@ class Node(BaseModel):
     label: str
     file_path: str
     line: int = 1
+    # Последняя строка элемента кода — для образцов в ТЗ (S12).
+    end_line: int = 1
     details: dict = Field(default_factory=dict)
     description: str = ""
     acceptance: list[str] = Field(default_factory=list)
@@ -104,6 +115,8 @@ class Edge(BaseModel):
     kind: EdgeKind
     label: str = ""
     line: int = 1
+    # Найдено анализом кода или только из блока edge (если пара совпала — code).
+    origin: Literal["code", "metadata"] = "code"
 
 
 class ScenarioPath(BaseModel):
