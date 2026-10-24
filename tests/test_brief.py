@@ -258,17 +258,30 @@ def _write_plan_project(root: Path) -> None:
             "async def base():\n"
             '    return await run("BaseScenarioName")\n'
         ),
-        "app/scenarios/cancel_order.py": (
-            "# Желаемое имя/якорь: CancelOrder\n"
-            "# studio: description start\n"
-            "# Отменяет заказ.\n"
-            "# studio: description end\n"
-        ),
     }
     for rel, text in files.items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
+    meta = {
+        "version": 1,
+        "nodes": {
+            "scenario:app/scenarios/cancel_order.py:CancelOrder": {
+                "kind": "scenario",
+                "name": "CancelOrder",
+                "file_path": "app/scenarios/cancel_order.py",
+                "target_file": "app/scenarios/cancel_order.py",
+                "description": "Отменяет заказ.",
+                "planned": True,
+                "details": {"name": "CancelOrder", "class_name": "CancelOrder"},
+            }
+        },
+        "edges": [],
+    }
+    (root / ".studio").mkdir(exist_ok=True)
+    (root / ".studio/metadata.json").write_text(
+        json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 def test_образец_обрезается_и_секреты_скрыты(tmp_path: Path):
@@ -328,8 +341,15 @@ def test_детали_узлов_и_origin_рёбер():
         if edge.kind == "dispatch" and "users.py:create_user" in edge.from_node
     )
     assert dispatch.origin == "code"
-    uses = next(edge for edge in graph.edges if edge.kind == "uses")
+    uses = next(
+        edge
+        for edge in graph.edges
+        if edge.kind == "uses" and edge.to_node == "model:models_planned.py:PlannedOrder"
+    )
     assert uses.origin == "metadata"
+    assert any(
+        edge.kind == "uses" and edge.to_node.startswith("nested:") for edge in graph.edges
+    )
 
 
 def test_сохранение_и_загрузка_тз(tmp_path: Path):
@@ -349,7 +369,7 @@ def test_cli_brief_stdout_only_and_export(demo: Path, capsys):
     assert main(["brief", "--project", str(demo), "--stdout"]) == 0
     out = capsys.readouterr().out
     assert out.startswith("# ТЗ для AI-агента")
-    assert "## 8. Формат блоков" in out
+    assert "## 8. Формат якорей и связей" in out
 
     assert main(["brief", "--project", str(GOLDEN), "--stdout", "--only", "CancelOrder"]) == 0
     out = capsys.readouterr().out

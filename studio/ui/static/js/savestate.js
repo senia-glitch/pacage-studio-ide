@@ -1,12 +1,11 @@
-export const SAVE_STATES = ["idle", "dirty", "saving", "saved", "error", "conflict"];
+export const SAVE_STATES = ["idle", "dirty", "saving", "saved", "error"];
 
 const TRANSITIONS = {
   idle: ["dirty", "saving", "saved"],
-  dirty: ["saving", "idle", "conflict"],
-  saving: ["saved", "error", "conflict", "dirty"],
+  dirty: ["saving", "idle"],
+  saving: ["saved", "error", "dirty"],
   saved: ["dirty", "saving", "idle"],
   error: ["dirty", "saving", "idle"],
-  conflict: ["saving", "dirty", "idle"],
 };
 
 export function nextState(current, event) {
@@ -16,7 +15,6 @@ export function nextState(current, event) {
     save: "saving",
     saved: "saved",
     fail: "error",
-    conflict: "conflict",
     reset: "idle",
     force: "saving",
   };
@@ -32,6 +30,5 @@ export function saveLabel(state) {
     saving: "Сохранение…",
     saved: "Сохранено ✓",
     error: "Ошибка — повторить",
-    conflict: "Конфликт: файл изменён",
   }[state] || "";
 }

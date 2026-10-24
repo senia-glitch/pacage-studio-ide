@@ -1,18 +1,20 @@
-"""Разрешение якорей из метаданных: anchor, path::anchor, io#n, legacy :LINE."""
+﻿"""Разрешение якорей из metadata.json: anchor, path::anchor, io#n."""
 
 from __future__ import annotations
 
 import re
 from collections import defaultdict
 
-from studio.diagnostics import Sink
-from studio.metamodel import Edge, Graph, GraphBuilder, node_anchor
+from studio.diagnostics import Sink, mark_node
+from studio.metamodel import Graph, GraphBuilder, node_anchor
 
 LEGACY_IO_RE = re.compile(r"^(?P<base>.+\._db\.[A-Za-z_][A-Za-z0-9_]*):(?P<line>\d+)$")
+# Якоря старого формата больше не читаются: metadata.json — новая сущность.
+READ_LEGACY_ANCHORS = False
 
 
 class AnchorResolver:
-    """Якорь → [id] строится один раз; формы: anchor, path::anchor, legacy :LINE."""
+    """Якорь → [id] строится один раз; формы: anchor, path::anchor."""
 
     def __init__(self, graph: Graph):
         self.graph = graph
@@ -57,14 +59,6 @@ class AnchorResolver:
         if len(exact) > 1:
             return None, "W_EDGE_AMBIGUOUS"
 
-        legacy = self._legacy(anchor_text, rel if explicit_file else None)
-        if legacy:
-            best_distance = min(distance for distance, _node_id in legacy)
-            best = [node_id for distance, node_id in legacy if distance == best_distance]
-            if len(best) > 1:
-                return None, "W_EDGE_AMBIGUOUS"
-            return best[0], None
-
         # Плановый io-якорь не содержит #n; после появления кода он должен
         # продолжать указывать на этот же метод порта.
         base_matches = (
@@ -78,77 +72,11 @@ class AnchorResolver:
             return None, "W_EDGE_AMBIGUOUS"
         return None, "W_EDGE_UNRESOLVED"
 
-    def _legacy(self, text: str, rel: str | None) -> list[tuple[int, str]]:
-        match = LEGACY_IO_RE.match(text)
-        if match is None:
-            return []
-        base = match.group("base")
-        wanted_line = int(match.group("line"))
-        out: list[tuple[int, str]] = []
-        for node in self.graph.nodes:
-            if node.kind != "io":
-                continue
-            if rel is not None and node.file_path != rel:
-                continue
-            if node_anchor(node).split("#", 1)[0] != base:
-                continue
-            out.append((abs(node.line - wanted_line), node.id))
-        return out
-
 
 def resolve_anchor_text(
     text: str, graph: Graph, prefer_file: str | None = None
 ) -> tuple[str | None, str | None]:
     return AnchorResolver(graph).resolve(text, prefer_file)
-
-
-def apply_metadata_edges(
-    builder: GraphBuilder, specs, sink: Sink | None = None
-) -> None:
-    """Edge-блоки — истина по умолчанию; конфликт пары заменяет code-ребро."""
-    resolver = AnchorResolver(builder.snapshot())
-    for spec in specs:
-        source, source_code = resolver.resolve(spec.from_anchor, spec.file_path)
-        target, target_code = resolver.resolve(spec.to_anchor, spec.file_path)
-        if source is None or target is None:
-            if sink is not None:
-                code = source_code if source is None else target_code
-                sink.add(
-                    code or "W_EDGE_UNRESOLVED",
-                    f"Связь «{spec.from_anchor}» → «{spec.to_anchor}» "
-                    f"({spec.kind}) не разрешена",
-                    file=spec.file_path,
-                    line=spec.line,
-                    hint="Укажите существующий якорь или path::anchor.",
-                )
-            continue
-        if source == target:
-            if sink is not None:
-                sink.add(
-                    "W_EDGE_SELF",
-                    f"Связь узла «{source}» с самим собой пропущена",
-                    file=spec.file_path,
-                    line=spec.line,
-                    hint="from и to не должны указывать на один узел.",
-                )
-            continue
-        edge_id = f"{source}::{spec.kind}::{target}"
-        if builder.has_edge(edge_id):
-            continue
-        metadata_only = not any(
-            edge.from_node == source and edge.to_node == target for edge in builder.edges()
-        )
-        builder.remove_edges_between(source, target)
-        builder.add_edge(
-            Edge(
-                id=edge_id,
-                from_node=source,
-                to_node=target,
-                kind=spec.kind,
-                line=spec.line,
-                origin="metadata" if metadata_only else "code",
-            )
-        )
 
 
 def add_duplicate_anchor_diagnostics(builder: GraphBuilder, sink: Sink) -> None:
@@ -162,19 +90,18 @@ def add_duplicate_anchor_diagnostics(builder: GraphBuilder, sink: Sink) -> None:
             continue
         first = nodes[0]
         for node in nodes[1:]:
-            sink.add(
-                "W_DUP_ANCHOR",
+            message = (
                 f"Якорь {anchor!r} есть у двух узлов: "
-                f"{first.file_path}:{first.line} и {node.file_path}:{node.line}",
-                file=node.file_path,
-                line=node.line,
-                hint="Связи из метаданных требуют path::anchor для однозначности.",
+                f"{first.file_path}:{first.line} и {node.file_path}:{node.line}"
             )
+            hint = "Связи из metadata.json требуют path::anchor для однозначности."
+            mark_node(first, sink, "W_DUP_ANCHOR", message, hint=hint)
+            mark_node(node, sink, "W_DUP_ANCHOR", message, hint=hint)
 
 
 __all__ = [
     "AnchorResolver",
     "add_duplicate_anchor_diagnostics",
-    "apply_metadata_edges",
     "resolve_anchor_text",
 ]
+

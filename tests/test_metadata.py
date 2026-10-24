@@ -1,266 +1,156 @@
-from __future__ import annotations
-
-from pathlib import Path
-
-from studio.metadata import (
-    MetadataError,
-    parse_blocks,
-    read_file_metadata,
-    render_metadata_file,
-    save_node_metadata,
-)
-from studio.scanner import scan
+from __future__ import annotationsimport hashlibimport jsonfrom pathlib import Pathfrom studio.metadata import (    METADATA_NAME,    MetadataError,    metadata_path,    read_metadata,    save_node_metadata,)from studio.scanner import scandef _hashes(root: Path) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root).as_posix()
+        if rel.startswith(".studio/"):
+            continue
+        out[rel] = hashlib.sha1(path.read_bytes()).hexdigest()
+    return out
 
 
-def _endpoint_text(*blocks: str) -> str:
-    return (
-        "from fastapi import APIRouter\n"
-        'router = APIRouter()\n\n'
-        + "".join(blocks)
-        + '\n@router.get("/a")\n'
-        "def first():\n"
-        "    pass\n"
-    )
+def _endpoint(graph):
+    return next(node for node in graph.nodes if node.kind == "endpoint")
 
 
-def test_разделы_читаются_в_любом_порядке():
-    text = _endpoint_text(
-        "# studio: acceptance start\n# - один\n# studio: acceptance end\n",
-        "# studio: domain start\n# orders\n# studio: domain end\n",
-        "# studio: description start\n# Описание.\n# studio: description end\n",
-    )
-    data, edges, _ = read_file_metadata(text, "app/routes.py")
-    meta = data["endpoint:app/routes.py:first"]
-    assert meta["description"] == "Описание."
-    assert meta["acceptance"] == ["один"]
-    assert meta["domain"] == "orders"
-    assert edges == []
-
-
-def test_блок_привязывается_к_ближайшему_якорю_ниже():
-    text = (
-        "# studio: description start\n# Первый.\n# studio: description end\n"
-        '@router.get("/a")\n'
-        "def first():\n"
-        "    pass\n\n"
-        "# studio: description start\n# Второй.\n# studio: description end\n"
-        '@router.get("/b")\n'
-        "def second():\n"
-        "    pass\n"
-    )
-    data, _, _ = read_file_metadata(text, "app/routes.py")
-    assert data["endpoint:app/routes.py:first"]["description"] == "Первый."
-    assert data["endpoint:app/routes.py:second"]["description"] == "Второй."
-
-
-def test_незакрытый_блок_не_читается():
-    text = (
-        "# studio: description start\n# Мусор.\n"
-        '@router.get("/a")\n'
-        "def first():\n"
-        "    pass\n"
-    )
-    data, _, _ = read_file_metadata(text, "app/routes.py")
-    assert data == {}
-
-
-def test_вложенность_запрещена():
-    text = (
-        "# studio: description start\n"
-        "# studio: acceptance start\n"
-        "# - вложено\n"
-        "# studio: acceptance end\n"
-        "# studio: description end\n"
-        '@router.get("/a")\n'
-        "def first():\n"
-        "    pass\n"
-    )
-    data, _, _ = read_file_metadata(text, "app/routes.py")
-    assert data == {}
-
-
-def test_ближайший_дубль_выигрывает():
-    text = (
-        "# studio: description start\n# Старое.\n# studio: description end\n"
-        "# studio: description start\n# Новое.\n# studio: description end\n"
-        '@router.get("/a")\n'
-        "def first():\n"
-        "    pass\n"
-    )
-    data, _, _ = read_file_metadata(text, "app/routes.py")
-    assert data["endpoint:app/routes.py:first"]["description"] == "Новое."
-
-
-def test_сирота_не_попадает_в_данные():
-    text = _endpoint_text() + "\n# studio: description start\n# Сирота.\n# studio: description end\n"
-    data, _, _ = read_file_metadata(text, "app/routes.py")
-    assert data == {}
-
-
-def test_edge_блок_читается():
-    text = _endpoint_text(
-        "# studio: edge start\n"
-        "# from: first\n"
-        "# to: second\n"
-        "# kind: dispatch\n"
-        "# studio: edge end\n"
-    )
-    _, edges, _ = read_file_metadata(text, "app/routes.py")
-    assert len(edges) == 1
-    assert (edges[0].from_anchor, edges[0].to_anchor, edges[0].kind) == (
-        "first",
-        "second",
-        "dispatch",
-    )
-
-
-def test_битый_edge_игнорируется():
-    text = _endpoint_text(
-        "# studio: edge start\n# from: first\n# kind: dispatch\n# studio: edge end\n"
-    )
-    _, edges, _ = read_file_metadata(text, "app/routes.py")
-    assert edges == []
-
-
-def test_сохранение_описания_над_декоратором(demo: Path):
+def test_сохранение_метаданных_не_меняет_код(demo: Path):
     graph = scan(demo)
     node = next(
-        n for n in graph.nodes if n.kind == "endpoint" and n.details["function_name"] == "list_orders"
+        node
+        for node in graph.nodes
+        if node.kind == "endpoint" and node.details["function_name"] == "list_orders"
     )
-    assert save_node_metadata(demo, node, "Новое описание.", ["критерий"], "").changed is True
-    text = (demo / node.file_path).read_text(encoding="utf-8")
-    assert "# studio: description start\n# Новое описание." in text
-    assert "# studio: acceptance start\n# - критерий" in text
-    assert text.index("# studio: description start") < text.index('@router.get("/list")')
+    before = _hashes(demo)
+    result = save_node_metadata(demo, node, "Новое описание.", ["критерий"], "orders")
+    assert result.changed is True
+    assert _hashes(demo) == before
+    assert metadata_path(demo).is_file()
+    text = metadata_path(demo).read_text(encoding="utf-8")
+    assert METADATA_NAME in str(metadata_path(demo))
+    assert "Новое описание." in text
+
+
+def test_метаданные_читаются_обратно(demo: Path):
     graph = scan(demo)
-    node = next(
-        n for n in graph.nodes if n.kind == "endpoint" and n.details["function_name"] == "list_orders"
+    endpoint = next(
+        node
+        for node in graph.nodes
+        if node.kind == "endpoint" and node.details["function_name"] == "create_order"
     )
-    assert node.description == "Новое описание."
-    assert node.acceptance == ["критерий"]
-
-
-def test_очищенный_раздел_удаляется_с_маркерами(demo: Path):
+    save_node_metadata(demo, endpoint, "Создаёт заказ.", ["201", "сохранён"], "orders, billing")
     graph = scan(demo)
-    node = next(
-        n for n in graph.nodes if n.kind == "endpoint" and n.details["function_name"] == "create_order"
-    )
-    assert save_node_metadata(demo, node, "", [], "").changed is True
-    text = (demo / node.file_path).read_text(encoding="utf-8")
-    assert "studio: description start" not in text
-    assert "studio: acceptance start" not in text
-    assert "studio: domain start" not in text
+    endpoint = next(node for node in graph.nodes if node.id == endpoint.id)
+    assert endpoint.description == "Создаёт заказ."
+    assert endpoint.acceptance == ["201", "сохранён"]
+    assert endpoint.domain == "orders, billing"
+
+
+def test_домен_только_у_эндпоинта(demo: Path):
     graph = scan(demo)
-    node = next(
-        n for n in graph.nodes if n.kind == "endpoint" and n.details["function_name"] == "create_order"
-    )
-    assert node.description == ""
-    assert node.acceptance == []
-    assert node.domain == ""
+    scenario = next(node for node in graph.nodes if node.kind == "scenario")
+    save_node_metadata(demo, scenario, scenario.description, [], "чужой")
+    metadata = read_metadata(demo)
+    record = metadata.nodes[scenario.id]
+    assert record["domain"] == ""
 
 
-def test_критерии_не_дублируют_маркер_списка(demo: Path):
+def test_повторное_сохранение_не_меняет_файл(demo: Path):
     graph = scan(demo)
-    node = next(
-        n for n in graph.nodes if n.kind == "endpoint" and n.details["function_name"] == "list_orders"
-    )
-    save_node_metadata(demo, node, "", ["- критерий"], "")
-    text = (demo / node.file_path).read_text(encoding="utf-8")
-    assert "# - критерий" in text
-    assert "# - - критерий" not in text
+    node = _endpoint(graph)
+    save_node_metadata(demo, node, "Описание.", [], "")
+    first = metadata_path(demo).read_bytes()
+    node = scan(demo).by_id()[node.id]
+    result = save_node_metadata(demo, node, "Описание.", [], "")
+    assert result.changed is False
+    assert metadata_path(demo).read_bytes() == first
 
 
-def test_описание_io_над_вызовом(demo: Path):
+def test_битый_json_даёт_жёлтую_пометку(demo: Path):
+    (demo / ".studio").mkdir(exist_ok=True)
+    (demo / ".studio" / METADATA_NAME).write_text("{broken", encoding="utf-8")
     graph = scan(demo)
-    io = next(n for n in graph.nodes if n.kind == "io" and n.details["method"] == "create")
-    assert save_node_metadata(demo, io, "Пишет заказ.", ["строка 1"], "").changed is True
-    lines = (demo / io.file_path).read_text(encoding="utf-8").splitlines()
-    call_index = next(i for i, line in enumerate(lines) if "self._db.create" in line)
-    start_index = max(
-        i for i, line in enumerate(lines) if "studio: description start" in line and i < call_index
-    )
-    assert start_index < call_index
-    assert lines[start_index].startswith("        # studio:")
-    graph = scan(demo)
-    io = next(n for n in graph.nodes if n.kind == "io" and n.details["method"] == "create")
-    assert io.description == "Пишет заказ."
-    assert io.acceptance == ["строка 1"]
+    assert any(item.code == "W_METADATA_INVALID" for item in graph.diagnostics)
 
 
-def test_домен_не_пишется_не_эндпоинту(demo: Path):
-    graph = scan(demo)
-    scenario = next(n for n in graph.nodes if n.kind == "scenario" and n.details["name"] == "create_order")
-    save_node_metadata(demo, scenario, scenario.description, scenario.acceptance, "чужой")
-    text = (demo / scenario.file_path).read_text(encoding="utf-8")
-    assert "studio: domain start" not in text
-
-
-def test_явное_сохранение_удаляет_сирот(demo: Path):
-    scenario = demo / "app/scenarios/orders.py"
-    scenario.write_text(
-        scenario.read_text(encoding="utf-8")
-        + "\n# studio: description start\n# Сирота.\n# studio: description end\n",
+def test_метаданные_без_узла_кода_жёлтые(demo: Path):
+    (demo / ".studio").mkdir(exist_ok=True)
+    (demo / ".studio" / METADATA_NAME).write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "nodes": {
+                    "scenario:app/scenarios/gone.py:Gone": {
+                        "kind": "scenario",
+                        "name": "Gone",
+                        "file_path": "app/scenarios/gone.py",
+                        "description": "Пропавший узел.",
+                        "planned": False,
+                    }
+                },
+                "edges": [],
+            },
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
     graph = scan(demo)
-    node = next(n for n in graph.nodes if n.kind == "scenario" and n.details["name"] == "charge_payment")
-    save_node_metadata(demo, node, "Новое.", [], "")
-    text = scenario.read_text(encoding="utf-8")
-    assert "Сирота." not in text
-    assert "Новое." in text
+    node = next(node for node in graph.nodes if node.id.endswith(":Gone"))
+    assert node.description == "Пропавший узел."
+    assert node.notes and node.notes[0]["code"] == "W_METADATA_ORPHAN"
+    assert any(item.code == "W_METADATA_ORPHAN" for item in graph.diagnostics)
 
 
-def _without_metadata(text: str) -> str:
-    lines = text.splitlines()
-    drop: set[int] = set()
-    for block in parse_blocks(lines):
-        drop.update(range(block.start, block.end + 1))
-    return "\n".join(line for index, line in enumerate(lines) if index not in drop)
-
-
-def test_сохранение_не_трогает_код(demo: Path):
+def test_запись_атомарная_и_без_временных_файлов(demo: Path):
     graph = scan(demo)
-    node = next(n for n in graph.nodes if n.kind == "scenario" and n.details["name"] == "list_orders")
-    before = (demo / node.file_path).read_text(encoding="utf-8")
-    save_node_metadata(demo, node, "Описание.", [], "")
-    after = (demo / node.file_path).read_text(encoding="utf-8")
-    assert _without_metadata(before) == _without_metadata(after)
+    save_node_metadata(demo, _endpoint(graph), "Описание.", [], "")
+    leftovers = [
+        path.name
+        for path in (demo / ".studio").iterdir()
+        if path.name not in {METADATA_NAME, "graph.json", "studio.log", ".gitignore", "briefs", "last-brief.json", "agent-brief.md"}
+    ]
+    assert not leftovers
 
 
-def test_невалидный_путь_не_пишется(demo: Path):
+def test_ошибка_пути_не_пишет(demo: Path, monkeypatch):
     graph = scan(demo)
-    node = next(n for n in graph.nodes if n.kind == "endpoint")
-    node.file_path = "../outside.py"
+    node = _endpoint(graph)
+
+    def fail(*_args, **_kwargs):
+        return False
+
+    import studio.metadata.store as store_module
+
+    monkeypatch.setattr(store_module, "atomic_write", fail)
     try:
         save_node_metadata(demo, node, "x", [], "")
-    except MetadataError:
-        pass
+    except MetadataError as exc:
+        assert exc.code == "not_writable"
     else:
         raise AssertionError("ожидалась MetadataError")
 
 
-def test_render_metadata_file_только_метаданные():
-    text = render_metadata_file(
-        "Описание",
-        ["критерий"],
-        "orders",
-        [("A", "B", "dispatch")],
-    )
-    for line in text.splitlines():
-        assert line == "" or line.startswith("#")
-    assert "studio: edge start" in text
-    assert "from: A" in text
+def test_скан_тз_и_проверка_не_меняют_код(demo: Path):
+    from studio.agent import BriefOptions, build_brief, verify_brief    from studio.env import read_env    from studio.scanner import scan    from studio.source import load_sources
+
+    before = _hashes(demo)
+    graph = scan(demo)
+    brief = build_brief(graph, load_sources(read_env(demo)), BriefOptions(map_mode="none"))
+    verify_brief(graph, brief.payload())
+    assert _hashes(demo) == before
 
 
-def test_парсер_видит_пары_маркеров():
-    blocks = parse_blocks(
-        [
-            "# studio: description start",
-            "# текст",
-            "# studio: description end",
-            "# studio: domain start",
-            "# orders",
-        ]
+def test_неизвестный_вид_узла_не_молчит(demo: Path):
+    (demo / ".studio").mkdir(exist_ok=True)
+    (demo / ".studio" / METADATA_NAME).write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "nodes": {"widget:x:y": {"kind": "widget", "name": "y"}},
+                "edges": [],
+            }
+        ),
+        encoding="utf-8",
     )
-    assert len(blocks) == 1
-    assert blocks[0].section == "description"
+    graph = scan(demo)
+    assert any(item.code == "W_METADATA_INVALID" for item in graph.diagnostics)

@@ -9,16 +9,17 @@ def _nodes(graph, kind):
     return [n for n in graph.nodes if n.kind == kind]
 
 
-def test_источники_и_пять_видов(demo: Path):
+def test_источники_и_виды_узлов(demo: Path):
     graph = scan(demo)
     kinds = {n.kind for n in graph.nodes}
-    assert kinds <= {"endpoint", "scenario", "io", "model", "test"}
+    assert kinds <= {"endpoint", "scenario", "io", "model", "test", "nested"}
     assert "helper" not in kinds
     assert len(_nodes(graph, "endpoint")) == 3
     assert len(_nodes(graph, "scenario")) == 3
     assert len(_nodes(graph, "model")) == 2
     assert len(_nodes(graph, "io")) == 4
     assert len(_nodes(graph, "test")) == 3
+    assert _nodes(graph, "nested")
 
 
 def test_endpoint_url_и_функция(demo: Path):
@@ -93,24 +94,34 @@ def test_путь_сценария(demo: Path):
 
 
 def test_связи_из_метаданных(demo: Path):
-    scenario = demo / "app/scenarios/orders.py"
-    text = scenario.read_text(encoding="utf-8")
-    text += (
-        "\n# studio: edge start\n"
-        "# from: CreateOrderScenario\n"
-        "# to: ListOrdersScenario\n"
-        "# kind: uses\n"
-        "# studio: edge end\n"
-    )
-    scenario.write_text(text, encoding="utf-8")
     graph = scan(demo)
     source = next(n for n in graph.nodes if n.kind == "scenario" and n.details["name"] == "create_order")
     target = next(n for n in graph.nodes if n.kind == "scenario" and n.details["name"] == "list_orders")
-    assert any(e.kind == "uses" and e.from_node == source.id and e.to_node == target.id for e in graph.edges)
+    meta = {
+        "version": 1,
+        "nodes": {},
+        "edges": [
+            {"from": source.id, "to": target.id, "kind": "uses"},
+        ],
+    }
+    (demo / ".studio").mkdir(exist_ok=True)
+    (demo / ".studio/metadata.json").write_text(
+        __import__("json").dumps(meta, ensure_ascii=False), encoding="utf-8"
+    )
+    graph = scan(demo)
+    edge = next(
+        e for e in graph.edges if e.kind == "uses" and e.from_node == source.id and e.to_node == target.id
+    )
+    assert edge.origin == "metadata"
 
 
 def test_io_переезжает_при_сдвиге_строк(demo: Path):
+    from studio.metadata import save_node_metadata
+
     path = demo / "app/scenarios/orders.py"
+    before = scan(demo)
+    old = next(n for n in before.nodes if n.kind == "io" and n.details["method"] == "create")
+    save_node_metadata(demo, old, "Запись заказа.", [], "")
     before = scan(demo)
     old = next(n for n in before.nodes if n.kind == "io" and n.details["method"] == "create")
     text = path.read_text(encoding="utf-8")
@@ -122,21 +133,67 @@ def test_io_переезжает_при_сдвиге_строк(demo: Path):
     assert new.description == old.description == "Запись заказа."
 
 
-def test_периферийные_узлы_из_импортов(demo: Path):
+def test_nested_узлы_из_импортов(demo: Path):
     graph = scan(demo)
     scenario = next(n for n in graph.nodes if n.kind == "scenario" and n.details["name"] == "create_order")
-    names = {item["name"] for item in scenario.peripherals}
-    assert "app.utils.money" in names
-    item = next(item for item in scenario.peripherals if item["name"] == "app.utils.money")
-    assert item["role"] == "utils"
-    assert item["file_path"] == "app/utils/money.py"
-    assert "calc_total" in item["symbols"]
+    nested = [
+        node
+        for node in graph.nodes
+        if node.kind == "nested" and node.details.get("parent_id") == scenario.id
+    ]
+    assert any(node.details["role"] == "module" for node in nested)
+    item = next(node for node in nested if node.details["role"] == "module")
+    assert item.file_path == "app/utils/money.py"
+    assert "calc_total" in item.details["symbols"]
+    assert any(
+        edge.kind == "uses" and edge.from_node == scenario.id and edge.to_node == item.id
+        for edge in graph.edges
+    )
 
 
-def test_нет_плана_и_хелперов_в_графе(demo: Path):
+def test_self_метод_и_функция_файла_в_nested(tmp_path: Path):
+    path = tmp_path / "app/scenarios/s.py"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "from core import BaseScenario, register_scenario\n\n"
+        "def helper(x):\n"
+        "    return x\n\n"
+        '@register_scenario("s")\n'
+        "class S(BaseScenario):\n"
+        "    async def execute(self):\n"
+        "        await self._load()\n"
+        "        helper(1)\n"
+        "    async def _load(self):\n"
+        "        pass\n",
+        encoding="utf-8",
+    )
+    graph = scan(tmp_path)
+    scenario = next(n for n in graph.nodes if n.kind == "scenario")
+    nested = {
+        (n.details["role"], n.details["name"]): n
+        for n in graph.nodes
+        if n.kind == "nested" and n.details["parent_id"] == scenario.id
+    }
+    assert ("method", "_load") in nested
+    assert ("function", "helper") in nested
+    assert nested[("method", "_load")].line > 1
+    assert len(
+        [e for e in graph.edges if e.kind == "uses" and e.from_node == scenario.id]
+    ) == 2
+
+
+def test_vneshnie_importy_ne_sozdayut_nested(demo: Path):
+    graph = scan(demo)
+    labels = {node.label for node in graph.nodes if node.kind == "nested"}
+    assert "fastapi" not in labels
+    assert "core" not in labels
+    assert "sqlmodel" not in labels
+
+
+def test_нетипичные_виды_не_появляются(demo: Path):
     graph = scan(demo)
     data = graph.model_dump()
     assert "plan_meta" not in data
     for node in data["nodes"]:
-        assert node["kind"] in {"endpoint", "scenario", "io", "model", "test"}
+        assert node["kind"] in {"endpoint", "scenario", "io", "model", "test", "nested"}
         assert "origin" not in node

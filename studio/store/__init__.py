@@ -31,7 +31,14 @@ def ensure_layout(project_root: Path) -> Path:
     sd = studio_dir(project_root)
     sd.mkdir(parents=True, exist_ok=True)
     gitignore = sd / ".gitignore"
-    lines = ["graph.json", "studio.log", "agent-brief.md", "briefs/", "last-brief.json"]
+    lines = [
+        "graph.json",
+        "metadata.json",
+        "studio.log",
+        "agent-brief.md",
+        "briefs/",
+        "last-brief.json",
+    ]
     try:
         existing = [ln for ln in gitignore.read_text(encoding="utf-8").splitlines() if ln.strip()]
     except OSError:

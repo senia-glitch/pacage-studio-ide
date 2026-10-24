@@ -102,6 +102,7 @@ class ScenarioEntry:
     doc: str | None = None
     end_line: int = 1
     signature: str = ""
+    has_execute: bool = True
 
 
 @dataclass
@@ -138,6 +139,7 @@ class EndpointEntry:
     extra_routes: list[dict] = field(default_factory=list)
     end_line: int = 1
     signature: str = ""
+    dynamic_path: bool = False
 
 
 @dataclass
@@ -253,6 +255,7 @@ def index_scenarios(
                 dto=kwarg_str_value(dec, "dto"),
                 response=kwarg_str_value(dec, "response"),
                 class_node=node,
+                has_execute=execute is not None,
                 doc=_doc(node, execute),
                 end_line=int(getattr(node, "end_lineno", node.lineno) or node.lineno),
                 signature=signature_of(node, extra=[execute] if execute is not None else None),
@@ -512,10 +515,10 @@ def _routes_for_function(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     routers: dict[str, RouterInfo],
     default_path: str,
-) -> tuple[list[tuple[str, str, str, list[str]]], list[int]]:
-    """Список (http_method, path, prefix, tags) и строки динамических путей."""
+) -> tuple[list[tuple[str, str, str, list[str]]], list[tuple[str, int]]]:
+    """Список (http_method, path, prefix, tags) и динамические пути (метод, строка)."""
     routes: list[tuple[str, str, str, list[str]]] = []
-    dynamic: list[int] = []
+    dynamic: list[tuple[str, int]] = []
     for dec in node.decorator_list:
         if not isinstance(dec, ast.Call):
             continue
@@ -548,7 +551,8 @@ def _routes_for_function(
             receiver = func.value.attr
         info = routers.get(receiver, RouterInfo())
         if path is None:
-            dynamic.append(dec.lineno)
+            for method in methods or [""]:
+                dynamic.append((method, dec.lineno))
             continue
         for method in methods:
             routes.append((method, path, info.prefix, list(info.tags)))
@@ -575,22 +579,20 @@ def index_endpoints(
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             routes, dynamic = _routes_for_function(node, routers, "")
-            for line in dynamic:
-                if sink is not None:
-                    sink.add(
-                        "W_ROUTE_DYNAMIC",
-                        f"Путь маршрута функции {node.name} — не строковый литерал",
-                        file=source.rel,
-                        line=line,
-                        hint="Сканер поддерживает только литеральные пути; вынесите строку.",
-                    )
-            if not routes:
+            if not routes and not dynamic:
                 continue
             entry_id = f"endpoint:{source.rel}:{node.name}"
             if entry_id in seen:
                 continue
             seen.add(entry_id)
-            primary_method, primary_path, router_prefix, tags = routes[0]
+            if routes:
+                primary_method, primary_path, router_prefix, tags = routes[0]
+            else:
+                primary_method = dynamic[0][0]
+                primary_path = ""
+                router_prefix = ""
+                tags = []
+            dynamic_lines = [line for _method, line in dynamic]
             url_parts = [env.api_prefix, *chain, router_prefix, primary_path]
             extra = [
                 {
@@ -612,11 +614,12 @@ def index_endpoints(
                     function_node=node,
                     tags=list(tags),
                     doc=_doc(node),
-                    url_path=_join_paths(*url_parts),
+                    url_path=_join_paths(*url_parts) if primary_path else "",
                     nested_path=router_prefix,
                     extra_routes=extra,
                     end_line=int(getattr(node, "end_lineno", node.lineno) or node.lineno),
                     signature=signature_of(node, include_decorators=True),
+                    dynamic_path=bool(dynamic_lines),
                 )
             )
     return out

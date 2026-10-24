@@ -1,18 +1,14 @@
-"""Единое состояние студии: граф в памяти, ревизии, watcher, undo."""
+﻿"""Единое состояние студии: граф в памяти, ревизии, watcher, метаданные."""
 
 from __future__ import annotations
 
-import hashlib
 import secrets
 import threading
 import time
-import uuid
-from collections import deque
 from pathlib import Path
 
 from studio import log as slog
 from studio import store
-from studio._atomic import atomic_write_bytes
 from studio.agent import (
     BriefOptions,
     build_brief,
@@ -33,7 +29,6 @@ from studio.scanner import scan
 from studio.scanner.anchors import AnchorResolver
 from studio.source import load_sources, stat_fingerprint
 
-HISTORY_LIMIT = 20
 DEFAULT_POLL = 1.0
 DEBOUNCE = 0.3
 
@@ -42,12 +37,8 @@ class NodeNotFound(Exception):
     pass
 
 
-class UndoNotFound(Exception):
-    pass
-
-
 class ProjectState:
-    """ОДИН замок на скан, запись метаданных, создание и undo."""
+    """ОДИН замок на скан, запись метаданных и создание."""
 
     def __init__(self, project_root: Path, poll_interval: float = DEFAULT_POLL):
         self.root = Path(project_root).resolve()
@@ -60,7 +51,6 @@ class ProjectState:
         self.host = "127.0.0.1"
         self.verbose = False
         self.poll_interval = poll_interval
-        self._history: deque[dict] = deque(maxlen=HISTORY_LIMIT)
         self._stop = threading.Event()
         self._watcher: threading.Thread | None = None
         self._watch_last: tuple | None = None
@@ -126,19 +116,6 @@ class ProjectState:
             raise NodeNotFound(node_id)
         return node
 
-    def _remember_undo(self, rel: str, old_bytes: bytes, new_hash: str) -> str:
-        undo_id = uuid.uuid4().hex
-        self._history.append(
-            {
-                "id": undo_id,
-                "rel": rel,
-                "old_bytes": old_bytes,
-                "new_hash": new_hash,
-                "ts": time.time(),
-            }
-        )
-        return undo_id
-
     def save_metadata(self, data: dict) -> dict:
         with self.lock:
             node_id = str(data.get("node_id") or "")
@@ -169,33 +146,17 @@ class ProjectState:
             if node.kind != "endpoint":
                 domain = ""
 
-            target = self.root / node.file_path
-            try:
-                old_bytes = target.read_bytes() if target.is_file() else b""
-            except OSError as exc:
-                raise MetadataError(
-                    "not_writable", f"{node.file_path}: файл не читается — {exc}"
-                ) from exc
-            base_hash = data.get("base_hash") or node.file_hash or None
-            force = bool(data.get("force"))
             result = save_node_metadata(
                 self.root,
                 node,
                 description,
                 acceptance_list,
                 domain,
-                base_hash=base_hash,
-                force=force,
             )
-            undo_id = None
-            if result.changed:
-                undo_id = self._remember_undo(node.file_path, old_bytes, result.new_hash)
             graph = self.rescan("save")
             return {
                 "graph": graph.model_dump(),
                 "changed": result.changed,
-                "removed_orphans": result.removed_orphans,
-                "undo_id": undo_id,
             }
 
     def create(self, data: dict) -> dict:
@@ -270,29 +231,6 @@ class ProjectState:
             data = load_brief(self.root, target)
             return verify_brief_data(self.ensure_graph(), data)
 
-    def undo(self, undo_id: str) -> dict:
-        with self.lock:
-            entry = next(
-                (item for item in reversed(self._history) if item["id"] == undo_id), None
-            )
-            if entry is None:
-                raise UndoNotFound(undo_id)
-            target = self.root / entry["rel"]
-            try:
-                current = target.read_bytes()
-            except OSError as exc:
-                raise MetadataError("file_missing", f"{entry['rel']}: файл не найден") from exc
-            current_hash = hashlib.sha1(current).hexdigest()
-            if current_hash != entry["new_hash"]:
-                raise MetadataError(
-                    "file_changed",
-                    f"{entry['rel']}: файл изменён после сохранения — отмена невозможна",
-                )
-            if not atomic_write_bytes(target, entry["old_bytes"]):
-                raise MetadataError("not_writable", f"{entry['rel']}: не удалось записать файл")
-            graph = self.rescan("undo")
-            return {"graph": graph.model_dump(), "revision": self.revision}
-
     # -------------------------------------------------------------- long-poll
 
     def wait_for_change(self, rev: int, timeout: float = 25) -> int:
@@ -313,6 +251,7 @@ class ProjectState:
                 "io": sum(1 for n in nodes if n.kind == "io"),
                 "models": sum(1 for n in nodes if n.kind == "model"),
                 "tests": sum(1 for n in nodes if n.kind == "test"),
+                "nested": sum(1 for n in nodes if n.kind == "nested"),
                 "diagnostics": len(graph.diagnostics) if graph is not None else 0,
             }
             from studio import __version__
@@ -382,9 +321,8 @@ class ProjectState:
 
 __all__ = [
     "DEFAULT_POLL",
-    "HISTORY_LIMIT",
     "NodeNotFound",
     "ProjectState",
-    "UndoNotFound",
     "CreateError",
 ]
+

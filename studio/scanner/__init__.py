@@ -11,8 +11,9 @@ import datetime as _dt
 import os
 from pathlib import Path
 
-from studio.diagnostics import Sink, diagnostic_for_exception
+from studio.diagnostics import Sink, diagnostic_for_exception, mark_node
 from studio.env import ProjectEnv, read_env
+from studio.metadata import apply_metadata, read_metadata
 from studio.metamodel import (
     Edge,
     EndpointDetails,
@@ -24,17 +25,14 @@ from studio.metamodel import (
     ScenarioPath,
     TestDetails,
 )
-from studio.scanner.anchors import (
-    add_duplicate_anchor_diagnostics,
-    apply_metadata_edges,
-)
+from studio.scanner.anchors import add_duplicate_anchor_diagnostics
 from studio.scanner.domains import compute_domains
 from studio.scanner.indexer import (
     Index,
     build_index,
     scenario_node_id,
 )
-from studio.scanner.peripherals import attach_peripherals
+from studio.scanner.nested import attach_nested
 from studio.scanner.reach import mark_complete, mark_todo_downstream
 from studio.scanner.resolver import (
     resolve_dispatch,
@@ -46,7 +44,7 @@ from studio.source import SourceSet, load_sources
 
 __all__ = [
     "Index",
-    "build_core_graph",
+    "attach_nested",
     "build_index",
     "build_scenario_paths",
     "compute_domains",
@@ -75,6 +73,7 @@ def _put_core_nodes(builder: GraphBuilder, index: Index) -> None:
                     extra_routes=list(entry.extra_routes),
                     signature=entry.signature,
                     doc=entry.doc or "",
+                    dynamic_path=entry.dynamic_path,
                 ).model_dump(),
             )
         )
@@ -97,6 +96,7 @@ def _put_core_nodes(builder: GraphBuilder, index: Index) -> None:
                     response=entry.response,
                     signature=entry.signature,
                     doc=(entry.doc or "").splitlines()[0][:200] if entry.doc else "",
+                    has_execute=entry.has_execute,
                 ).model_dump(),
             )
         )
@@ -153,24 +153,6 @@ def _attach_tests(builder: GraphBuilder, env: ProjectEnv, index: Index, sources:
                     line=entry.line,
                 )
             )
-
-
-def build_core_graph(
-    env: ProjectEnv, index: Index, sources: SourceSet | None = None, sink: Sink | None = None
-) -> Graph:
-    """Узлы endpoint/scenario/io/model и связи из AST."""
-    sources = sources if sources is not None else load_sources(env, sink)
-    sink = sink or Sink()
-    builder = GraphBuilder(project_root=env.project_root.as_posix())
-    _put_core_nodes(builder, index)
-    resolve_dispatch(builder, index, env, sources, sink)
-    resolve_scenario_calls(builder, index, env, sources, sink)
-    resolve_io_and_tables(builder, index, env, sources, sink)
-    graph = builder.build()
-    graph.endpoints = sorted(n.id for n in graph.nodes if n.kind == "endpoint")
-    graph.scenarios = sorted(n.id for n in graph.nodes if n.kind == "scenario")
-    graph.diagnostics = sink.diagnostics()
-    return graph
 
 
 def _scenario_roots(graph: Graph) -> dict[str, list[str]]:
@@ -274,11 +256,30 @@ def _empty_project(sink: Sink, env: ProjectEnv) -> None:
     )
 
 
-def scan(project_root: Path) -> Graph:
-    """Полный проход: env → sources → AST → метаданные → домены → пути."""
-    from studio.metadata import scan_metadata
-    from studio.scanner.planned import scan_planned
+def _mark_known_gaps(builder: GraphBuilder, sink: Sink) -> None:
+    for node in builder._nodes.values():
+        if node.planned:
+            continue
+        if node.kind == "endpoint" and (node.details or {}).get("dynamic_path"):
+            mark_node(
+                node,
+                sink,
+                "W_ROUTE_DYNAMIC",
+                "Путь маршрута — не строковый литерал",
+                hint="Сканер поддерживает только литеральные пути; вынесите строку.",
+            )
+        if node.kind == "scenario" and (node.details or {}).get("has_execute") is False:
+            mark_node(
+                node,
+                sink,
+                "W_NO_EXECUTE",
+                "У сценария нет execute — io-вызовы не собраны",
+                hint="Добавьте execute или self-методы, вызываемые из него.",
+            )
 
+
+def scan(project_root: Path) -> Graph:
+    """Полный проход: env → sources → AST → nested → metadata → домены → пути."""
     root = Path(project_root).resolve()
     sink = Sink()
     env = _phase(sink, "env", lambda: read_env(root))
@@ -312,17 +313,14 @@ def scan(project_root: Path) -> Graph:
         lambda: resolve_io_and_tables(builder, index, env, sources, sink),
     )
     _phase(sink, "tests", lambda: _attach_tests(builder, env, index, sources))
-    _phase(sink, "peripherals", lambda: attach_peripherals(builder.snapshot(), env, index, sources))
+    _phase(sink, "nested", lambda: attach_nested(builder, env, sources, sink))
 
-    graph_for_metadata = builder.snapshot()
-    specs = _phase(
-        sink,
-        "metadata",
-        lambda: scan_metadata(graph_for_metadata, root, sources, sink),
-    ) or []
+    def _metadata() -> None:
+        metadata = read_metadata(root, sink)
+        apply_metadata(builder, metadata, sink)
 
-    _phase(sink, "planned", lambda: scan_planned(builder, env, sources, sink))
-    _phase(sink, "edges", lambda: apply_metadata_edges(builder, specs, sink))
+    _phase(sink, "metadata", _metadata)
+    _phase(sink, "gaps", lambda: _mark_known_gaps(builder, sink))
     _phase(sink, "duplicate_anchors", lambda: add_duplicate_anchor_diagnostics(builder, sink))
 
     graph = builder.build()

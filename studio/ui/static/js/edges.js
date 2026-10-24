@@ -65,8 +65,8 @@ export function drawEdges(svg, boxes, edges, colors, names, escapeHtml) {
       const path = `M${x1},${y1} C${(x1 + x2) / 2},${y1} ${(x1 + x2) / 2},${y2} ${x2},${y2}`;
       const mx = (x1 + x2) / 2;
       const my = (y1 + y2) / 2 - 5;
-      const dash = edge.todo || edge.kind === "uses" || edge.kind === "depends" ? ' stroke-dasharray="6,4"' : "";
-      const color = colors[edge.kind] || "#9a9aa2";
+      const dash = edge.yellow || edge.todo || edge.kind === "uses" || edge.kind === "depends" ? ' stroke-dasharray="6,4"' : "";
+      const color = edge.yellow ? "#e8c33a" : (colors[edge.kind] || "#9a9aa2");
       return (
         `<path d="${path}" fill="none" stroke="${color}" stroke-width="1.7"${dash} ` +
         `marker-end="url(#ar-${edge.kind})"/>` +

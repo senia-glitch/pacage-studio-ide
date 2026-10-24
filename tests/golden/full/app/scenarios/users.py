@@ -7,9 +7,6 @@ class CreateUserScenario(BaseScenario):
         await self._load()
 
     async def _load(self):
-        # studio: description start
-        # Читает пользователей.
-        # studio: description end
         await self._db.query(
             "SELECT * FROM users u JOIN orders o ON o.id = u.order_id"
         )

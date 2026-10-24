@@ -20,11 +20,11 @@ def test_docs_cover_codes():
         assert code in text, code
 
 
-def test_spec_сохранён_и_дополнен():
+def test_spec_описывает_новую_реальность():
     spec = (ROOT / "docs/SPEC.md").read_text(encoding="utf-8")
-    assert "Изменения 4.0" in spec
-    assert "S11" in spec
-    assert "S12" in spec
+    assert "metadata.json" in spec
+    assert "nested" in spec
+    assert "# studio:" not in spec
     original = ROOT / "ТЗ этого пакета - истина для его рефакторинга.txt"
     assert original.is_file()
 

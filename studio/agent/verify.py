@@ -1,4 +1,8 @@
-"""Проверка выполнения ТЗ (S12): узел, рёбра из кода, тесты, метаданные."""
+"""Проверка ТЗ: только факты — узел, связи, тест.
+
+Никаких оценок «почти» и «в целом». Статус задачи определяется тремя
+вопросами: узел появился в коде, ожидаемые связи есть, тест с именем узла есть.
+"""
 
 from __future__ import annotations
 
@@ -14,15 +18,21 @@ STATUS_RU = {
     STATUS_PARTIAL: "частично",
     STATUS_NOT_DONE: "не сделано",
 }
-TEST_KINDS = frozenset({"endpoint", "scenario", "test"})
+CODE_EDGE_KINDS = frozenset({"dispatch", "scenario_call", "port_call", "table", "tests"})
 NAME_RE = re.compile(r"[^a-z0-9]+")
+CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 def _token(value: str) -> str:
-    return NAME_RE.sub("_", str(value or "").lower()).strip("_")
+    text = CAMEL_RE.sub("_", str(value or ""))
+    return NAME_RE.sub("_", text.lower()).strip("_")
 
 
-def _find_node(graph: Graph, kind: str, anchor: str) -> Node | None:
+def _find_node(graph: Graph, kind: str, anchor: str, node_id: str = "") -> Node | None:
+    if node_id:
+        node = graph.by_id().get(node_id)
+        if node is not None and node.kind == kind:
+            return node
     candidates = [
         node
         for node in graph.nodes
@@ -52,7 +62,7 @@ def _resolve_expected_node(graph: Graph, prefix: str, expected: dict) -> Node | 
 
 def _has_code_edge(graph: Graph, expected: dict) -> bool:
     kind = expected.get("kind")
-    if kind not in ("dispatch", "scenario_call", "port_call", "table", "tests"):
+    if kind not in CODE_EDGE_KINDS:
         return True
     source = _resolve_expected_node(graph, "from", expected)
     target = _resolve_expected_node(graph, "to", expected)
@@ -63,48 +73,52 @@ def _has_code_edge(graph: Graph, expected: dict) -> bool:
             edge.kind == kind
             and edge.from_node == source.id
             and edge.to_node == target.id
+            and edge.origin == "code"
         ):
-            return edge.origin == "code"
+            return True
     return False
 
 
-def _test_for(graph: Graph, node: Node) -> Node | None:
+def _tests_for(graph: Graph, node: Node) -> list[Node]:
     index = graph.index()
-    fallback: Node | None = None
-    target = _token(node_anchor(node) or node.label)
+    out: list[Node] = []
     for edge in index.incoming(node.id):
         if edge.kind != "tests":
             continue
         test = index.node(edge.from_node)
-        if test is None or test.kind != "test":
-            continue
-        if fallback is None:
-            fallback = test
-        name = _token((test.details or {}).get("test_name") or test.label)
-        if target and (target in name or name in target):
-            return test
-    return fallback
-
-
-def _file_errors(graph: Graph, node: Node) -> list[str]:
-    out: list[str] = []
-    for diag in graph.diagnostics:
-        if diag.level != "error" or diag.file != node.file_path:
-            continue
-        line = int(diag.line or 0)
-        if line and node.line and not (
-            int(node.line) <= line <= int(node.end_line or node.line)
-        ):
-            continue
-        out.append(diag.code)
+        if test is not None and test.kind == "test" and test.line > 0:
+            out.append(test)
     return out
+
+
+def _name_test(graph: Graph, node: Node, anchor: str) -> Node | None:
+    target = _token(anchor or node_anchor(node) or node.label)
+    if not target:
+        return None
+    for test in sorted(
+        (item for item in graph.nodes if item.kind == "test" and item.line > 0),
+        key=lambda item: (item.file_path, item.line, item.id),
+    ):
+        name = _token((test.details or {}).get("test_name") or test.label)
+        if target in name or name in target:
+            return test
+    return None
+
+
+def _test_for(graph: Graph, node: Node, anchor: str) -> Node | None:
+    linked = _tests_for(graph, node)
+    if linked:
+        return sorted(linked, key=lambda item: (item.file_path, item.line, item.id))[0]
+    if node.kind == "test":
+        return node if node.line > 0 else None
+    return _name_test(graph, node, anchor)
 
 
 def verify_task(graph: Graph, task: dict) -> dict:
     number = task.get("number")
     kind = str(task.get("kind") or "")
     anchor = str(task.get("anchor") or "")
-    node = _find_node(graph, kind, anchor)
+    node = _find_node(graph, kind, anchor, str(task.get("id") or ""))
     item = {
         "number": number,
         "kind": kind,
@@ -112,61 +126,50 @@ def verify_task(graph: Graph, task: dict) -> dict:
         "status": STATUS_NOT_DONE,
         "file": "",
         "line": 0,
+        "node": {"ok": False, "file": "", "line": 0},
+        "edges": {"ok": True, "missing": []},
+        "test": {"ok": False, "name": "", "file": "", "line": 0},
         "message": "",
     }
-    if node is None:
+    if node is None or node.line <= 0:
         item["message"] = f"узел `{anchor}` не найден в коде"
         return item
+
     item["file"] = node.file_path
     item["line"] = node.line
-    if node.planned:
-        item["message"] = "узел всё ещё существует только в метаданных (planned)"
-        return item
+    item["node"] = {"ok": True, "file": node.file_path, "line": node.line}
 
-    if str(task.get("plan_file") or "") and node.file_path != task.get("plan_file"):
-        item["message"] = (
-            f"перенесён в `{node.file_path}:{node.line}`"
-            f" (план был `{task.get('plan_file')}`)"
-        )
-
-    problems: list[str] = []
-    current_description = node.description or ""
-    current_acceptance = [str(value) for value in node.acceptance or []]
-    if not task.get("empty_description") and (
-        (
-            task.get("description_hash")
-            and current_description != str(task.get("description") or "")
-        )
-        or (
-            task.get("acceptance_hash")
-            and current_acceptance
-            != [str(value) for value in task.get("acceptance") or []]
-        )
-    ):
-        problems.append("блоки description/acceptance отличаются от выданных в ТЗ")
-
+    missing = []
     for expected in task.get("expected_edges") or []:
         if not _has_code_edge(graph, expected):
-            problems.append(f"не подтверждено ребро `{expected.get('kind')}`")
-            break
+            missing.append(
+                f"{expected.get('kind')}: "
+                f"{expected.get('from_anchor')} → {expected.get('to_anchor')}"
+            )
+    item["edges"] = {"ok": not missing, "missing": missing}
 
-    acceptance = [str(value) for value in task.get("acceptance") or []]
-    if acceptance and kind in TEST_KINDS and _test_for(graph, node) is None:
-        problems.append("нет теста, связанного с узлом")
+    test = _test_for(graph, node, anchor)
+    if test is not None:
+        item["test"] = {
+            "ok": True,
+            "name": str((test.details or {}).get("test_name") or test.label),
+            "file": test.file_path,
+            "line": test.line,
+        }
+    elif kind == "test":
+        item["test"] = {"ok": True, "name": anchor, "file": node.file_path, "line": node.line}
 
-    errors = _file_errors(graph, node)
-    if errors:
-        problems.append("в файле узла есть ошибки: " + ", ".join(sorted(set(errors))))
-
-    if problems:
-        item["status"] = STATUS_PARTIAL
-        item["message"] = "; ".join(problems)
-        if not item["message"]:
-            item["message"] = "выполнено частично"
-    else:
+    if item["edges"]["ok"] and item["test"]["ok"]:
         item["status"] = STATUS_DONE
-        if not item["message"]:
-            item["message"] = "узел найден в коде"
+        item["message"] = "узел, связи и тест есть"
+    else:
+        item["status"] = STATUS_PARTIAL
+        problems = []
+        if not item["edges"]["ok"]:
+            problems.append("нет связей: " + "; ".join(missing))
+        if not item["test"]["ok"]:
+            problems.append("нет теста с именем узла")
+        item["message"] = "; ".join(problems)
     return item
 
 
@@ -201,19 +204,37 @@ def verify_brief(graph: Graph, brief_data: dict) -> dict:
     }
 
 
+def _where(file: str, line: int) -> str:
+    return f"{file}:{line}" if line else file
+
+
 def render_report(report: dict) -> str:
     lines = [
         f"ТЗ {report.get('brief_id') or '?'}: выполнено "
         f"{report['done']} из {report['total']} · {report['status']}"
     ]
     for item in report.get("items") or []:
-        where = ""
-        if item.get("file"):
-            where = f" ({item['file']}:{item['line']})"
+        node = item.get("node") or {}
+        edges = item.get("edges") or {}
+        test = item.get("test") or {}
+        node_text = (
+            f"узел: да ({_where(node.get('file', ''), node.get('line', 0))})"
+            if node.get("ok")
+            else "узел: нет"
+        )
+        if edges.get("ok"):
+            edges_text = "связи: да"
+        else:
+            edges_text = "связи: нет (" + "; ".join(edges.get("missing") or []) + ")"
+        test_text = (
+            f"тест: да ({_where(test.get('file', ''), test.get('line', 0))})"
+            if test.get("ok")
+            else "тест: нет"
+        )
         lines.append(
             f"  T{item.get('number')} {item.get('kind')} `{item.get('anchor')}` — "
-            f"{STATUS_RU.get(item.get('status'), item.get('status'))}{where}"
-            + (f": {item['message']}" if item.get("message") else "")
+            f"{node_text} → {edges_text} → {test_text} → "
+            f"{STATUS_RU.get(item.get('status'), item.get('status'))}"
         )
     return "\n".join(lines)
 

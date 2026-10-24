@@ -21,9 +21,6 @@ CODES: dict[str, str] = {
     "W_NO_ROUTES": "пакет роутов не найден",
     "W_NO_SCENARIOS": "пакет сценариев не найден",
     "W_NO_MODELS": "файл моделей не найден",
-    "W_UNCLOSED_BLOCK": "блок метаданных не закрыт",
-    "W_NESTED_BLOCK": "вложенный блок метаданных",
-    "W_ORPHAN_BLOCK": "блок метаданных без якоря",
     "W_EDGE_UNRESOLVED": "связь из метаданных не разрешена",
     "W_EDGE_AMBIGUOUS": "связь из метаданных неоднозначна",
     "W_EDGE_SELF": "связь узла с самим собой",
@@ -33,7 +30,11 @@ CODES: dict[str, str] = {
     "W_IO_DYNAMIC": "SQL или таблица не литерал",
     "W_IO_SAME_LINE": "несколько вызовов порта в одной строке",
     "W_TABLE_UNKNOWN": "таблица из io не найдена среди моделей",
-    "W_PLAN_UNKNOWN_KIND": "вид узла-плана не определён",
+    "W_NO_EXECUTE": "у сценария нет execute",
+    "W_IMPORT_UNRESOLVED": "импорт проекта не разрешается",
+    "W_METADATA_INVALID": "metadata.json не читается",
+    "W_METADATA_ORPHAN": "метаданные без узла в коде",
+    "W_METADATA_EDGE": "связь из metadata.json не добавлена",
     "I_EMPTY_PROJECT": "источники не найдены",
 }
 
@@ -45,6 +46,8 @@ class Diagnostic(BaseModel):
     file: str = ""
     line: int = 0
     hint: str = ""
+    node_id: str = ""
+    edge_id: str = ""
 
     def key(self) -> tuple[str, str, int, str]:
         return (self.code, self.file, self.line, self.message)
@@ -74,6 +77,8 @@ class Sink:
         line: int = 0,
         hint: str = "",
         level: Level | None = None,
+        node_id: str = "",
+        edge_id: str = "",
     ) -> Diagnostic:
         diag = Diagnostic(
             level=level or code_level(code),
@@ -82,6 +87,8 @@ class Sink:
             file=file,
             line=line,
             hint=hint,
+            node_id=node_id,
+            edge_id=edge_id,
         )
         if diag.key() not in self._seen:
             self._seen.add(diag.key())
@@ -98,6 +105,8 @@ class Sink:
                     line=diag.line,
                     hint=diag.hint,
                     level=diag.level,
+                    node_id=diag.node_id,
+                    edge_id=diag.edge_id,
                 )
 
     def diagnostics(self) -> list[Diagnostic]:
@@ -113,10 +122,61 @@ def diagnostic_for_exception(phase: str, exc: BaseException) -> Diagnostic:
     )
 
 
+def mark_node(
+    node,
+    sink: Sink | None,
+    code: str,
+    message: str,
+    *,
+    hint: str = "",
+    level: Level | None = None,
+) -> None:
+    """Жёлтая пометка узла: причина видна и в узле, и в панели диагностики."""
+    note = {"code": code, "message": message, "hint": hint}
+    notes = getattr(node, "notes", None)
+    if notes is None:
+        notes = []
+        node.notes = notes
+    if note not in notes:
+        notes.append(note)
+    if sink is not None:
+        sink.add(
+            code,
+            message,
+            file=getattr(node, "file_path", ""),
+            line=getattr(node, "line", 0),
+            hint=hint,
+            level=level,
+            node_id=getattr(node, "id", ""),
+        )
+
+
+def mark_edge(edge, sink: Sink | None, code: str, message: str, *, hint: str = "") -> None:
+    """Жёлтая пометка ребра: причина видна на ребре и в диагностике."""
+    note = {"code": code, "message": message, "hint": hint}
+    notes = getattr(edge, "notes", None)
+    if notes is None:
+        notes = []
+        edge.notes = notes
+    if note not in notes:
+        notes.append(note)
+    if sink is not None:
+        sink.add(
+            code,
+            message,
+            file="",
+            line=getattr(edge, "line", 0),
+            hint=hint,
+            edge_id=getattr(edge, "id", ""),
+        )
+
+
 __all__ = [
     "CODES",
     "Diagnostic",
     "Sink",
     "code_level",
     "diagnostic_for_exception",
+    "mark_edge",
+    "mark_node",
 ]

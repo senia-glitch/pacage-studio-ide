@@ -1,4 +1,4 @@
-"""Схема графа студии v6.
+﻿"""Схема графа студии v6.
 
 Карта пути HTTP-запроса:
 
@@ -17,10 +17,10 @@ from pydantic import BaseModel, Field
 
 from studio.diagnostics import Diagnostic
 
-NodeKind = Literal["endpoint", "scenario", "io", "model", "test"]
+NodeKind = Literal["endpoint", "scenario", "io", "model", "test", "nested"]
 EdgeKind = Literal["dispatch", "scenario_call", "port_call", "table", "tests", "uses", "depends"]
 
-NODE_KINDS: tuple[str, ...] = ("endpoint", "scenario", "io", "model", "test")
+NODE_KINDS: tuple[str, ...] = ("endpoint", "scenario", "io", "model", "test", "nested")
 EDGE_KINDS: tuple[str, ...] = (
     "dispatch",
     "scenario_call",
@@ -48,6 +48,7 @@ class EndpointDetails(BaseModel):
     signature: str = ""
     doc: str = ""
     todo_downstream: int = 0
+    dynamic_path: bool = False
 
 
 class ScenarioDetails(BaseModel):
@@ -58,6 +59,7 @@ class ScenarioDetails(BaseModel):
     response: str | None = None
     signature: str = ""
     doc: str = ""
+    has_execute: bool = True
 
 
 class IODetails(BaseModel):
@@ -87,6 +89,13 @@ class TestDetails(BaseModel):
     doc: str = ""
 
 
+class NestedDetails(BaseModel):
+    role: str
+    parent_id: str
+    name: str
+    symbols: list[str] = Field(default_factory=list)
+
+
 class Node(BaseModel):
     id: str
     kind: NodeKind
@@ -99,8 +108,6 @@ class Node(BaseModel):
     description: str = ""
     acceptance: list[str] = Field(default_factory=list)
     domain: str = ""
-    # Периферийные узлы: методы/классы/файлы внутри узла (§4.3).
-    peripherals: list[dict] = Field(default_factory=list)
     # Узел существует только в метаданных: кода с таким якорем ещё нет.
     planned: bool = False
     # Сколько планируемых узлов достижимо от эндпоинта вниз по потоку.
@@ -109,6 +116,8 @@ class Node(BaseModel):
     complete: bool = True
     # sha1 исходных байтов файла на момент скана (S7).
     file_hash: str = ""
+    # Причины жёлтой подсветки: [{"code", "message", "hint"}].
+    notes: list[dict] = Field(default_factory=list)
 
 
 class Edge(BaseModel):
@@ -118,8 +127,9 @@ class Edge(BaseModel):
     kind: EdgeKind
     label: str = ""
     line: int = 1
-    # Найдено анализом кода или только из блока edge (если пара совпала — code).
+    # Найдено анализом кода или только из metadata.json (если пара совпала — code).
     origin: Literal["code", "metadata"] = "code"
+    notes: list[dict] = Field(default_factory=list)
 
 
 class ScenarioPath(BaseModel):
@@ -268,6 +278,8 @@ def node_anchor(node: Node) -> str:
         if ordinal > 0:
             return f"{base}#{ordinal}"
         return base
+    if node.kind == "nested":
+        return str(details.get("name") or node.label)
     return ""
 
 
@@ -284,6 +296,7 @@ __all__ = [
     "IODetails",
     "ModelDetails",
     "NODE_KINDS",
+    "NestedDetails",
     "Node",
     "NodeKind",
     "ScenarioDetails",
@@ -293,3 +306,4 @@ __all__ = [
     "normalize_domain",
     "split_domains",
 ]
+

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import random
 import time
 from pathlib import Path
@@ -9,10 +10,10 @@ import pytest
 from studio._atomic import atomic_write
 from studio.creator import CreateError, create_metadata_files, plan_creation
 from studio.env import read_env
-from studio.metadata import MetadataError, save_node_metadata
+from studio.metadata import save_node_metadata
 from studio.scanner import scan
 from studio.scanner.ast_utils import extract_tables_from_sql
-from studio.source import iter_source_paths, load_source
+from studio.source import iter_source_paths
 
 
 def _write(root: Path, rel: str, text: str) -> Path:
@@ -107,23 +108,12 @@ def test_окружение_диагностики(tmp_path: Path):
     assert "I_EMPTY_PROJECT" in codes
 
 
-def test_диагностики_блоков(tmp_path: Path):
+def test_битый_metadata_json(tmp_path: Path):
     _base_project(tmp_path)
-    _write(
-        tmp_path,
-        "app/scenarios/unclosed.py",
-        "# studio: description start\n# без конца\n",
-    )
-    _write(
-        tmp_path,
-        "app/scenarios/nested.py",
-        "# studio: description start\n# вложено\n# studio: acceptance start\n"
-        "# studio: acceptance end\n# studio: description end\n",
-    )
+    _write(tmp_path, ".studio/metadata.json", "{broken")
     graph = _scan(tmp_path)
-    codes = {d.code for d in graph.diagnostics}
-    assert "W_UNCLOSED_BLOCK" in codes
-    assert "W_NESTED_BLOCK" in codes
+    assert any(item.code == "W_METADATA_INVALID" for item in graph.diagnostics)
+    assert any(node.kind == "endpoint" for node in graph.nodes)
 
 
 def test_fuzz_скан_не_падает(tmp_path: Path):
@@ -191,15 +181,27 @@ def test_домены_не_протекают(tmp_path: Path):
         tmp_path,
         "app/api/v1/routes/a.py",
         "from fastapi import APIRouter\nfrom core import run\nrouter=APIRouter()\n"
-        "# studio: domain start\n# A\n# studio: domain end\n"
         '@router.get("/a")\nasync def a():\n    return await run("s1")\n',
     )
     _write(
         tmp_path,
         "app/api/v1/routes/b.py",
         "from fastapi import APIRouter\nfrom core import run\nrouter=APIRouter()\n"
-        "# studio: domain start\n# B\n# studio: domain end\n"
         '@router.get("/b")\nasync def b():\n    return await run("s2")\n',
+    )
+    _write(
+        tmp_path,
+        ".studio/metadata.json",
+        json.dumps(
+            {
+                "version": 1,
+                "nodes": {
+                    "endpoint:app/api/v1/routes/a.py:a": {"domain": "A"},
+                    "endpoint:app/api/v1/routes/b.py:b": {"domain": "B"},
+                },
+                "edges": [],
+            }
+        ),
     )
     _write(
         tmp_path,
@@ -283,42 +285,78 @@ def test_неоднозначный_якорь_и_path(tmp_path: Path):
     _write(
         tmp_path,
         "app/scenarios/c.py",
-        "# studio: edge start\n# from: Three\n# to: Shared\n# kind: uses\n# studio: edge end\n"
         "from core import BaseScenario, register_scenario\n"
         '@register_scenario("three")\nclass Three(BaseScenario):\n'
         "    async def execute(self):\n        pass\n",
     )
+    _write(
+        tmp_path,
+        ".studio/metadata.json",
+        json.dumps(
+            {
+                "version": 1,
+                "nodes": {},
+                "edges": [
+                    {
+                        "from": "scenario:app/scenarios/c.py:Three",
+                        "to": "Shared",
+                        "kind": "uses",
+                    }
+                ],
+            }
+        ),
+    )
     graph = _scan(tmp_path)
     assert any(d.code == "W_DUP_ANCHOR" for d in graph.diagnostics)
     assert any(d.code == "W_EDGE_AMBIGUOUS" for d in graph.diagnostics)
-    path = tmp_path / "app/scenarios/b.py"
-    path.write_text(
-        path.read_text(encoding="utf-8")
-        + "\n# studio: edge start\n# from: app/scenarios/b.py::Shared\n"
-        "# to: app/scenarios/b.py::Shared\n"
-        "# kind: uses\n# studio: edge end\n",
-        encoding="utf-8",
+    _write(
+        tmp_path,
+        ".studio/metadata.json",
+        json.dumps(
+            {
+                "version": 1,
+                "nodes": {},
+                "edges": [
+                    {
+                        "from": "app/scenarios/b.py::Shared",
+                        "to": "app/scenarios/b.py::Shared",
+                        "kind": "uses",
+                    }
+                ],
+            }
+        ),
     )
     graph = _scan(tmp_path)
     assert any(d.code == "W_EDGE_SELF" for d in graph.diagnostics)
 
 
-def test_legacy_io_якорь_в_edge(tmp_path: Path):
+def test_legacy_io_якорь_не_читается(tmp_path: Path):
     _base_project(tmp_path)
     scenario = tmp_path / "app/scenarios/orders.py"
-    graph = _scan(tmp_path)
-    io = next(n for n in graph.nodes if n.kind == "io")
-    scenario.write_text(
-        scenario.read_text(encoding="utf-8")
-        + "\n# studio: edge start\n"
-        f"# from: CreateOrderScenario\n# to: CreateOrderScenario._db.create:{io.line}\n"
-        "# kind: uses\n# studio: edge end\n",
-        encoding="utf-8",
+    _write(
+        tmp_path,
+        ".studio/metadata.json",
+        json.dumps(
+            {
+                "version": 1,
+                "nodes": {},
+                "edges": [
+                    {
+                        "from": "CreateOrderScenario",
+                        "to": "CreateOrderScenario._db.create:5",
+                        "kind": "uses",
+                    }
+                ],
+            }
+        ),
     )
     graph = _scan(tmp_path)
-    assert any(
-        e.kind == "uses" and e.to_node == io.id for e in graph.edges
+    assert not any(
+        edge.kind == "uses" and edge.to_node.startswith("io:") for edge in graph.edges
     )
+    # legacy-якорь разрешается как обычный неразрешённый W_EDGE_UNRESOLVED
+    assert any(item.code == "W_EDGE_UNRESOLVED" for item in graph.diagnostics)
+    assert scenario.is_file()
 
 
 # --------------------------------------------------------------------- WP4
@@ -407,7 +445,12 @@ def test_self_метод_io_и_via_method(tmp_path: Path):
     graph = _scan(tmp_path)
     io = next(n for n in graph.nodes if n.kind == "io")
     scenario = next(n for n in graph.nodes if n.kind == "scenario")
-    assert ("method", "_load") in {(p["role"], p["name"]) for p in scenario.peripherals}
+    nested = {
+        (node.details["role"], node.details["name"])
+        for node in graph.nodes
+        if node.kind == "nested" and node.details.get("parent_id") == scenario.id
+    }
+    assert ("method", "_load") in nested
     assert io.details["via_method"] == "_load"
     assert io.details["tables"] == ["users", "orders", "missing"]
     table_edges = [e for e in graph.edges if e.kind == "table" and e.from_node == io.id]
@@ -459,7 +502,7 @@ def test_тесты_класс_url_и_границы(tmp_path: Path):
 
 
 @pytest.mark.parametrize("newline,bom,final", [("\n", False, True), ("\r\n", True, False)])
-def test_запись_сохраняет_формат(tmp_path: Path, newline: str, bom: bool, final: bool):
+def test_код_в_любом_формате_не_меняется(tmp_path: Path, newline: str, bom: bool, final: bool):
     text = "from fastapi import APIRouter\nrouter=APIRouter()\n@router.get('/x')\ndef x():\n    pass"
     if final:
         text += "\n"
@@ -471,59 +514,27 @@ def test_запись_сохраняет_формат(tmp_path: Path, newline: s
     path.write_bytes(raw)
     graph = _scan(tmp_path)
     node = next(n for n in graph.nodes if n.kind == "endpoint")
-    result = save_node_metadata(tmp_path, node, "Описание.", [], "", base_hash=node.file_hash)
+    result = save_node_metadata(tmp_path, node, "Описание.", [], "")
     assert result.changed is True
-    data = path.read_bytes()
-    assert data.startswith(b"\xef\xbb\xbf") is bom
-    if newline == "\r\n":
-        assert b"\r\n" in data
-    assert data.endswith(b"\n") is final
-    (tmp_path / ".env.fastbase").write_text("")
+    assert path.read_bytes() == raw
     graph = _scan(tmp_path)
     node = next(n for n in graph.nodes if n.kind == "endpoint")
-    again = save_node_metadata(tmp_path, node, "Описание.", [], "", base_hash=node.file_hash)
+    again = save_node_metadata(tmp_path, node, "Описание.", [], "")
     assert again.changed is False
-    assert path.read_bytes() == data
 
 
-def test_конфликт_файла(tmp_path: Path):
+def test_битый_файл_не_мешает_сохранить_метаданные(tmp_path: Path):
     _base_project(tmp_path)
     graph = _scan(tmp_path)
     node = next(n for n in graph.nodes if n.kind == "endpoint")
-    path = tmp_path / node.file_path
-    path.write_text(path.read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
-    with pytest.raises(MetadataError) as error:
-        save_node_metadata(tmp_path, node, "x", [], "", base_hash=node.file_hash)
-    assert error.value.code == "file_changed"
-    forced = save_node_metadata(
-        tmp_path, node, "x", [], "", base_hash=node.file_hash, force=True
-    )
-    assert forced.changed is True
+    broken = tmp_path / "app/api/v1/routes/broken.py"
+    broken.write_bytes(b"def x(:\n")
+    status = save_node_metadata(tmp_path, node, "Описание.", [], "")
+    assert status.changed is True
+    assert broken.read_bytes() == b"def x(:\n"
 
 
-def test_битый_файл_не_пишется(tmp_path: Path):
-    path = tmp_path / "app/api/v1/routes/x.py"
-    path.parent.mkdir(parents=True)
-    path.write_bytes(b"def x(:\n")
-    source = load_source(tmp_path, path)
-    from studio.metamodel import Node
-
-    node = Node(
-        id="endpoint:app/api/v1/routes/x.py:x",
-        kind="endpoint",
-        label="x",
-        file_path="app/api/v1/routes/x.py",
-        details={"function_name": "x"},
-    )
-    before = path.read_bytes()
-    with pytest.raises(MetadataError) as error:
-        save_node_metadata(tmp_path, node, "x", [], "")
-    assert error.value.code == "not_writable"
-    assert path.read_bytes() == before
-    assert source.error is not None
-
-
-def test_экранирование_маркера(tmp_path: Path):
+def test_многострочное_описание_в_json(tmp_path: Path):
     _base_project(tmp_path)
     graph = _scan(tmp_path)
     node = next(n for n in graph.nodes if n.kind == "endpoint")
@@ -533,22 +544,6 @@ def test_экранирование_маркера(tmp_path: Path):
     node = next(n for n in graph.nodes if n.kind == "endpoint")
     assert node.description == description
     assert node.acceptance == ["studio: description end"]
-
-
-def test_сироты_с_removed_orphans(tmp_path: Path):
-    _base_project(tmp_path)
-    scenario = tmp_path / "app/scenarios/orders.py"
-    scenario.write_text(
-        scenario.read_text(encoding="utf-8")
-        + "\n# studio: description start\n# Сирота.\n# studio: description end\n",
-        encoding="utf-8",
-    )
-    graph = _scan(tmp_path)
-    node = next(n for n in graph.nodes if n.kind == "scenario")
-    result = save_node_metadata(tmp_path, node, "Новое.", [], "")
-    assert result.removed_orphans
-    assert result.removed_orphans[0]["section"] == "description"
-    assert len(result.removed_orphans[0]["preview"]) <= 60
 
 
 def test_создатель_snake_и_занятое_имя(tmp_path: Path):
@@ -668,5 +663,5 @@ def test_параллельные_сохранения(tmp_path: Path):
     for thread in threads:
         thread.join()
     assert not results
-    text = (tmp_path / io_nodes[0].file_path).read_text(encoding="utf-8")
+    text = (tmp_path / ".studio/metadata.json").read_text(encoding="utf-8")
     assert all(f"io {node.id}" in text for node in io_nodes)

@@ -6,12 +6,6 @@ router = APIRouter(tags=["users"])
 SCENARIO = "create_user"
 
 
-# studio: description start
-# Создаёт пользователя.
-# studio: description end
-# studio: domain start
-# users
-# studio: domain end
 @router.post("/create")
 @router.get("/list")
 async def create_user():

@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import test from "node:test";
 
 import {nextState, saveLabel} from "../../studio/ui/static/js/savestate.js";
@@ -16,6 +16,5 @@ test("все переходы формы", () => {
   state = nextState(state, "save");
   state = nextState(state, "fail");
   assert.equal(state, "error");
-  assert.equal(saveLabel("conflict"), "Конфликт: файл изменён");
   assert.equal(nextState("unknown", "edit"), "idle");
 });

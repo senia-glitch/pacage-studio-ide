@@ -18,18 +18,20 @@
     <button class="tabbtn" data-tab="create" title="конструктор нового сценария: только метаданные, без кода">Создание</button>
   </span>
   <span class="search-wrap"><input id="searchBox" type="search" placeholder="Поиск (/) — метод, URL, имя, домен" aria-label="Поиск"><span class="hint" id="searchCount"></span></span>
-  <select id="editorChoice" title="Редактор для «Открыть в редакторе»" aria-label="Редактор"></select>
+  <select id="editorChoice" title="Открывать в VS Code" aria-label="Редактор"></select>
   <span id="liveDot" class="live off" title="нет связи со студией">●</span>
   <span class="todo-chip-wrap">
-    <button id="briefBtn" type="button" title="Планируемые узлы: подсветить TODO">TODO: 0</button>
+    <button id="briefBtn" type="button" title="Планируемые узлы и статус ТЗ">К реализации: 0</button>
     <button id="todoMenuBtn" type="button" class="todo-menu-btn" title="Меню TODO" aria-label="Меню TODO">▾</button>
     <span id="todoMenuPanel" class="todo-menu-panel" hidden>
       <button id="todoBriefAction" type="button">Сформировать ТЗ для AI-агента</button>
+      <button id="todoStatusAction" type="button">Проверить выполнение ТЗ</button>
     </span>
   </span>
-  <button id="diagBtn" type="button" title="Диагностика">⚠ 0</button>
+  <button id="diagBtn" type="button" title="Диагностика и жёлтые пометки">⚠ 0</button>
   <span class="spacer"></span>
   <label class="hint" title="визуально скрыть описания, критерии и домены на узлах"><input type="checkbox" id="hideMeta"> скрыть метаданные</label>
+  <label class="hint" title="скрыть nested-узлы на карте; в инспекторе и ТЗ они остаются"><input type="checkbox" id="hideNested"> скрыть вложенные</label>
   <span class="hint" id="zoomLabel">100%</span>
   <button id="zOut" title="отдалить">−</button>
   <button id="zIn" title="приблизить">+</button>
@@ -51,7 +53,7 @@
         <div id="scenBar">
           <span class="hint">Сценарий:</span>
           <select id="scenSelect" style="min-width:260px"></select>
-          <span class="hint" id="scenHint">путь: endpoint → scenario → io → model; тесты — справа</span>
+          <span class="hint" id="scenHint">путь: endpoint → scenario → io → model; вложенные узлы — рядом с родителем</span>
         </div>
         <div class="canvas" id="scenCanvas"><div class="view" id="scenView"><div class="stage" id="scenStage"><svg class="edges" id="scenEdges"></svg></div></div></div>
       </div>
@@ -65,7 +67,7 @@
   <section class="tab" id="tab-create">
     <div id="createPane">
       <div class="createbar">
-        <span class="hint">Конструктор создаёт только метаданные: один файл на узел, без кода.</span>
+        <span class="hint">Конструктор создаёт файлы-скелеты с TODO. Описания и связи — в .studio/metadata.json.</span>
         <span class="spacer"></span>
         <button id="createClear" type="button">Очистить</button>
         <button id="createSubmit" class="primary" type="button">Создать</button>

@@ -36,15 +36,25 @@ def test_узел_без_домена_пуст(demo: Path):
 
 
 def test_несколько_эндпоинтов_домены_через_запятую_без_дублей(demo: Path):
+    from studio.metadata import read_metadata, write_metadata
+
     path = demo / "app/api/v1/routes/orders.py"
     path.write_text(
         path.read_text(encoding="utf-8")
-        + "\n# studio: domain start\n# orders\n# studio: domain end\n"
-        '@router.get("/create-again")\n'
+        + '\n@router.get("/create-again")\n'
         "async def create_order_again():\n"
         '    return await run("create_order")\n',
         encoding="utf-8",
     )
+    metadata = read_metadata(demo)
+    metadata.nodes["endpoint:app/api/v1/routes/orders.py:create_order_again"] = {
+        "kind": "endpoint",
+        "name": "create_order_again",
+        "file_path": "app/api/v1/routes/orders.py",
+        "domain": "orders",
+        "planned": False,
+    }
+    assert write_metadata(demo, metadata)
     graph = scan(demo)
     scenario = _by_name(graph, "create_order")
     assert scenario.domain == "orders, billing"

@@ -219,7 +219,7 @@ def scenario_bodies(
     }
     execute = methods.get("execute")
     if execute is None:
-        return [(method, method.name) for method in methods.values()]
+        return []
     out: list[tuple[ast.FunctionDef | ast.AsyncFunctionDef, str | None]] = [(execute, None)]
     seen = {"execute"}
     current = [execute]

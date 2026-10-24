@@ -46,10 +46,10 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index
 .card .hd .grip:hover,.zone .zlab .grip:hover{color:var(--acc)}
 .card.dragging,.zone.zone-dragging,.zone.dragging{opacity:.96;box-shadow:0 10px 30px #000c;z-index:60!important}
 .card.dragging{cursor:grabbing}
-.periph-node{width:252px;background:#2a2b30}
-.periph-node .hd{border-bottom-color:#5a6478}
-.periph-node .hd .chip{background:#3f4046;color:#b8b8c0}
-.periph-node .mt{white-space:normal;line-height:1.35}
+.nested-node{width:252px;background:#2a2b30}
+.nested-node .hd{border-bottom-color:#5a6478}
+.nested-node .hd .chip{background:#3f4046;color:#b8b8c0}
+.nested-node .mt{white-space:normal;line-height:1.35}
 .card .hd .chip{flex:none;font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:#c9c9d0;background:#3a3b40;border-radius:3px;padding:0 4px}
 .card .hd .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .card .mt{padding:5px 9px 6px;font-size:10.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -128,7 +128,7 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index
 ::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-thumb{background:#3f4046;border-radius:6px;border:2px solid transparent;background-clip:content-box}
 
-/* ---------- 4.0: �����, ��������, live, ����������� ---------- */
+/* ---------- 4.0: поиск, редактор, live, диагностика ---------- */
 .search-wrap{display:inline-flex;align-items:center;gap:6px;min-width:220px}
 .search-wrap input{background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--txt);padding:4px 8px;font:12px "Segoe UI",Arial,sans-serif;width:240px}
 .search-wrap input:focus{border-color:var(--acc);outline:none}
@@ -199,3 +199,16 @@ body.todo-highlight .card:not(.node--todo){opacity:.33;filter:saturate(.4)}
 body.todo-highlight .card.node--todo{box-shadow:0 0 0 1px #7a5a30}
 .off-group-title{position:absolute;left:14px;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--dim)}
 .map-offpath .card{max-width:250px}
+
+/* Р–С‘Р»С‚С‹Рµ РїРѕРјРµС‚РєРё Рё nested-СѓР·Р»С‹ */
+.card.node--yellow{border-color:#c9a227;box-shadow:0 0 0 1px rgba(201,162,39,.35)}
+.chip.warn{background:#4a3a18;color:#f0d06a;border:1px solid #7a6420}
+.yellow-note{margin:5px 9px;padding:5px 7px;border-left:2px solid #c9a227;background:rgba(201,162,39,.08);color:#e7d492;font-size:10.5px;line-height:1.35}
+.yellow-block .yellow-note{margin:5px 0}
+.nested-list{padding:4px 9px 6px;border-bottom:1px solid #3a3b40}
+.nested-list .lbl{font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);margin-bottom:3px}
+.nested-item{display:inline-block;margin:1px 4px 1px 0;padding:1px 5px;font:10px inherit;background:#2a2b30;border:1px dashed #54565e;border-radius:4px;color:#b9bac2;cursor:pointer}
+.nested-item:hover{border-color:var(--acc);color:var(--acc)}
+.card.nested-node{border-style:dotted;background:rgba(143,143,152,.06)}
+.card.nested-node .hd .chip{background:#35363c;color:#b9bac2}
+.nested-inspector button{font:inherit}

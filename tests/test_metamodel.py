@@ -5,13 +5,14 @@ import typing
 from studio.metamodel import EDGE_KINDS, Graph, Node, NodeKind, node_anchor
 
 
-def test_ровно_пять_видов_узлов():
+def test_шесть_видов_узлов():
     assert set(typing.get_args(NodeKind)) == {
         "endpoint",
         "scenario",
         "io",
         "model",
         "test",
+        "nested",
     }
 
 

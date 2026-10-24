@@ -25,7 +25,7 @@ from studio.server.security import (
     static_path,
     token_ok,
 )
-from studio.server.state import NodeNotFound, ProjectState, UndoNotFound
+from studio.server.state import NodeNotFound, ProjectState
 from studio.ui import INDEX, STATIC_DIR
 
 DEFAULT_PORT_START = 8777
@@ -176,14 +176,10 @@ def make_handler(ctx):
                     "invalid_input": 400,
                     "node_not_found": 404,
                     "anchor_not_found": 404,
-                    "file_changed": 409,
                     "not_writable": 422,
-                    "file_missing": 404,
                 }.get(exc.code, 400)
                 code = "node_not_found" if exc.code == "anchor_not_found" else exc.code
                 self._error(status, code, exc.message, getattr(exc, "details", None))
-            except UndoNotFound:
-                self._error(404, "undo_not_found", "Запись для отмены не найдена")
             except BriefNotFound as exc:
                 self._error(404, "brief_not_found", exc.message)
             except BriefError as exc:
@@ -274,21 +270,6 @@ def make_handler(ctx):
 
         # --------------------------------------------------------------- POST
 
-        def _attach_current(self, exc: MetadataError, data: dict) -> None:
-            """Для 409 file_changed — что сейчас лежит в коде (S7)."""
-            try:
-                state.rescan("conflict")
-                node = state._resolve_node(str(data.get("node_id") or ""))
-                exc.details = {
-                    "current": {
-                        "description": node.description,
-                        "acceptance": list(node.acceptance),
-                        "domain": node.domain,
-                    }
-                }
-            except Exception:  # noqa: BLE001 — детали не обязательны для ответа
-                pass
-
         def _post(self) -> None:
             url = urllib.parse.urlsplit(self.path)
             data = self._read_body()
@@ -296,23 +277,13 @@ def make_handler(ctx):
                 graph = state.rescan("manual")
                 return self._json(graph.model_dump())
             if url.path == "/api/metadata/node":
-                try:
-                    return self._json(state.save_metadata(data))
-                except MetadataError as exc:
-                    if exc.code == "file_changed":
-                        self._attach_current(exc, data)
-                    raise
+                return self._json(state.save_metadata(data))
             if url.path == "/api/create":
                 return self._json(state.create(data))
             if url.path == "/api/brief":
                 return self._json(state.brief(data))
             if url.path == "/api/brief/save":
                 return self._json(state.save_brief(data))
-            if url.path == "/api/undo":
-                undo_id = str(data.get("undo_id") or "")
-                if not undo_id:
-                    raise _HTTPProblem(400, "invalid_input", "Нужен undo_id")
-                return self._json(state.undo(undo_id))
             return self._error(404, "not_found", "Не найдено")
 
     return Handler

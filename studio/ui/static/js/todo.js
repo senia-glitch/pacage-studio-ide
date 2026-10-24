@@ -43,6 +43,7 @@ export function anchorOf(node) {
     const ordinal = Number(details.ordinal) || 0;
     return ordinal > 0 ? `${base}#${ordinal}` : base;
   }
+  if (node.kind === "nested") return String(details.name || node.label || "");
   return "";
 }
 

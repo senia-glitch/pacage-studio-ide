@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import threading
@@ -90,6 +90,8 @@ def test_api_граф_требует_токен(demo: Path):
 
 
 def test_сохранение_метаданных_узла(demo: Path):
+    target = demo / "app/api/v1/routes/orders.py"
+    before = target.read_bytes()
     with _Server(demo) as srv:
         status, data = srv.post(
             "/api/metadata/node",
@@ -100,61 +102,39 @@ def test_сохранение_метаданных_узла(demo: Path):
                 "domain": "",
             },
         )
+        assert (demo / ".studio/metadata.json").is_file()
     assert status == 200
     assert data["changed"] is True
-    assert data["undo_id"]
     node = next(n for n in data["graph"]["nodes"] if n["id"].endswith(":list_orders"))
     assert node["description"] == "Новое."
     assert node["acceptance"] == ["A"]
+    assert target.read_bytes() == before
 
 
-def test_конфликт_файла_и_force(demo: Path):
+def test_код_вне_студии_не_конфликтует(demo: Path):
+    target = demo / "app/api/v1/routes/orders.py"
     with _Server(demo) as srv:
-        status, data = srv.post(
+        status, _data = srv.post(
             "/api/metadata/node",
             {"node_id": "endpoint:app/api/v1/routes/orders.py:list_orders", "description": "A"},
         )
         assert status == 200
-        base = next(
-            n for n in data["graph"]["nodes"] if n["id"].endswith(":list_orders")
-        )["file_hash"]
-        target = demo / "app/api/v1/routes/orders.py"
         target.write_text(target.read_text(encoding="utf-8") + "\n# right\n", encoding="utf-8")
         status, payload = srv.post(
             "/api/metadata/node",
             {
                 "node_id": "endpoint:app/api/v1/routes/orders.py:list_orders",
                 "description": "B",
-                "base_hash": base,
-            },
-        )
-        assert status == 409
-        assert payload["error"]["code"] == "file_changed"
-        assert "current" in payload["error"]["details"]
-        status, payload = srv.post(
-            "/api/metadata/node",
-            {
-                "node_id": "endpoint:app/api/v1/routes/orders.py:list_orders",
-                "description": "B",
-                "base_hash": base,
-                "force": True,
             },
         )
         assert status == 200
+        assert payload["changed"] is True
 
 
-def test_отмена_сохранения(demo: Path):
+def test_отмена_удалена(demo: Path):
     with _Server(demo) as srv:
-        target = demo / "app/api/v1/routes/orders.py"
-        before = target.read_bytes()
-        status, data = srv.post(
-            "/api/metadata/node",
-            {"node_id": "endpoint:app/api/v1/routes/orders.py:list_orders", "description": "Временное"},
-        )
-        assert status == 200 and data["undo_id"]
-        status, _ = srv.post("/api/undo", {"undo_id": data["undo_id"]})
-        assert status == 200
-        assert target.read_bytes() == before
+        status, data = srv.post("/api/undo", {"undo_id": "x"})
+    assert status == 404
 
 
 def test_безопасность_запросов(demo: Path):
@@ -310,3 +290,4 @@ def test_правка_файла_поднимает_ревизию(demo: Path):
         with srv.get("/api/state", {"X-Studio-Token": srv.token}) as response:
             second = json.loads(response.read().decode("utf-8"))["revision"]
     assert second > first
+

@@ -28,7 +28,8 @@ def test_документ_теперь_тз_для_агента(demo: Path):
     document = build_document(scan(demo))
     assert document.startswith("# ТЗ для AI-агента")
     assert "## 2. Правила работы (обязательны)" in document
-    assert "studio: description start" in document
+    assert "Создаёт заказ." in document
+    assert "## 8. Формат якорей и связей" in document
     assert "## 5. Карта проекта" in document
     assert "### Домен: orders, billing" in document
     assert "create_order" in document

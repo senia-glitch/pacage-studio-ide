@@ -67,6 +67,7 @@ def _graph_counts(graph) -> dict:
         "io": _count(graph, "io"),
         "models": _count(graph, "model"),
         "tests": _count(graph, "test"),
+        "nested": _count(graph, "nested"),
         "edges": len(graph.edges),
         "nodes": len(graph.nodes),
     }

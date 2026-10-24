@@ -1,11 +1,10 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from studio.creator import create_metadata_files
 from studio.env import read_env
-from studio.exporter import build_document
-from studio.metadata import save_node_metadata
 from studio.scanner import scan
 
 
@@ -21,7 +20,11 @@ def _payload() -> dict:
                 "details": {"http_method": "", "path": ""},
             },
             {"kind": "scenario", "name": "RefundOrderScenario", "description": "Сценарий возврата."},
-            {"kind": "io", "name": "create", "details": {"scenario": "RefundOrderScenario", "method": "create"}},
+            {
+                "kind": "io",
+                "name": "create",
+                "details": {"scenario_class": "RefundOrderScenario", "method": "create"},
+            },
             {"kind": "model", "name": "Refund", "description": "Модель возврата."},
             {"kind": "test", "name": "test_refund", "description": "Тест возврата."},
         ],
@@ -34,15 +37,42 @@ def _payload() -> dict:
     }
 
 
-def test_плановые_узлы_видны_без_кода(demo: Path):
+def test_плановые_узлы_из_metadata_без_кода(demo: Path):
+    meta = {
+        "version": 1,
+        "nodes": {
+            "endpoint:app/api/v1/routes/refund.py:refund_order": {
+                "kind": "endpoint",
+                "name": "refund_order",
+                "file_path": "app/api/v1/routes/refund.py",
+                "target_file": "app/api/v1/routes/refund.py",
+                "description": "Возврат.",
+                "domain": "refunds",
+                "planned": True,
+                "details": {"function_name": "refund_order", "http_method": "", "path": ""},
+            }
+        },
+        "edges": [],
+    }
+    (demo / ".studio").mkdir(exist_ok=True)
+    (demo / ".studio/metadata.json").write_text(
+        json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+    )
+    graph = scan(demo)
+    node = next(node for node in graph.nodes if node.kind == "endpoint" and node.planned)
+    assert node.description == "Возврат."
+    assert node.domain == "refunds"
+    assert node.line == 0
+    assert node.file_path == "app/api/v1/routes/refund.py"
+
+
+def test_плановые_узлы_после_создания_видны(demo: Path):
     create_metadata_files(_payload(), read_env(demo))
     graph = scan(demo)
-    planned = {n.kind: n for n in graph.nodes if n.planned}
+    planned = {node.kind: node for node in graph.nodes if node.planned}
     assert set(planned) == {"endpoint", "scenario", "io", "model", "test"}
     endpoint = planned["endpoint"]
     assert endpoint.details["function_name"] == "refund_order"
-    assert endpoint.details["http_method"] == ""
-    assert endpoint.details["path"] == ""
     assert endpoint.domain == "refunds"
     scenario = planned["scenario"]
     assert scenario.id in graph.scenarios
@@ -53,7 +83,7 @@ def test_плановые_узлы_видны_без_кода(demo: Path):
     assert planned["test"].id in path.tests
 
 
-def test_плановая_модель_и_тест_в_графе(demo: Path):
+def test_плановая_модель_и_тест(demo: Path):
     create_metadata_files(_payload(), read_env(demo))
     graph = scan(demo)
     model = next(n for n in graph.nodes if n.planned and n.kind == "model")
@@ -64,58 +94,9 @@ def test_плановая_модель_и_тест_в_графе(demo: Path):
     assert test.description == "Тест возврата."
 
 
-def test_имя_занято_существующим_узлом(demo: Path):
-    import pytest
-
-    from studio.creator import CreateError
-
-    payload = {
-        "nodes": [
-            {"kind": "scenario", "name": "ListOrdersScenario", "description": "Плановое описание."}
-        ]
-    }
-    with pytest.raises(CreateError, match="занято"):
-        create_metadata_files(payload, read_env(demo))
-
-
-def test_код_важнее_плана(demo: Path):
-    plan = demo / "app/scenarios/manual_plan.py"
-    plan.write_text(
-        "# Желаемое имя/якорь: CreateOrderScenario\n"
-        "# studio: description start\n"
-        "# Из плана.\n"
-        "# studio: description end\n",
-        encoding="utf-8",
-    )
-    graph = scan(demo)
-    nodes = [
-        n
-        for n in graph.nodes
-        if n.kind == "scenario" and n.details["class_name"] == "CreateOrderScenario"
-    ]
-    assert len(nodes) == 1
-    assert nodes[0].planned is False
-    assert nodes[0].description == "Сценарий создания заказа."
-
-
-def test_сохранение_планового_узла_не_ломает_edges(demo: Path):
-    create_metadata_files(_payload(), read_env(demo))
-    graph = scan(demo)
-    endpoint = next(n for n in graph.nodes if n.planned and n.kind == "endpoint")
-    assert save_node_metadata(demo, endpoint, "Обновлено.", ["Критерий"], "new-domain").changed is True
-    graph = scan(demo)
-    endpoint = next(n for n in graph.nodes if n.planned and n.kind == "endpoint")
-    assert endpoint.description == "Обновлено."
-    assert endpoint.acceptance == ["Критерий"]
-    assert endpoint.domain == "new-domain"
-    scenario = next(n for n in graph.nodes if n.planned and n.kind == "scenario")
-    assert any(
-        e.kind == "dispatch" and e.from_node == endpoint.id and e.to_node == scenario.id
-        for e in graph.edges
-    )
-
-
 def test_экспорт_включает_плановые_узлы(demo: Path):
+    from studio.exporter import build_document
+
     create_metadata_files(_payload(), read_env(demo))
     document = build_document(scan(demo))
     assert "RefundOrderScenario" in document

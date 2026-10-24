@@ -1,4 +1,4 @@
-"""Единственное место чтения файлов проекта.
+﻿"""Единственное место чтения файлов проекта.
 
 `load_source` никогда не бросает исключение: ошибка кодировки, синтаксиса или
 доступа превращается в диагностику, а остальной скан продолжается.
@@ -37,9 +37,6 @@ class SourceFile:
     def readable(self) -> bool:
         return self.error is None
 
-    @property
-    def writable(self) -> bool:
-        return self.error is None
 
 
 @dataclass
@@ -384,3 +381,4 @@ __all__ = [
     "stat_fingerprint",
     "tests_files",
 ]
+

@@ -18,3 +18,7 @@ htmlcov/
 .studio/
 graph.json
 studio.log
+
+# golden fixtures
+!tests/golden/**/.studio/
+!tests/golden/**/.studio/**

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import ast
 
-from studio.diagnostics import Sink
+from studio.diagnostics import Sink, mark_node
 from studio.env import ProjectEnv
 from studio.metamodel import Edge, GraphBuilder, IODetails, Node
 from studio.scanner.ast_utils import (
@@ -46,16 +46,31 @@ def _source(env: ProjectEnv, sources: SourceSet, rel: str):
     return sources.by_rel(rel)
 
 
-def _dispatch_name(call: ast.Call, constants: dict[str, str], sink: Sink, file: str) -> str | None:
+def _dispatch_name(
+    call: ast.Call,
+    constants: dict[str, str],
+    sink: Sink,
+    file: str,
+    node: Node | None = None,
+) -> str | None:
     name = resolve_run_name(call, constants)
     if name is None:
-        sink.add(
-            "W_DISPATCH_DYNAMIC",
-            "run() вызван с нелитеральным именем сценария",
-            file=file,
-            line=call.lineno,
-            hint="Используйте run(\"имя\") или модульную строковую константу.",
-        )
+        if node is not None:
+            mark_node(
+                node,
+                sink,
+                "W_DISPATCH_DYNAMIC",
+                "run() вызван с нелитеральным именем сценария",
+                hint='Используйте run("имя") или модульную строковую константу.',
+            )
+        else:
+            sink.add(
+                "W_DISPATCH_DYNAMIC",
+                "run() вызван с нелитеральным именем сценария",
+                file=file,
+                line=call.lineno,
+                hint="Используйте run(\"имя\") или модульную строковую константу.",
+            )
     return name
 
 
@@ -99,8 +114,9 @@ def resolve_dispatch(
             calls.extend(
                 (call, f" через {helper.name}") for call in find_calls(helper, aliases)
             )
+        endpoint_node = builder.node(entry.id)
         for call, suffix in sorted(calls, key=lambda item: item[0].lineno):
-            name = _dispatch_name(call, constants, sink, entry.file_path)
+            name = _dispatch_name(call, constants, sink, entry.file_path, endpoint_node)
             if not name or name not in index.scenarios:
                 continue
             target = scenario_node_id(index.scenarios[name])
@@ -142,9 +158,10 @@ def resolve_scenario_calls(
         source_id = scenario_node_id(entry)
         if builder.node(source_id) is None:
             continue
+        scenario_node = builder.node(source_id)
         for body, _via in scenario_bodies(entry.class_node):
             for call in find_calls(body, aliases):
-                name = _dispatch_name(call, constants, sink, entry.file_path)
+                name = _dispatch_name(call, constants, sink, entry.file_path, scenario_node)
                 if not name or name not in index.scenarios or name == entry.name:
                     continue
                 target = scenario_node_id(index.scenarios[name])
@@ -163,35 +180,27 @@ def resolve_scenario_calls(
                 )
 
 
-def _io_tables(
-    call: ast.Call, method: str, sink: Sink, file: str
-) -> list[str]:
+def _io_tables(call: ast.Call, method: str) -> tuple[list[str], tuple[str, str] | None]:
+    """(таблицы, причина неточности)."""
     if method in ("query", "custom"):
         sql = call_first_str_arg(call)
         if sql is None:
             if call.args:
-                sink.add(
-                    "W_IO_DYNAMIC",
+                return [], (
                     "SQL-запрос не является строковым литералом",
-                    file=file,
-                    line=call.lineno,
-                    hint="Сканер видит таблицы только в литеральном SQL.",
+                    "Сканер видит таблицы только в литеральном SQL.",
                 )
-            return []
-        return extract_tables_from_sql(sql)
+            return [], None
+        return extract_tables_from_sql(sql), None
     if not call.args:
-        return []
+        return [], None
     first = call.args[0]
     if isinstance(first, ast.Constant) and isinstance(first.value, str):
-        return [first.value]
-    sink.add(
-        "W_IO_DYNAMIC",
+        return [first.value], None
+    return [], (
         "Имя таблицы в вызове порта — не строковый литерал",
-        file=file,
-        line=call.lineno,
-        hint="Передавайте таблицу строкой: self._db.create(\"orders\", ...).",
+        'Передавайте таблицу строкой: self._db.create("orders", ...).',
     )
-    return []
 
 
 def _io_label(method: str, tables: list[str]) -> str:
@@ -222,20 +231,10 @@ def resolve_io_and_tables(
         seen_lines: dict[int, str] = {}
         for call in calls:
             method = call.method
-            tables = _io_tables(call.call, method, sink, entry.file_path)
+            tables, issue = _io_tables(call.call, method)
             node_id = io_node_id(entry.file_path, entry.class_name, method, call.ordinal)
             first_on_line = seen_lines.get(call.lineno)
-            if first_on_line is not None:
-                sink.add(
-                    "W_IO_SAME_LINE",
-                    "Несколько вызовов порта в одной строке: метаданные привязаны к первому",
-                    file=entry.file_path,
-                    line=call.lineno,
-                    hint="Разнесите вызовы по строкам, чтобы адресовать каждый io-узел.",
-                )
-            else:
-                seen_lines[call.lineno] = node_id
-            _add_node(
+            io_node = _add_node(
                 builder,
                 Node(
                     id=node_id,
@@ -256,6 +255,24 @@ def resolve_io_and_tables(
                     ).model_dump(),
                 ),
             )
+            if issue is not None:
+                mark_node(
+                    io_node,
+                    sink,
+                    "W_IO_DYNAMIC",
+                    issue[0],
+                    hint=issue[1],
+                )
+            if first_on_line is not None:
+                mark_node(
+                    io_node,
+                    sink,
+                    "W_IO_SAME_LINE",
+                    "Несколько вызовов порта в одной строке: метаданные привязаны к первому",
+                    hint="Разнесите вызовы по строкам, чтобы адресовать каждый io-узел.",
+                )
+            else:
+                seen_lines[call.lineno] = node_id
             _add_edge(
                 builder,
                 Edge(
@@ -270,11 +287,11 @@ def resolve_io_and_tables(
             for table in tables:
                 model = index.models.get(table)
                 if model is None:
-                    sink.add(
+                    mark_node(
+                        io_node,
+                        sink,
                         "W_TABLE_UNKNOWN",
                         f"Таблица {table!r} не найдена среди моделей",
-                        file=entry.file_path,
-                        line=call.lineno,
                         hint="Добавьте модель или задайте STUDIO_MODELS в .env.fastbase.",
                     )
                     continue

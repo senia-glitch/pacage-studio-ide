@@ -36,16 +36,6 @@ FILES: dict[str, str] = {
         'router = APIRouter(prefix="/orders", tags=["orders"])\n'
         "\n"
         "\n"
-        "# studio: description start\n"
-        "# Создаёт заказ.\n"
-        "# studio: description end\n"
-        "# studio: acceptance start\n"
-        "# - Возвращает 201\n"
-        "# - Заказ сохранён\n"
-        "# studio: acceptance end\n"
-        "# studio: domain start\n"
-        "# orders, billing\n"
-        "# studio: domain end\n"
         '@router.post("/create")\n'
         "async def create_order():\n"
         '    return await run("create_order")\n'
@@ -70,15 +60,9 @@ FILES: dict[str, str] = {
         "from app.utils.money import calc_total\n"
         "\n"
         "\n"
-        "# studio: description start\n"
-        "# Сценарий создания заказа.\n"
-        "# studio: description end\n"
         '@register_scenario("create_order")\n'
         "class CreateOrderScenario(BaseScenario):\n"
         "    async def execute(self, dto):\n"
-        "        # studio: description start\n"
-        "        # Запись заказа.\n"
-        "        # studio: description end\n"
         '        await self._db.create("orders", {})\n'
         "        await self._db.query('SELECT id FROM \"users\"')\n"
         '        await run("charge_payment", dto)\n'
@@ -111,6 +95,37 @@ FILES: dict[str, str] = {
         "\n"
         "def test_health():\n"
         "    assert True\n"
+    ),
+    ".studio/metadata.json": (
+        "{\n"
+        '  "version": 1,\n'
+        '  "nodes": {\n'
+        '    "endpoint:app/api/v1/routes/orders.py:create_order": {\n'
+        '      "kind": "endpoint",\n'
+        '      "name": "create_order",\n'
+        '      "file_path": "app/api/v1/routes/orders.py",\n'
+        '      "description": "Создаёт заказ.",\n'
+        '      "acceptance": ["Возвращает 201", "Заказ сохранён"],\n'
+        '      "domain": "orders, billing",\n'
+        '      "planned": false\n'
+        "    },\n"
+        '    "scenario:app/scenarios/orders.py:CreateOrderScenario": {\n'
+        '      "kind": "scenario",\n'
+        '      "name": "CreateOrderScenario",\n'
+        '      "file_path": "app/scenarios/orders.py",\n'
+        '      "description": "Сценарий создания заказа.",\n'
+        '      "planned": false\n'
+        "    },\n"
+        '    "io:app/scenarios/orders.py:CreateOrderScenario._db.create#1": {\n'
+        '      "kind": "io",\n'
+        '      "name": "CreateOrderScenario._db.create#1",\n'
+        '      "file_path": "app/scenarios/orders.py",\n'
+        '      "description": "Запись заказа.",\n'
+        '      "planned": false\n'
+        "    }\n"
+        "  },\n"
+        '  "edges": []\n'
+        "}\n"
     ),
 }
 

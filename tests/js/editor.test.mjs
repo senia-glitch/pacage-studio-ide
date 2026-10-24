@@ -18,14 +18,14 @@ test("windows-путь с пробелом и кириллицей", () => {
 
 test("posix-путь и строка 1", () => {
   assert.equal(
-    buildEditorUrl("cursor", "/home/me/app/x.py", "app/x.py", 1),
-    "cursor://file//home/me/app/x.py:1",
+    buildEditorUrl("vscode", "/home/me/app/x.py", "app/x.py", 1),
+    "vscode://file//home/me/app/x.py:1",
   );
 });
 
-test("свой шаблон", () => {
+test("неизвестный редактор откатывается на VS Code", () => {
   assert.equal(
-    buildEditorUrl("custom", "/tmp/x.py", "x.py", 7, "my://{rel}?line={line}&path={path}"),
-    "my://x.py?line=7&path=/tmp/x.py",
+    buildEditorUrl("other", "/tmp/x.py", "x.py", 7),
+    "vscode://file//tmp/x.py:7",
   );
 });

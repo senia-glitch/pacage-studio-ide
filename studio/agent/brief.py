@@ -1,4 +1,4 @@
-"""ТЗ для AI-агента: карта проекта + задачи на планируемые узлы (S12).
+﻿"""ТЗ для AI-агента: карта проекта + задачи на планируемые узлы (S12).
 
 Генерация локальная и детерминированная: один и тот же граф и параметры дают
 одинаковые байты, кроме строки «Сформировано». Код проекта не пишется.
@@ -35,13 +35,14 @@ MAX_BRIEF_CHARS = 60_000
 SAMPLE_LINE_LIMIT = 40
 
 MAP_MODES = ("full", "related", "compact", "none")
-KIND_ORDER = {"model": 0, "io": 1, "scenario": 2, "endpoint": 3, "test": 4}
+KIND_ORDER = {"model": 0, "io": 1, "scenario": 2, "endpoint": 3, "test": 4, "nested": 5}
 KIND_NAMES = {
     "endpoint": "эндпоинт",
     "scenario": "сценарий",
     "io": "io",
     "model": "модель",
     "test": "тест",
+    "nested": "вложенный",
 }
 EDGE_NAMES = {
     "dispatch": "вызов сценария",
@@ -308,6 +309,11 @@ def _details_summary(node: Node) -> str:
         return f"_db.{details.get('method') or '?'}(){suffix}"
     if node.kind == "test":
         return f"модуль {details.get('module') or node.file_path}"
+    if node.kind == "nested":
+        role = str(details.get("role") or "module")
+        symbols = details.get("symbols") or []
+        suffix = f" · символы: {', '.join(symbols)}" if symbols else ""
+        return f"{role} · {node.file_path}{suffix}"
     return _kind_name(node.kind)
 
 
@@ -569,7 +575,13 @@ def _map_tree(graph: Graph, visible: set[str] | None, compact: bool) -> list[str
                     if depth >= 5:
                         continue
                     for edge in index.out(current):
-                        if edge.kind not in ("dispatch", "scenario_call", "port_call", "table"):
+                        if edge.kind not in (
+                            "dispatch",
+                            "scenario_call",
+                            "port_call",
+                            "table",
+                            "uses",
+                        ):
                             continue
                         if edge.to_node in seen:
                             continue
@@ -732,6 +744,31 @@ def _diagnostics_section(graph: Graph, warnings: list[str]) -> list[str]:
     return lines
 
 
+def _reuse_nodes(graph: Graph, task: Node, sample: Node | None) -> list[Node]:
+    """nested-узлы образца и предков задачи: что можно переиспользовать."""
+    index = graph.index()
+    roots: list[str] = [task.id]
+    if sample is not None:
+        roots.append(sample.id)
+    seen_roots = set(roots)
+    queue: deque[str] = deque(roots)
+    while queue:
+        current = queue.popleft()
+        for edge in index.incoming(current):
+            if edge.kind in ("dispatch", "scenario_call") and edge.from_node not in seen_roots:
+                seen_roots.add(edge.from_node)
+                queue.append(edge.from_node)
+    found: dict[str, Node] = {}
+    for root_id in sorted(seen_roots):
+        for edge in index.out(root_id):
+            if edge.kind != "uses":
+                continue
+            node = index.node(edge.to_node)
+            if node is not None and node.kind == "nested":
+                found[node.id] = node
+    return sorted(found.values(), key=lambda node: (node.file_path, node.line, node.id))
+
+
 def _render_task(
     graph: Graph,
     sources: SourceSet,
@@ -744,9 +781,9 @@ def _render_task(
     index = graph.index()
     by_id = graph.by_id()
     anchor = node_anchor(task) or task.label
-    target = task.file_path
+    target = str((task.details or {}).get("target_file") or task.file_path)
     lines = [f"### T{number}. {_kind_name(task.kind)} `{anchor}`  [ПЛАН]", ""]
-    lines.append(f"- Целевой файл: `{target}` (сейчас файл-план)")
+    lines.append(f"- Целевой файл: `{target}`")
     lines.append(
         f"- Якорь (имя в коде): `{anchor}` · Домен: {task.domain or 'не указано'} · "
         f"Детали: {_details_summary(task)}"
@@ -810,16 +847,13 @@ def _render_task(
                 "line": start,
                 "end_line": end,
             }
-        peripherals = [
-            str(item.get("file_path") or "")
-            for item in (sample.peripherals or [])
-            if item.get("file_path")
-        ]
-        if peripherals:
-            lines.append(
-                "- Можно переиспользовать (периферия образца): "
-                + ", ".join(f"`{item}`" for item in dict.fromkeys(peripherals))
-            )
+    reuse = _reuse_nodes(graph, task, sample)
+    if reuse:
+        items = []
+        for node in reuse:
+            where = _where(node)
+            items.append(f"`{where}` — {node.label}")
+        lines.append("- Можно переиспользовать: " + "; ".join(items))
     tests = [
         by_id[edge.from_node]
         for edge in index.incoming(task.id)
@@ -853,18 +887,16 @@ def _render_task(
         "empty_description": not bool(_description(task).strip()),
         "expected_edges": expected_edges,
         "sample": sample_payload,
+        "reuse": [
+            {"file": node.file_path, "line": node.line, "label": node.label}
+            for node in reuse
+        ],
     }
     return "\n".join(lines), task_payload
 
 
 def _unready_payload(node: Node) -> dict:
-    missing = []
-    if not (node.description or "").strip():
-        missing.append("описание")
-    if not (node.acceptance or []):
-        missing.append("критерии приёмки")
-    if not (node.domain or "").strip() and node.kind == "endpoint":
-        missing.append("домен")
+    missing = [] if (node.description or "").strip() else ["описание"]
     return {
         "id": node.id,
         "kind": node.kind,
@@ -908,8 +940,8 @@ def _build_markdown(
             "связи и критерии приёмки обязательны."
         )
         lines.append(
-            "Каждая задача — один узел карты: файл-план заменяется рабочим кодом, "
-            "а блоки `# studio:` над якорем сохраняются без изменений."
+            "Каждая задача — один узел карты. Описания и связи взяты из "
+            ".studio/metadata.json; код проекта студия не изменяет."
         )
         lines.append(
             "Порядок задач учитывает зависимости: модели → io → сценарии → "
@@ -928,9 +960,10 @@ def _build_markdown(
                 }
             )
             depends = ", ".join(f"T{item}" for item in dependencies) or "—"
+            target_file = str((node.details or {}).get("target_file") or node.file_path)
             lines.append(
                 f"| T{number} | {_kind_name(node.kind)} | `{node_anchor(node) or node.label}` "
-                f"| `{node.file_path}` | {depends} |"
+                f"| `{target_file}` | {depends} |"
             )
     else:
         lines.append(
@@ -972,18 +1005,13 @@ def _build_markdown(
         lines.append("")
     else:
         for node in unready:
-            missing = []
-            if not (node.description or "").strip():
-                missing.append("добавьте описание")
-            if not (node.acceptance or []):
-                missing.append("добавьте критерии приёмки")
             lines.append(
                 f"- `{_kind_name(node.kind)}` `{node_anchor(node) or node.label}` — "
-                f"`{node.file_path}`: " + ", ".join(missing)
+                f"`{node.file_path}`: добавьте описание в студии"
             )
         lines.append("")
     lines.extend(_diagnostics_section(graph, warnings))
-    lines.append("## 8. Формат блоков `# studio:`")
+    lines.append("## 8. Формат якорей и связей")
     lines.append("")
     try:
         rules_path = Path(__file__).resolve().parent.parent / "metadata" / "rules.md"
@@ -1009,7 +1037,12 @@ def _build_markdown(
 def _fingerprint_tasks(tasks: list[Node]) -> str:
     digest = hashlib.sha1()
     for node in sorted(tasks, key=lambda item: item.id):
-        digest.update(f"{node.id}:{node.file_hash}\n".encode())
+        digest.update(
+            (
+                f"{node.id}:{node.file_hash}:{node.description}:"
+                f"{'|'.join(node.acceptance or [])}\n"
+            ).encode()
+        )
     return digest.hexdigest()
 
 
@@ -1269,3 +1302,4 @@ __all__ = [
     "save_brief",
     "save_brief_sidecars",
 ]
+

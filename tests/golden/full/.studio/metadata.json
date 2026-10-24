@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "nodes": {
+    "endpoint:app/api/v1/routes/cancel_order.py:cancel_order": {
+      "kind": "endpoint",
+      "name": "cancel_order",
+      "file_path": "app/api/v1/routes/cancel_order.py",
+      "target_file": "app/api/v1/routes/cancel_order.py",
+      "details": {
+        "http_method": "post",
+        "path": "/cancel",
+        "function_name": "cancel_order",
+        "url_path": "/api/v1/users/cancel"
+      },
+      "description": "Отменяет заказ по идентификатору.",
+      "acceptance": [
+        "POST /api/v1/users/cancel возвращает 200"
+      ],
+      "domain": "users",
+      "planned": true
+    },
+    "endpoint:app/api/v1/routes/users.py:both": {
+      "kind": "endpoint",
+      "name": "both",
+      "file_path": "app/api/v1/routes/users.py",
+      "target_file": "app/api/v1/routes/users.py",
+      "details": {},
+      "description": "",
+      "acceptance": [],
+      "domain": "",
+      "planned": false
+    },
+    "endpoint:app/api/v1/routes/users.py:create_user": {
+      "kind": "endpoint",
+      "name": "create_user",
+      "file_path": "app/api/v1/routes/users.py",
+      "target_file": "app/api/v1/routes/users.py",
+      "details": {},
+      "description": "Создаёт пользователя.",
+      "acceptance": [],
+      "domain": "users",
+      "planned": false
+    },
+    "io:app/scenarios/users.py:CreateUserScenario._db.query#1": {
+      "kind": "io",
+      "name": "CreateUserScenario._db.query#1",
+      "file_path": "app/scenarios/users.py",
+      "target_file": "app/scenarios/users.py",
+      "details": {},
+      "description": "Загружает пользователя и связанные заказы.",
+      "acceptance": [],
+      "domain": "",
+      "planned": false
+    },
+    "model:models_planned.py:PlannedOrder": {
+      "kind": "model",
+      "name": "PlannedOrder",
+      "file_path": "models_planned.py",
+      "target_file": "models_planned.py",
+      "details": {
+        "class_name": "PlannedOrder",
+        "tablename": "planned_orders",
+        "table": "planned_orders",
+        "source_file": "models_planned.py"
+      },
+      "description": "Модель планируемых заказов: таблица planned_orders.",
+      "acceptance": [
+        "Таблица planned_orders доступна в сценарии CancelOrder"
+      ],
+      "domain": "",
+      "planned": true
+    },
+    "scenario:app/scenarios/cancel_order.py:CancelOrder": {
+      "kind": "scenario",
+      "name": "CancelOrder",
+      "file_path": "app/scenarios/cancel_order.py",
+      "target_file": "app/scenarios/cancel_order.py",
+      "details": {
+        "name": "CancelOrder",
+        "class_name": "CancelOrder",
+        "module": "app.scenarios.cancel_order"
+      },
+      "description": "Отменяет заказ и освобождает место. Связь с моделью planned_orders.",
+      "acceptance": [
+        "Заказ помечен как отменённый",
+        "Освобождено место на складе"
+      ],
+      "domain": "",
+      "planned": true
+    },
+    "scenario:app/scenarios/notify.py:NotifyScenario": {
+      "kind": "scenario",
+      "name": "NotifyScenario",
+      "file_path": "app/scenarios/notify.py",
+      "target_file": "app/scenarios/notify.py",
+      "details": {
+        "name": "NotifyScenario",
+        "class_name": "NotifyScenario",
+        "module": "app.scenarios.notify"
+      },
+      "description": "",
+      "acceptance": [
+        "Отправляется уведомление"
+      ],
+      "domain": "",
+      "planned": true
+    },
+    "scenario:app/scenarios/users.py:AuditScenario": {
+      "kind": "scenario",
+      "name": "AuditScenario",
+      "file_path": "app/scenarios/users.py",
+      "target_file": "app/scenarios/users.py",
+      "details": {},
+      "description": "Пишет аудит в orders.",
+      "acceptance": [],
+      "domain": "",
+      "planned": false
+    },
+    "scenario:app/scenarios/users.py:CreateUserScenario": {
+      "kind": "scenario",
+      "name": "CreateUserScenario",
+      "file_path": "app/scenarios/users.py",
+      "target_file": "app/scenarios/users.py",
+      "details": {},
+      "description": "Сценарий создания пользователя.",
+      "acceptance": [],
+      "domain": "",
+      "planned": false
+    },
+    "test:tests/test_users.py:TestUsers.test_audit": {
+      "kind": "test",
+      "name": "TestUsers.test_audit",
+      "file_path": "tests/test_users.py",
+      "target_file": "tests/test_users.py",
+      "details": {},
+      "description": "",
+      "acceptance": [],
+      "domain": "",
+      "planned": false
+    },
+    "test:tests/test_users.py:TestUsers.test_create_by_url": {
+      "kind": "test",
+      "name": "TestUsers.test_create_by_url",
+      "file_path": "tests/test_users.py",
+      "target_file": "tests/test_users.py",
+      "details": {},
+      "description": "",
+      "acceptance": [],
+      "domain": "",
+      "planned": false
+    }
+  },
+  "edges": [
+    {
+      "from": "endpoint:app/api/v1/routes/cancel_order.py:cancel_order",
+      "to": "scenario:app/scenarios/cancel_order.py:CancelOrder",
+      "kind": "dispatch"
+    },
+    {
+      "from": "scenario:app/scenarios/cancel_order.py:CancelOrder",
+      "to": "model:models_planned.py:PlannedOrder",
+      "kind": "uses"
+    }
+  ]
+}
