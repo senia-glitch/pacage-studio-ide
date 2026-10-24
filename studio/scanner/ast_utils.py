@@ -157,13 +157,6 @@ def kwarg_list_str(call: ast.Call, key: str) -> list[str]:
     return []
 
 
-def kwarg_true(call: ast.Call, key: str) -> bool:
-    for kw in call.keywords:
-        if kw.arg == key and isinstance(kw.value, ast.Constant) and kw.value.value is True:
-            return True
-    return False
-
-
 def module_str_constants(tree: ast.Module) -> dict[str, str]:
     """Модульные NAME = "строка" (в том числе AnnAssign)."""
     out: dict[str, str] = {}
@@ -292,25 +285,10 @@ def extract_tables_from_sql(sql: str | None) -> list[str]:
     return out
 
 
-def extract_table_from_sql(sql: str | None) -> str | None:
-    """Первая таблица из SQL (совместимость с 3.x)."""
-    tables = extract_tables_from_sql(sql)
-    return tables[0] if tables else None
-
-
 def find_top_level_function(
     tree: ast.Module, name: str
 ) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
     for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
-            return node
-    return None
-
-
-def find_method(
-    class_node: ast.ClassDef, name: str
-) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
-    for node in class_node.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
             return node
     return None
@@ -324,10 +302,6 @@ def base_names(node: ast.ClassDef) -> list[str]:
         elif isinstance(expr, ast.Attribute):
             out.append(expr.attr)
     return out
-
-
-def has_base(node: ast.ClassDef, base: str) -> bool:
-    return base in base_names(node)
 
 
 def class_table_name(node: ast.ClassDef) -> str | None:

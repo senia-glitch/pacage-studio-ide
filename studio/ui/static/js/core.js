@@ -1,4 +1,4 @@
-﻿import {api as apiRequest, onRevision} from "./api.js";
+import {api as apiRequest, onRevision} from "./api.js";
 import {enableNodeDrag as enableNodeDragImpl, enableZoneDrag as enableZoneDragImpl} from "./drag.js";
 import {EDITORS, buildEditorUrl} from "./editor.js";
 import {drawEdges as drawEdgesImpl} from "./edges.js";
@@ -49,7 +49,6 @@ export const S = {
   formDirty: false,
   persistTimer: null,
   lastSearchQuery: "",
-  editorTemplate: "",
   editorId: "vscode",
   studioInfo: null,
   briefReport: null,
@@ -71,7 +70,6 @@ export const hooks = {
 
 const api = apiRequest;
 try {
-  S.editorTemplate = localStorage.getItem("studio:editor-template") || "";
   S.editorId = localStorage.getItem("studio:editor") || "vscode";
 } catch (_) {}
 onRevision((value) => { S.studioRevision = Math.max(S.studioRevision, value); });
@@ -294,14 +292,12 @@ function nodeAbsPath(n){
   const root=String((S.G&&S.G.project_root)||"").replace(/[\\/]+$/,"");
   return root?root+"/"+n.file_path:n.file_path;
 }
-function currentEditor(){return EDITORS.some(e=>e.id===S.editorId)?S.editorId:"vscode"}
 function openEditorForNode(n){
   if(!n)return;
   const line=n.planned?1:(n.line||1);
-  const url=buildEditorUrl(currentEditor(),nodeAbsPath(n),n.file_path,line,S.editorTemplate);
+  const url=buildEditorUrl("vscode",nodeAbsPath(n),n.file_path,line);
   const anchor=document.createElement("a");
   anchor.href=url;anchor.style.display="none";document.body.appendChild(anchor);anchor.click();anchor.remove();
-  if(currentEditor()==="custom"&&!S.editorTemplate)toast("Задайте шаблон редактора: {path}, {rel}, {line}");
 }
 function copyNodeLocation(n){
   if(!n)return;
@@ -320,13 +316,9 @@ function copyNodeLocation(n){
 function initEditorChoice(){
   const select=$("editorChoice");if(!select)return;
   select.innerHTML=EDITORS.map(e=>`<option value="${e.id}">${esc(e.title)}</option>`).join("");
-  select.value=currentEditor();
+  select.value=S.editorId;
   select.onchange=()=>{
     S.editorId=select.value;
-    if(S.editorId==="custom"){
-      const value=prompt("Шаблон ссылки на редактор: {path}, {rel}, {line}",S.editorTemplate||"{path}:{line}");
-      if(value!==null){S.editorTemplate=value;try{localStorage.setItem("studio:editor-template",S.editorTemplate)}catch(_){ }}
-    }
     try{localStorage.setItem("studio:editor",S.editorId)}catch(_){ }
     schedulePersist();
   };
@@ -342,7 +334,7 @@ function currentPositions(){
 }
 function uiSnapshot(){
   return{
-    tab:S.tab,selectedScenario:S.selectedScenario,selectedNode:S.selectedNode,hideMeta:S.hideMeta,hideNested:S.hideNested,todoHighlight:S.todoHighlight,editor:S.editorId,editorTemplate:S.editorTemplate,
+    tab:S.tab,selectedScenario:S.selectedScenario,selectedNode:S.selectedNode,hideMeta:S.hideMeta,hideNested:S.hideNested,todoHighlight:S.todoHighlight,editor:S.editorId,
     views:{map:S.mapView,scen:S.scenView,create:S.createView},
     positions:currentPositions(),
     listOpen:Object.fromEntries(S.listOpen),
@@ -367,7 +359,6 @@ function restoreUiState(saved){
   S.todoHighlight=!!saved.todoHighlight;
   applyTodoHighlight();
   if(EDITORS.some(e=>e.id===saved.editor))S.editorId=saved.editor;
-  if(typeof saved.editorTemplate==="string")S.editorTemplate=saved.editorTemplate;
   for(const key of ["map","scen","create"]){
     const view=saved.views&&saved.views[key];
     if(view&&Number.isFinite(view.x)&&Number.isFinite(view.y)&&Number.isFinite(view.k)){

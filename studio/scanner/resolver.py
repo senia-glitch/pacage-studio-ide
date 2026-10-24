@@ -29,10 +29,6 @@ def io_node_id(rel_path: str, scenario_class: str, method: str, ordinal: int) ->
     return f"io:{rel_path}:{scenario_class}._db.{method}#{ordinal}"
 
 
-def io_anchor(scenario_class: str, method: str, ordinal: int) -> str:
-    return f"{scenario_class}._db.{method}#{ordinal}"
-
-
 def _add_edge(builder: GraphBuilder, edge: Edge) -> None:
     builder.add_edge(edge)
 

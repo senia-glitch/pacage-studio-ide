@@ -153,15 +153,6 @@ def scenario_node_id(entry: ScenarioEntry) -> str:
     return f"scenario:{entry.file_path}:{entry.class_name}"
 
 
-def endpoint_node_id(entry: EndpointEntry) -> str:
-    return entry.id
-
-
-def iter_module_files(root: Path, dotted: str) -> list[Path]:
-    """Совместимость: обход пакета живёт в studio.source."""
-    return module_files(root, dotted)
-
-
 def _files_for(sources: SourceSet, root: Path, dotted: str) -> list[SourceFile]:
     wanted = {path.resolve().as_posix() for path in module_files(root, dotted)}
     out: list[SourceFile] = []
