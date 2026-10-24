@@ -1,16 +1,11 @@
-﻿"""Разрешение якорей из metadata.json: anchor, path::anchor, io#n."""
+"""Разрешение якорей из metadata.json: anchor, path::anchor, io#n."""
 
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 
 from studio.diagnostics import Sink, mark_node
 from studio.metamodel import Graph, GraphBuilder, node_anchor
-
-LEGACY_IO_RE = re.compile(r"^(?P<base>.+\._db\.[A-Za-z_][A-Za-z0-9_]*):(?P<line>\d+)$")
-# Якоря старого формата больше не читаются: metadata.json — новая сущность.
-READ_LEGACY_ANCHORS = False
 
 
 class AnchorResolver:
