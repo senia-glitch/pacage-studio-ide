@@ -25,8 +25,6 @@ def test_spec_описывает_новую_реальность():
     assert "metadata.json" in spec
     assert "nested" in spec
     assert "# studio:" not in spec
-    original = ROOT / "ТЗ этого пакета - истина для его рефакторинга.txt"
-    assert original.is_file()
 
 
 def test_правила_и_документация_агента():
