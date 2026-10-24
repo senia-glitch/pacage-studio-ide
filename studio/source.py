@@ -30,11 +30,6 @@ class SourceFile:
     raw: bytes = b""
     error: Diagnostic | None = None
 
-    @property
-    def readable(self) -> bool:
-        return self.error is None
-
-
 
 @dataclass
 class SourceSet:
@@ -51,22 +46,11 @@ class SourceSet:
     def all_files(self) -> list[SourceFile]:
         return [*self.files, *self.readonly]
 
-    def editable(self) -> list[SourceFile]:
-        return list(self.files)
-
     def fingerprint(self) -> str:
         digest = hashlib.sha1()
         for item in sorted(self.all_files(), key=lambda f: f.rel):
             digest.update(f"{item.rel}:{item.sha1}\n".encode())
         return digest.hexdigest()
-
-
-def parse_text(text: str, filename: str = "") -> ast.Module | None:
-    """Разбор текста без исключений (для метаданных и тестов)."""
-    try:
-        return ast.parse(text, filename=filename)
-    except (SyntaxError, ValueError, RecursionError, MemoryError):
-        return None
 
 
 def load_source(root: Path, path: Path) -> SourceFile:
