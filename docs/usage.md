@@ -5,11 +5,14 @@
 ```powershell
 studio doctor                  # проверить источники и окружение
 studio                         # автоскан + интерфейс, открывает браузер
+studio dev                     # то же явно: --host, --port, --no-open, --poll, --verbose
 studio scan [--json]           # только скан → .studio/graph.json
 studio list [--json]           # сценарии в терминале
 studio brief [--stdout] [--only ANCHOR] [--scenario NAME]
 studio verify [BRIEF]          # проверить выполнение ТЗ
 studio install-full            # fastbase[full] в текущий venv
+studio help                    # все команды
+studio --version               # версия пакета
 ```
 
 Про ТЗ для AI-агента — в [agent-brief.md](agent-brief.md).
@@ -58,6 +61,6 @@ markdown-список. Коды — в [troubleshooting.md](troubleshooting.md).
 
 ## Лог
 
-`.studio/studio.log` — журнал сканов, ошибок и записи. GET-запросы не пишутся;
-`studio dev --verbose` добавляет HTTP. Удалить `.studio/` безопасно: граф и
-метаданные будут созданы заново (метаданные — только при явном сохранении).
+`.studio/studio.log` — журнал сканов, ошибок и записи. HTTP-запросы по
+умолчанию не пишутся; `studio dev --verbose` добавляет их. Удаление `.studio/`
+стирает `metadata.json` безвозвратно: граф пересоберётся, описания — нет.

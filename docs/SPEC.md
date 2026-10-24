@@ -9,8 +9,8 @@
 endpoint → scenario → io → model
 ```
 
-Код проекта не изменяется. Все описания, критерии, домены, связи и планы —
-в `.studio/metadata.json`.
+Существующий код не изменяется; создаются только новые файлы-скелеты.
+Все описания, критерии, домены, связи и планы — в `.studio/metadata.json`.
 
 ## Блоки
 
@@ -22,7 +22,7 @@ endpoint → scenario → io → model
    `.studio/metadata.json`; к коду проекта не обращается.
 4. **Создание** (`studio/creator/`) — проверка ввода, файлы-скелеты с TODO и
    запись плана в метаданные. Всё или ничего.
-5. **ТЗ** (`studio/agent/brief.py`) — граф + метаданные → markdown.
+5. **ТЗ** (`studio/agent/brief.py`) — граф, исходники и правила → markdown.
 6. **Проверка ТЗ** (`studio/agent/verify.py`) — узел, связи, тест; только
    факты.
 7. **UI** (`studio/ui/static/js/`) — карта, сценарий, инспектор, создание,
@@ -40,10 +40,10 @@ endpoint → scenario → io → model
 
 ## Метаданные
 
-Один файл `.studio/metadata.json`, ключ — стабильный якорь узла. Поля:
-`description`, `acceptance`, `domain` (только endpoint), `planned`, `details`,
-`file_path`, `target_file`. Связи из metadata.json для существующих узлов —
-только `uses`/`depends`.
+Один файл `.studio/metadata.json`, ключ — стабильный якорь узла. Служебные
+поля: `kind`, `name`, `file_path`, `target_file`, `details`. Пользовательские:
+`description`, `acceptance`, `domain` (только endpoint), `planned`. Связи из
+metadata.json для существующих узлов — только `uses`/`depends`.
 
 ## Диагностика
 
