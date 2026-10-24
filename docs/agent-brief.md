@@ -8,7 +8,9 @@
 
 ```bash
 studio brief                      # .studio/agent-brief.md, весь проект
-studio brief --stdout             # ТЗ в stdout, без записи
+studio brief --stdout             # ТЗ в stdout, без файла ТЗ
+# при --stdout и --json служебные .studio/briefs/*.json и last-brief.json
+# всё равно пишутся: по ним работает studio verify
 studio brief --only CancelOrder   # только выбранный узел (можно повторять)
 studio brief --scenario cancel_order --map related
 studio brief --include-empty      # включить узлы без описания
