@@ -1,4 +1,4 @@
-export function bindDrag(element, handle, view, onMove, onEnd, hooks = {}) {
+function bindDrag(element, handle, view, onMove, onEnd, hooks = {}) {
   if (!handle) return;
   handle.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;

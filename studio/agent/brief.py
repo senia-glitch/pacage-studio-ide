@@ -462,9 +462,7 @@ def _path_text(graph: Graph, path: list[str], numbers: dict[str, int]) -> str:
     return " → ".join(parts)
 
 
-def _choose_sample(
-    graph: Graph, task: Node, samples: list[Node]
-) -> Node | None:
+def _choose_sample(task: Node, samples: list[Node]) -> Node | None:
     candidates = [
         node
         for node in samples
@@ -528,7 +526,7 @@ def _sample_code(source: SourceSet, node: Node) -> tuple[str, int, int] | None:
     return "\n".join(cleaned), start, min(end, start + SAMPLE_LINE_LIMIT - 1)
 
 
-def _map_line(node: Node, compact: bool = False) -> str:
+def _map_line(node: Node) -> str:
     return _node_line(node)
 
 
@@ -546,7 +544,7 @@ def _map_tree(graph: Graph, visible: set[str] | None, compact: bool) -> list[str
     )
     if compact:
         return [
-            _map_line(node, compact=True)
+            _map_line(node)
             for node in endpoints
             if visible is None or node.id in visible
         ]
@@ -651,7 +649,7 @@ def _section_map(
     if mode == "compact":
         lines.append("### 5.2 Узлы (кратко)")
         lines.append("")
-        lines.extend(_map_line(node, compact=True) for node in graph.nodes)
+        lines.extend(_map_line(node) for node in graph.nodes)
         lines.append("")
         return lines
     visible = None if mode == "full" else _related_visible(graph, task_ids)
@@ -820,7 +818,7 @@ def _render_task(
         relation_lines.append("  - не указано")
     lines.extend(relation_lines)
 
-    sample = _choose_sample(graph, task, source_tasks)
+    sample = _choose_sample(task, source_tasks)
     sample_payload: dict = {}
     if sample is None:
         lines.append(

@@ -1,5 +1,5 @@
-export const TODO_BADGE_NO_CODE = "TODO · нет кода";
-export const TODO_BADGE_NO_DESCRIPTION = "TODO · нет описания";
+const TODO_BADGE_NO_CODE = "TODO · нет кода";
+const TODO_BADGE_NO_DESCRIPTION = "TODO · нет описания";
 
 export const OFF_PATH_KINDS = ["scenario", "io", "model", "test"];
 export const OFF_PATH_TITLES = {
@@ -13,7 +13,7 @@ export function isTodo(node) {
   return !!node && node.planned === true;
 }
 
-export function hasDescription(node) {
+function hasDescription(node) {
   return !!String((node && node.description) || "").trim();
 }
 

@@ -344,7 +344,7 @@ function renderScenario(){
 }
 
 
-export {renderScenario, redrawScenarioEdges, recomputeScenarioSizes, focusIncompleteNode};
+export {renderScenario, focusIncompleteNode};
 
 
 

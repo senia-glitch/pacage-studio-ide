@@ -16,9 +16,6 @@ studio verify                     # проверить последнее ТЗ
 studio verify .studio/agent-brief.md --json
 ```
 
-`studio export` остаётся устаревшим псевдонимом `studio brief --map full`:
-документ называется ТЗ для AI-агента.
-
 ## Что попадает в ТЗ
 
 - постановка и таблица задач;

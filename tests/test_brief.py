@@ -228,9 +228,7 @@ def test_образец_приоритет_домен_каталог_id():
         domain="orders",
         details={"class_name": "SameDomain"},
     )
-    chosen = _choose_sample(
-        Graph(nodes=[task, other, same_domain, same_dir]), task, [other, same_domain, same_dir]
-    )
+    chosen = _choose_sample(task, [other, same_domain, same_dir])
     assert chosen is same_dir
 
 
@@ -365,7 +363,7 @@ def test_сохранение_и_загрузка_тз(tmp_path: Path):
     assert loaded_file["brief_id"] == brief.brief_id
 
 
-def test_cli_brief_stdout_only_and_export(demo: Path, capsys):
+def test_cli_brief_stdout_only(demo: Path, capsys):
     assert main(["brief", "--project", str(demo), "--stdout"]) == 0
     out = capsys.readouterr().out
     assert out.startswith("# ТЗ для AI-агента")
@@ -378,9 +376,8 @@ def test_cli_brief_stdout_only_and_export(demo: Path, capsys):
     assert len(headings) == 1
     assert "CancelOrder" in headings[0]
 
-    assert main(["export", "--project", str(demo)]) == 0
+    assert main(["brief", "--project", str(demo), "--map", "full"]) == 0
     out = capsys.readouterr().out
-    assert "устарел" in out
     assert "ТЗ:" in out
 
 

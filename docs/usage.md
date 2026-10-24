@@ -9,7 +9,6 @@ studio scan [--json]           # только скан → .studio/graph.json
 studio list [--json]           # сценарии в терминале
 studio brief [--stdout] [--only ANCHOR] [--scenario NAME]
 studio verify [BRIEF]          # проверить выполнение ТЗ
-studio export [--out PATH]     # устаревший псевдоним brief --map full
 studio install-full            # fastbase[full] в текущий venv
 ```
 

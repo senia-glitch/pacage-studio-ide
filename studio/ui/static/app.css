@@ -32,7 +32,6 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index
 .map-zone>.zlab,.scen-zone>.zlab,.create-zone>.zlab{cursor:move;color:var(--txt)}
 .zone-add{flex:none;background:transparent;border:1px solid var(--line);color:var(--txt);border-radius:4px;padding:0 5px;font-size:13px;line-height:15px;cursor:pointer}
 .zone-add:hover{border-color:var(--acc);color:var(--acc)}
-.zone.zone-dragging{box-shadow:0 0 0 1px var(--acc),0 8px 26px #0008}
 .zone.map-fastbase{background:rgba(90,160,255,.055)}
 .zone.map-method{background:rgba(120,130,160,.055)}
 .zone.scen-zone{background:rgba(120,130,160,.045)}
@@ -44,7 +43,7 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index
 .card .hd .grip,.zone .zlab .grip{flex:none;color:#8a8b93;cursor:grab;font-size:12px;line-height:1;letter-spacing:0;user-select:none}
 .card .hd,.zone .zlab{touch-action:none}
 .card .hd .grip:hover,.zone .zlab .grip:hover{color:var(--acc)}
-.card.dragging,.zone.zone-dragging,.zone.dragging{opacity:.96;box-shadow:0 10px 30px #000c;z-index:60!important}
+.card.dragging,.zone.dragging{opacity:.96;box-shadow:0 10px 30px #000c;z-index:60!important}
 .card.dragging{cursor:grabbing}
 .nested-node{width:252px;background:#2a2b30}
 .nested-node .hd{border-bottom-color:#5a6478}
@@ -62,7 +61,7 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index
 .empty{position:absolute;left:40px;top:70px;color:var(--dim);font-size:13px;line-height:1.7}
 .mapbar{padding:6px 12px;border-bottom:1px solid #000;display:flex;gap:12px;align-items:center;background:var(--panel)}
 .mapbar b{color:var(--acc)}
-#mapPane,#scenPane{display:flex;flex-direction:column;flex:1;min-height:0}
+#mapPane{display:flex;flex-direction:column;flex:1;min-height:0}
 #scenWrap{flex:1;display:grid;grid-template-columns:230px 1fr 350px;min-height:0}
 #scenList{background:var(--panel);border-right:1px solid #000;overflow:auto;padding:6px;min-height:0}
 #scenList .sitem{padding:4px 8px;border-radius:5px;cursor:pointer;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -97,7 +96,6 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index
 .chips{display:inline-flex;gap:4px;flex-wrap:wrap}
 .chip{font-size:9.5px;padding:1px 6px;border-radius:8px;background:#3a3b40;color:#c2c2ca}
 .chip.acc{background:#4a3a28;color:var(--acc)}
-.chip.plan{background:#3a3b40;color:#e8a35a}
 .card.planned{border-style:dashed}
 #createPane{flex:1;display:flex;flex-direction:column;min-height:0}
 .createbar{display:flex;gap:8px;align-items:center;padding:6px 12px;border-bottom:1px solid #000;background:var(--panel);flex-wrap:wrap}
@@ -160,8 +158,6 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index
 .palette-list{max-height:50vh;overflow:auto;margin-top:8px}
 .palette-item{padding:5px 7px;border-radius:5px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .palette-item:hover,.palette-item.on{background:var(--panel2);outline:1px solid var(--acc)}
-.conflict{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.conflict pre{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px;white-space:pre-wrap;max-height:220px;overflow:auto;font:11px/1.4 Consolas,monospace}
 .hotkeys{display:grid;grid-template-columns:1fr 1fr;gap:5px 18px}
 .hotkeys b{color:var(--acc)}
 

@@ -206,5 +206,5 @@ function initTodoChip(){
 }
 
 
-export {updateBriefBadge, applyTodoHighlight, toggleTodoHighlight, scheduleBriefStatus, refreshBriefStatus, openBriefStatus, openBriefDialog, initTodoChip};
+export {updateBriefBadge, scheduleBriefStatus, refreshBriefStatus, openBriefDialog, initTodoChip};
 

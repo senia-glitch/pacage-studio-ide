@@ -211,15 +211,8 @@ def save_node_metadata(
     description: str,
     acceptance: list[str],
     domain: str,
-    base_hash: str | None = None,
-    force: bool = False,
 ) -> SaveResult:
-    """Сохранить описание/критерии/домен узла в metadata.json.
-
-    base_hash и force оставлены совместимыми с API, но к файлам проекта
-    отношения не имеют: конфликтов с кодом больше нет.
-    """
-    del base_hash, force
+    """Сохранить описание/критерии/домен узла в metadata.json."""
     metadata = read_metadata(project_root)
     record = dict(metadata.nodes.get(node.id) or _record_for_node(node))
     record.update(

@@ -301,16 +301,16 @@ def scan(project_root: Path) -> Graph:
 
     index = _phase(sink, "index", lambda: build_index(env, sources, sink)) or Index()
     _phase(sink, "nodes", lambda: _put_core_nodes(builder, index))
-    _phase(sink, "dispatch", lambda: resolve_dispatch(builder, index, env, sources, sink))
+    _phase(sink, "dispatch", lambda: resolve_dispatch(builder, index, sources, sink))
     _phase(
         sink,
         "scenario_calls",
-        lambda: resolve_scenario_calls(builder, index, env, sources, sink),
+        lambda: resolve_scenario_calls(builder, index, sources, sink),
     )
     _phase(
         sink,
         "io",
-        lambda: resolve_io_and_tables(builder, index, env, sources, sink),
+        lambda: resolve_io_and_tables(builder, index, sources, sink),
     )
     _phase(sink, "tests", lambda: _attach_tests(builder, env, index, sources))
     _phase(sink, "nested", lambda: attach_nested(builder, env, sources, sink))

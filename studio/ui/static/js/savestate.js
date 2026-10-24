@@ -1,4 +1,4 @@
-export const SAVE_STATES = ["idle", "dirty", "saving", "saved", "error"];
+const SAVE_STATES = ["idle", "dirty", "saving", "saved", "error"];
 
 const TRANSITIONS = {
   idle: ["dirty", "saving", "saved"],

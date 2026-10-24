@@ -238,6 +238,6 @@ function renderMap(){
   applyTransform("mapView",S.mapView);
 }
 
-export {renderMap, recomputeMapSizes};
+export {renderMap};
 
 

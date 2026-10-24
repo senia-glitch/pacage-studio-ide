@@ -94,11 +94,11 @@ def test_плановая_модель_и_тест(demo: Path):
     assert test.description == "Тест возврата."
 
 
-def test_экспорт_включает_плановые_узлы(demo: Path):
-    from studio.exporter import build_document
+def test_тз_включает_плановые_узлы(demo: Path):
+    from studio.agent import BriefOptions, build_brief
 
     create_metadata_files(_payload(), read_env(demo))
-    document = build_document(scan(demo))
+    document = build_brief(scan(demo), None, BriefOptions(map_mode="full")).markdown
     assert "RefundOrderScenario" in document
     assert "refund_order" in document
     assert "Модель возврата." in document

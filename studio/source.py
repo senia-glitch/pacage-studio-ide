@@ -28,9 +28,6 @@ class SourceFile:
     tree: ast.Module | None = None
     sha1: str = ""
     raw: bytes = b""
-    bom: bool = False
-    newline: str = "\n"
-    final_newline: bool = True
     error: Diagnostic | None = None
 
     @property
@@ -62,12 +59,6 @@ class SourceSet:
         for item in sorted(self.all_files(), key=lambda f: f.rel):
             digest.update(f"{item.rel}:{item.sha1}\n".encode())
         return digest.hexdigest()
-
-
-def detect_newline(text: str) -> str:
-    crlf = text.count("\r\n")
-    lf = text.count("\n") - crlf
-    return "\r\n" if crlf > lf else "\n"
 
 
 def parse_text(text: str, filename: str = "") -> ast.Module | None:
@@ -104,8 +95,7 @@ def load_source(root: Path, path: Path) -> SourceFile:
 
     original = raw
     sha1 = hashlib.sha1(original).hexdigest()
-    bom = raw.startswith(BOM)
-    if bom:
+    if raw.startswith(BOM):
         raw = raw[len(BOM) :]
 
     if len(raw) > MAX_SOURCE_BYTES:
@@ -115,7 +105,6 @@ def load_source(root: Path, path: Path) -> SourceFile:
             text="",
             sha1=sha1,
             raw=original,
-            bom=bom,
             error=Diagnostic(
                 level="warning",
                 code="W_FILE_TOO_BIG",
@@ -134,7 +123,6 @@ def load_source(root: Path, path: Path) -> SourceFile:
             text="",
             sha1=sha1,
             raw=original,
-            bom=bom,
             error=Diagnostic(
                 level="error",
                 code="E_ENCODING",
@@ -145,8 +133,6 @@ def load_source(root: Path, path: Path) -> SourceFile:
             ),
         )
 
-    newline = detect_newline(decoded)
-    final_newline = decoded.endswith("\n") or decoded.endswith("\r")
     text = decoded.replace("\r\n", "\n").replace("\r", "\n")
     lines = text.splitlines()
 
@@ -161,9 +147,6 @@ def load_source(root: Path, path: Path) -> SourceFile:
             lines=lines,
             sha1=sha1,
             raw=original,
-            bom=bom,
-            newline=newline,
-            final_newline=final_newline,
             error=Diagnostic(
                 level="error",
                 code="E_SYNTAX",
@@ -181,9 +164,6 @@ def load_source(root: Path, path: Path) -> SourceFile:
             lines=lines,
             sha1=sha1,
             raw=original,
-            bom=bom,
-            newline=newline,
-            final_newline=final_newline,
             error=Diagnostic(
                 level="error",
                 code="E_SYNTAX",
@@ -201,9 +181,6 @@ def load_source(root: Path, path: Path) -> SourceFile:
         tree=tree,
         sha1=sha1,
         raw=original,
-        bom=bom,
-        newline=newline,
-        final_newline=final_newline,
     )
 
 
@@ -371,7 +348,6 @@ def load_sources(env: ProjectEnv, sink: Sink | None = None) -> SourceSet:
 __all__ = [
     "SourceFile",
     "SourceSet",
-    "detect_newline",
     "iter_source_paths",
     "load_source",
     "load_sources",

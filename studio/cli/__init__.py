@@ -1,4 +1,4 @@
-"""CLI студии: dev, scan, list, export, doctor, install-full, help."""
+"""CLI студии: dev, scan, list, brief, verify, doctor, install-full, help."""
 
 from __future__ import annotations
 
@@ -327,19 +327,6 @@ def cmd_verify(args) -> int:
     return int(report["code"])
 
 
-def cmd_export(args) -> int:
-    root, _explicit = _find_root(args.project)
-    slog.start_run(root, "export")
-    print("studio export устарел: используйте studio brief --map full")
-    args.map = "full"
-    args.only = []
-    args.scenario = ""
-    args.include_empty = False
-    args.json = False
-    args.stdout = False
-    return cmd_brief(args)
-
-
 def _source_stats(root, graph, env) -> list[dict]:
     routes_files = len(module_files(root, env.routes_package))
     core_files = len(module_files(root, env.core_discover))
@@ -502,7 +489,7 @@ def cmd_dev(args) -> int:
     return 0
 
 
-def cmd_help(args) -> int:
+def cmd_help(_args) -> int:
     print("studio — карта пути HTTP-запроса")
     print()
     print("  HTTP → endpoint (fastbase) → scenario (core) → io → model (event-infra)")
@@ -516,7 +503,6 @@ def cmd_help(args) -> int:
     print("        [--map full|related|compact|none] [--include-empty] [--json]")
     print("                                       ТЗ для AI-агента")
     print("  verify [BRIEF] [--json]            проверить выполнение ТЗ")
-    print("  export [--project .] [--out PATH]  устаревший псевдоним brief --map full")
     print("  doctor [--project .] [--json] [--strict]  диагностика одной командой")
     print("  install-full [--project .]         установить/обновить fastbase[full]")
     print("  help                               этот экран")
@@ -574,11 +560,6 @@ def build_parser() -> argparse.ArgumentParser:
     verify_p.add_argument("brief", nargs="?", default=None, help="файл, id или last")
     verify_p.add_argument("--json", action="store_true")
     verify_p.set_defaults(f=cmd_verify)
-
-    export_p = sub.add_parser("export", help="устаревший псевдоним brief --map full")
-    _add_project(export_p)
-    export_p.add_argument("--out", default=None)
-    export_p.set_defaults(f=cmd_export)
 
     doctor_p = sub.add_parser("doctor", help="диагностика проекта")
     _add_project(doctor_p)

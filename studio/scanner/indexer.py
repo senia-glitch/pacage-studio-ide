@@ -514,7 +514,6 @@ def _router_chains(
 def _routes_for_function(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     routers: dict[str, RouterInfo],
-    default_path: str,
 ) -> tuple[list[tuple[str, str, str, list[str]]], list[tuple[str, int]]]:
     """Список (http_method, path, prefix, tags) и динамические пути (метод, строка)."""
     routes: list[tuple[str, str, str, list[str]]] = []
@@ -578,7 +577,7 @@ def index_endpoints(
         for node in tree.body:
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            routes, dynamic = _routes_for_function(node, routers, "")
+            routes, dynamic = _routes_for_function(node, routers)
             if not routes and not dynamic:
                 continue
             entry_id = f"endpoint:{source.rel}:{node.name}"

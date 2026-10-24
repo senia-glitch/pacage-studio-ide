@@ -1,5 +1,5 @@
 import {offsetInStage} from "./edges.js";
-import {$, esc} from "./util.js";
+import {$} from "./util.js";
 
 export function bindViewport(canvasId, view, apply) {
   const canvas = $(canvasId);
@@ -87,5 +87,3 @@ export function revealElement(canvas, view, element, apply) {
   view.y = ch / 2 - (position.y + h / 2) * (view.k || 1);
   apply();
 }
-
-export {$, esc};

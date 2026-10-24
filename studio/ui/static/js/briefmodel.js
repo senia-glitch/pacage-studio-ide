@@ -1,4 +1,4 @@
-export const MAP_MODES = ["related", "full", "compact", "none"];
+const MAP_MODES = ["related", "full", "compact", "none"];
 
 export function plannedNodes(graph) {
   return ((graph && graph.nodes) || [])

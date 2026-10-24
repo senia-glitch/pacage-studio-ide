@@ -9,7 +9,6 @@ from __future__ import annotations
 import ast
 
 from studio.diagnostics import Sink, mark_node
-from studio.env import ProjectEnv
 from studio.metamodel import Edge, GraphBuilder, IODetails, Node
 from studio.scanner.ast_utils import (
     call_first_str_arg,
@@ -42,7 +41,7 @@ def _add_node(builder: GraphBuilder, node: Node) -> Node:
     return builder.add_node(node)
 
 
-def _source(env: ProjectEnv, sources: SourceSet, rel: str):
+def _source(sources: SourceSet, rel: str):
     return sources.by_rel(rel)
 
 
@@ -92,13 +91,12 @@ def _local_helper_calls(
 def resolve_dispatch(
     builder: GraphBuilder,
     index: Index,
-    env: ProjectEnv,
     sources: SourceSet,
     sink: Sink,
 ) -> None:
     """endpoint --dispatch--> scenario: run() напрямую или через помощника."""
     for entry in index.endpoints:
-        source = _source(env, sources, entry.file_path)
+        source = _source(sources, entry.file_path)
         if source is None or source.tree is None:
             continue
         aliases = run_aliases(source.tree)
@@ -144,13 +142,12 @@ def _constants(tree: ast.Module) -> dict[str, str]:
 def resolve_scenario_calls(
     builder: GraphBuilder,
     index: Index,
-    env: ProjectEnv,
     sources: SourceSet,
     sink: Sink,
 ) -> None:
     """scenario --scenario_call--> scenario: run() в execute или self-методах."""
     for entry in index.scenarios.values():
-        source = _source(env, sources, entry.file_path)
+        source = _source(sources, entry.file_path)
         if source is None or source.tree is None:
             continue
         aliases = run_aliases(source.tree)
@@ -215,13 +212,12 @@ def _io_label(method: str, tables: list[str]) -> str:
 def resolve_io_and_tables(
     builder: GraphBuilder,
     index: Index,
-    env: ProjectEnv,
     sources: SourceSet,
     sink: Sink,
 ) -> None:
     """`self._db.<method>(...)` в execute/self-методах → io-узел, port_call и table."""
     for entry in index.scenarios.values():
-        source = _source(env, sources, entry.file_path)
+        source = _source(sources, entry.file_path)
         if source is None:
             continue
         source_id = scenario_node_id(entry)

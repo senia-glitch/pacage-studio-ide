@@ -34,7 +34,6 @@ EDGE_KINDS: tuple[str, ...] = (
 FLOW_EDGE_KINDS: frozenset[str] = frozenset(
     {"dispatch", "scenario_call", "port_call", "table", "uses", "depends"}
 )
-FLOW = FLOW_EDGE_KINDS
 
 
 class EndpointDetails(BaseModel):
@@ -157,12 +156,6 @@ class Graph(BaseModel):
     def by_id(self) -> dict[str, Node]:
         return {n.id: n for n in self.nodes}
 
-    def edges_from(self, node_id: str) -> list[Edge]:
-        return [e for e in self.edges if e.from_node == node_id]
-
-    def edges_to(self, node_id: str) -> list[Edge]:
-        return [e for e in self.edges if e.to_node == node_id]
-
     def index(self) -> GraphIndex:
         return GraphIndex(self)
 
@@ -212,14 +205,6 @@ class GraphBuilder:
             return self._edges[edge.id]
         self._edges[edge.id] = edge
         return edge
-
-    def remove_edge(self, edge_id: str) -> None:
-        self._edges.pop(edge_id, None)
-
-    def remove_edges_between(self, source: str, target: str) -> None:
-        for edge_id, edge in list(self._edges.items()):
-            if edge.from_node == source and edge.to_node == target:
-                self._edges.pop(edge_id, None)
 
     def has_edge(self, edge_id: str) -> bool:
         return edge_id in self._edges
@@ -285,7 +270,6 @@ def node_anchor(node: Node) -> str:
 
 __all__ = [
     "EDGE_KINDS",
-    "FLOW",
     "FLOW_EDGE_KINDS",
     "Edge",
     "EdgeKind",

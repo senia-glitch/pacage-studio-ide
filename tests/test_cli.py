@@ -98,10 +98,8 @@ def test_install_full_запускает_pip(demo: Path, monkeypatch, capsys):
     assert "fastbase[full] @ git+https://github.com/senia-glitch/fastapi-transport.git" in command
 
 
-def test_export_создаёт_документ(demo: Path, capsys):
-    assert cli.main(["export", "--project", str(demo)]) == 0
-    out = capsys.readouterr().out
-    assert "устарел" in out
+def test_brief_map_full_создаёт_документ(demo: Path, capsys):
+    assert cli.main(["brief", "--project", str(demo), "--map", "full"]) == 0
     target = demo / ".studio/agent-brief.md"
     assert target.is_file()
     text = target.read_text(encoding="utf-8")
@@ -110,9 +108,9 @@ def test_export_создаёт_документ(demo: Path, capsys):
     assert "## 5. Карта проекта" in text
 
 
-def test_export_out(demo: Path, capsys):
+def test_brief_out(demo: Path, capsys):
     target = demo / "docs/out.md"
-    assert cli.main(["export", "--project", str(demo), "--out", str(target)]) == 0
+    assert cli.main(["brief", "--project", str(demo), "--out", str(target)]) == 0
     assert target.is_file()
     assert target.read_text(encoding="utf-8").startswith("# ТЗ для AI-агента")
 

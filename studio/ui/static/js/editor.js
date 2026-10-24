@@ -2,7 +2,7 @@
   {id: "vscode", title: "VS Code", template: "vscode://file/{path}:{line}"},
 ];
 
-export function encodeEditorPath(value) {
+function encodeEditorPath(value) {
   return encodeURI(String(value || "").replace(/\\/g, "/"));
 }
 
