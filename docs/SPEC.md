@@ -31,12 +31,21 @@ endpoint → scenario → io → model
 
 ## Граф
 
-Схема v6. Виды узлов: `endpoint`, `scenario`, `io`, `model`, `test`, `nested`.
+Схема v7. Виды узлов: `endpoint`, `scenario`, `io`, `model`, `test`, `nested`.
 Связи: `dispatch`, `scenario_call`, `port_call`, `table`, `tests`, `uses`,
 `depends`. Узлы и рёбра могут иметь `notes` — причины жёлтой подсветки.
+Узлы плана несут `plan` (slug) и `layer`; `Graph.plans` — состояния планов,
+которые считает `resolve_plan`.
 
 `nested` — один уровень: self-методы сценария, функции файла и импортированные
 модули проекта. Внешние модули и stdlib не показываются.
+
+## Планы сценариев
+
+План — цепочка слоёв (endpoint, scenario, [io, model], [test]), описанная одним
+текстом. Планы живут в `metadata.json` (версия 2). Скан создаёт планируемые
+узлы endpoint/scenario/test, рёбра `dispatch` и `tests`, а `resolve_plan`
+привязывает слои к коду и выставляет статус `done` / `partial` / `not_done`.
 
 ## Метаданные
 

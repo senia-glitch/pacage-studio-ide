@@ -1,4 +1,4 @@
-﻿"""Схема графа студии v6.
+"""Схема графа студии v7.
 
 Карта пути HTTP-запроса:
 
@@ -6,6 +6,7 @@
 
 Ровно пять видов узлов (§4.2 ТЗ). Периферийные элементы (методы, экземпляры,
 классы, файлы) не являются отдельными видами — они входят в состав этих пяти.
+Планы сценариев — цепочки слоёв — хранятся в `Graph.plans`.
 """
 
 from __future__ import annotations
@@ -109,6 +110,9 @@ class Node(BaseModel):
     domain: str = ""
     # Узел существует только в метаданных: кода с таким якорем ещё нет.
     planned: bool = False
+    # План сценария и слой, к которому узел привязан (для планов).
+    plan: str = ""
+    layer: str = ""
     # Сколько планируемых узлов достижимо от эндпоинта вниз по потоку.
     todo_downstream: int = 0
     # Достижим из эндпоинта по направленным рёбрам потока (S4).
@@ -141,14 +145,34 @@ class ScenarioPath(BaseModel):
     tests: list[str] = Field(default_factory=list)
 
 
+class PlanLayerState(BaseModel):
+    """Состояние одного слоя плана: done/missing и фактические узлы."""
+
+    layer: str
+    status: Literal["done", "missing"] = "missing"
+    suggested_name: str = ""
+    target_file: str = ""
+    node_ids: list[str] = Field(default_factory=list)
+    actual_names: list[str] = Field(default_factory=list)
+
+
+class PlanState(BaseModel):
+    """Результат resolve_plan: выполнен ли план и чем подтверждён каждый слой."""
+
+    slug: str
+    status: Literal["done", "partial", "not_done"] = "not_done"
+    layers: list[PlanLayerState] = Field(default_factory=list)
+
+
 class Graph(BaseModel):
-    version: int = 6
+    version: int = 7
     project_root: str = ""
     nodes: list[Node] = Field(default_factory=list)
     edges: list[Edge] = Field(default_factory=list)
     endpoints: list[str] = Field(default_factory=list)
     scenarios: list[str] = Field(default_factory=list)
     scenario_paths: dict[str, ScenarioPath] = Field(default_factory=dict)
+    plans: list[PlanState] = Field(default_factory=list)
     diagnostics: list[Diagnostic] = Field(default_factory=list)
     generated_at: str = ""
     fingerprint: str = ""
@@ -172,6 +196,8 @@ class GraphIndex:
         for edge in graph.edges:
             self.out_edges[edge.from_node].append(edge)
             self.in_edges[edge.to_node].append(edge)
+        # Планы нужны validate_plan: занятые slug/имена/файлы других планов.
+        self.plans: list = list(graph.plans)
 
     def out(self, node_id: str) -> list[Edge]:
         return self.out_edges.get(node_id, [])
@@ -283,6 +309,8 @@ __all__ = [
     "NestedDetails",
     "Node",
     "NodeKind",
+    "PlanLayerState",
+    "PlanState",
     "ScenarioDetails",
     "ScenarioPath",
     "TestDetails",

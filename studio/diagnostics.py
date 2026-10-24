@@ -35,6 +35,9 @@ CODES: dict[str, str] = {
     "W_METADATA_INVALID": "metadata.json не читается",
     "W_METADATA_ORPHAN": "метаданные без узла в коде",
     "W_METADATA_EDGE": "связь из metadata.json не добавлена",
+    "W_PLAN_INVALID": "запись плана не читается",
+    "W_PLAN_CONFLICT": "имя или файл плана заняты",
+    "W_PLAN_NO_DESCRIPTION": "у плана нет описания",
     "I_EMPTY_PROJECT": "источники не найдены",
 }
 

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import threading
@@ -84,7 +84,7 @@ def test_api_граф_требует_токен(demo: Path):
             raise AssertionError("ожидался 403")
         with srv.get("/api/graph", {"X-Studio-Token": srv.token}) as response:
             data = json.loads(response.read().decode("utf-8"))
-    assert data["version"] == 6
+    assert data["version"] == 7
     assert any(n["kind"] == "endpoint" for n in data["nodes"])
     assert "diagnostics" in data
 
@@ -200,7 +200,7 @@ def test_создание_файлов_через_api(demo: Path):
     assert status == 200
     assert len(data["created"]) == 2
     assert all((demo / item["path"]).is_file() for item in data["created"])
-    assert data["graph"]["version"] == 6
+    assert data["graph"]["version"] == 7
 
 
 def test_невалидное_создание_409(demo: Path):
@@ -213,7 +213,7 @@ def test_невалидное_создание_409(demo: Path):
 def test_rescan_и_etag(demo: Path):
     with _Server(demo) as srv:
         status, data = srv.post("/api/rescan", {})
-        assert status == 200 and data["version"] == 6
+        assert status == 200 and data["version"] == 7
         with srv.get("/api/graph", {"X-Studio-Token": srv.token}) as response:
             etag = response.headers["ETag"]
             revision = int(response.headers["X-Studio-Revision"])

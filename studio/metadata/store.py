@@ -1,4 +1,4 @@
-﻿"""Хранилище метаданных студии: только `.studio/metadata.json`.
+"""Хранилище метаданных студии: только `.studio/metadata.json`.
 
 Код проекта здесь не читается и не пишется. Файл — простой JSON, ключ узла —
 стабильный якорь (`endpoint:app/api/routes.py:create_order`). Запись атомарная
@@ -14,9 +14,15 @@ from pathlib import Path
 
 from studio._atomic import atomic_write
 from studio.diagnostics import Sink
+from studio.metadata.plans import (
+    Plan,
+    PlanError,
+    plan_from_record,
+    plan_to_record,
+)
 from studio.metamodel import Node, normalize_domain
 
-METADATA_VERSION = 1
+METADATA_VERSION = 2
 STUDIO_DIR = ".studio"
 METADATA_NAME = "metadata.json"
 ALLOWED_FIELDS = (
@@ -29,7 +35,10 @@ ALLOWED_FIELDS = (
     "acceptance",
     "domain",
     "planned",
+    "plan",
+    "layer",
 )
+_TOP_LEVEL_FIELDS = frozenset({"version", "nodes", "edges", "plans"})
 
 
 class MetadataError(Exception):
@@ -55,12 +64,23 @@ class Metadata:
     version: int = METADATA_VERSION
     nodes: dict[str, dict] = field(default_factory=dict)
     edges: list[dict] = field(default_factory=list)
+    plans: dict[str, Plan] = field(default_factory=dict)
+    # Неизвестные ключи корня: читаются и пишутся без потерь.
+    extra: dict = field(default_factory=dict)
+    # Версия выше поддерживаемой: файл не перезаписывается.
+    write_blocked: bool = False
 
     def copy(self) -> Metadata:
         return Metadata(
             version=self.version,
             nodes={key: _clean_node(value) for key, value in self.nodes.items()},
             edges=[dict(value) for value in self.edges],
+            plans={
+                key: plan_from_record(key, plan_to_record(plan))
+                for key, plan in self.plans.items()
+            },
+            extra=dict(self.extra),
+            write_blocked=self.write_blocked,
         )
 
 
@@ -80,7 +100,7 @@ def _clean_node(raw) -> dict:
         if key not in raw:
             continue
         value = raw[key]
-        if key in ("description", "name", "kind", "file_path", "target_file"):
+        if key in ("description", "name", "kind", "file_path", "target_file", "plan", "layer"):
             out[key] = str(value or "")
         elif key == "domain":
             out[key] = normalize_domain(str(value or ""))
@@ -99,6 +119,9 @@ def _clean_node(raw) -> dict:
             out[key] = dict(value) if isinstance(value, dict) else {}
         elif key == "planned":
             out[key] = bool(value)
+    for key, value in raw.items():
+        if key not in ALLOWED_FIELDS:
+            out[key] = value
     return out
 
 
@@ -137,14 +160,27 @@ def read_metadata(project_root: Path, sink: Sink | None = None) -> Metadata:
                 file=f"{STUDIO_DIR}/{METADATA_NAME}",
             )
         return Metadata()
-    version = raw.get("version")
-    if version not in (None, METADATA_VERSION) and sink is not None:
-        sink.add(
-            "W_METADATA_INVALID",
-            f"metadata.json: неизвестная версия схемы {version!r}",
-            file=f"{STUDIO_DIR}/{METADATA_NAME}",
-            hint=f"Поддерживается версия {METADATA_VERSION}.",
-        )
+    raw_version = raw.get("version")
+    version = 1 if raw_version is None else raw_version
+    if not isinstance(version, int) or version < 1:
+        if sink is not None:
+            sink.add(
+                "W_METADATA_INVALID",
+                f"metadata.json: неизвестная версия схемы {raw_version!r}",
+                file=f"{STUDIO_DIR}/{METADATA_NAME}",
+                hint=f"Поддерживается версия {METADATA_VERSION}; файл не перезаписывается.",
+            )
+        return Metadata(version=METADATA_VERSION, write_blocked=True)
+    if version > METADATA_VERSION:
+        if sink is not None:
+            sink.add(
+                "W_METADATA_INVALID",
+                f"metadata.json: версия схемы {version} новее поддерживаемой "
+                f"{METADATA_VERSION}",
+                file=f"{STUDIO_DIR}/{METADATA_NAME}",
+                hint="Обновите studio; файл не перезаписывается.",
+            )
+        return Metadata(version=METADATA_VERSION, write_blocked=True)
     nodes: dict[str, dict] = {}
     raw_nodes = raw.get("nodes")
     if isinstance(raw_nodes, dict):
@@ -160,11 +196,45 @@ def read_metadata(project_root: Path, sink: Sink | None = None) -> Metadata:
             edge = _clean_edge(value)
             if edge is not None:
                 edges.append(edge)
-    return Metadata(version=METADATA_VERSION, nodes=nodes, edges=edges)
+    plans: dict[str, Plan] = {}
+    raw_plans = raw.get("plans")
+    if raw_plans is not None:
+        if not isinstance(raw_plans, dict):
+            if sink is not None:
+                sink.add(
+                    "W_PLAN_INVALID",
+                    "metadata.json: plans должен быть объектом «slug → план»",
+                    file=f"{STUDIO_DIR}/{METADATA_NAME}",
+                    hint="Удалите plans или исправьте его форму.",
+                )
+        else:
+            for key, value in raw_plans.items():
+                try:
+                    plan = plan_from_record(str(key), value)
+                except PlanError as exc:
+                    if sink is not None:
+                        sink.add(
+                            "W_PLAN_INVALID",
+                            f"metadata.json: план {key!r} не читается: {exc}",
+                            file=f"{STUDIO_DIR}/{METADATA_NAME}",
+                            hint="Исправьте типы полей плана или удалите запись.",
+                        )
+                    continue
+                plans[str(key)] = plan
+    extra = {
+        key: value for key, value in raw.items() if key not in _TOP_LEVEL_FIELDS
+    }
+    return Metadata(
+        version=METADATA_VERSION,
+        nodes=nodes,
+        edges=edges,
+        plans=plans,
+        extra=extra,
+    )
 
 
 def metadata_payload(metadata: Metadata) -> str:
-    payload = {
+    payload: dict = {
         "version": METADATA_VERSION,
         "nodes": {
             key: metadata.nodes[key] for key in sorted(metadata.nodes)
@@ -177,12 +247,21 @@ def metadata_payload(metadata: Metadata) -> str:
                 str(item.get("to") or ""),
             ),
         ),
+        "plans": {
+            key: plan_to_record(metadata.plans[key])
+            for key in sorted(metadata.plans)
+        },
     }
+    payload.update(
+        {key: value for key, value in metadata.extra.items() if key not in payload}
+    )
     return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False) + "\n"
 
 
 def write_metadata(project_root: Path, metadata: Metadata) -> bool:
-    """Атомарно записать metadata.json. False — запись не удалась."""
+    """Атомарно записать metadata.json. False — запись не удалась или запрещена."""
+    if metadata.write_blocked:
+        return False
     path = metadata_path(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     return atomic_write(path, metadata_payload(metadata))

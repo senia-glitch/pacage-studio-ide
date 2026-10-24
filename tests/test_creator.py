@@ -113,7 +113,7 @@ def test_связь_на_несуществующий_узел(demo: Path):
 def test_после_создания_скан_не_падает(demo: Path):
     create_metadata_files(_payload(), read_env(demo))
     graph = scan(demo)
-    assert graph.version == 6
+    assert graph.version == 7
     planned = [node for node in graph.nodes if node.planned]
     assert {node.kind for node in planned} >= {"endpoint", "scenario", "model", "test"}
 

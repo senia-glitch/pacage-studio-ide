@@ -14,6 +14,8 @@ from pathlib import Path
 from studio.diagnostics import Sink, diagnostic_for_exception, mark_node
 from studio.env import ProjectEnv, read_env
 from studio.metadata import apply_metadata, read_metadata
+from studio.metadata.plans import validate_plan
+from studio.metadata.store import Metadata
 from studio.metamodel import (
     Edge,
     EndpointDetails,
@@ -33,6 +35,7 @@ from studio.scanner.indexer import (
     scenario_node_id,
 )
 from studio.scanner.nested import attach_nested
+from studio.scanner.plans import resolve_plan
 from studio.scanner.reach import mark_complete, mark_todo_downstream
 from studio.scanner.resolver import (
     resolve_dispatch,
@@ -278,6 +281,17 @@ def _mark_known_gaps(builder: GraphBuilder, sink: Sink) -> None:
             )
 
 
+def _resolve_plans(graph: Graph, metadata: Metadata, sink: Sink) -> None:
+    """Проверить планы и заполнить graph.plans через resolve_plan."""
+    index = graph.index()
+    index.plans = list(metadata.plans.values())
+    states = []
+    for _slug, plan in sorted(metadata.plans.items()):
+        sink.extend(validate_plan(plan, index))
+        states.append(resolve_plan(graph, plan))
+    graph.plans = states
+
+
 def scan(project_root: Path) -> Graph:
     """Полный проход: env → sources → AST → nested → metadata → домены → пути."""
     root = Path(project_root).resolve()
@@ -316,14 +330,17 @@ def scan(project_root: Path) -> Graph:
     _phase(sink, "nested", lambda: attach_nested(builder, env, sources, sink))
 
     def _metadata() -> None:
-        metadata = read_metadata(root, sink)
         apply_metadata(builder, metadata, sink)
 
+    metadata = _phase(sink, "metadata_read", lambda: read_metadata(root, sink))
+    if metadata is None:
+        metadata = Metadata()
     _phase(sink, "metadata", _metadata)
     _phase(sink, "gaps", lambda: _mark_known_gaps(builder, sink))
     _phase(sink, "duplicate_anchors", lambda: add_duplicate_anchor_diagnostics(builder, sink))
 
     graph = builder.build()
+    _phase(sink, "plans", lambda: _resolve_plans(graph, metadata, sink))
     _phase(sink, "domains", lambda: compute_domains(graph))
     _phase(sink, "reach", lambda: mark_complete(graph))
     _phase(sink, "todo_downstream", lambda: mark_todo_downstream(graph))

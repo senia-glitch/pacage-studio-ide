@@ -1,4 +1,4 @@
-﻿"""Подмешивание metadata.json в граф: описания, домены, планы и связи.
+"""Подмешивание metadata.json в граф: описания, домены, планы и связи.
 
 Сканер не пишет на диск: этот модуль только читает уже загруженные метаданные
 и меняет граф в памяти.
@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from studio.diagnostics import Sink, mark_node
+from studio.metadata.plans import Plan, layer_file, layer_name
 from studio.metadata.store import Metadata
 from studio.metamodel import (
     EDGE_KINDS,
@@ -166,6 +167,131 @@ def _resolve(builder: GraphBuilder, text: str, prefer_file: str) -> tuple[str | 
     return None, code or "W_EDGE_UNRESOLVED"
 
 
+def _plan_node_id(kind: str, file_path: str, name: str) -> str:
+    return f"{kind}:{file_path}:{name}"
+
+
+def _claimable(node: Node, slug: str) -> bool:
+    return node.plan in ("", slug)
+
+
+def _find_plan_target(
+    builder: GraphBuilder, kind: str, name: str, target_file: str, slug: str
+) -> Node | None:
+    """Существующий узел слоя: точный id, имя, затем единственный в файле."""
+    if target_file:
+        exact = builder.node(_plan_node_id(kind, target_file, name))
+        if exact is not None and _claimable(exact, slug):
+            return exact
+    candidates = [
+        node
+        for node in builder._nodes.values()
+        if node.kind == kind and _claimable(node, slug)
+    ]
+    named = [
+        node
+        for node in candidates
+        if _matches_name(node, name)
+        and (not target_file or node.file_path == target_file)
+    ]
+    if named:
+        if target_file:
+            for node in named:
+                if node.file_path == target_file:
+                    return node
+        return named[0]
+    if target_file:
+        in_file = [node for node in candidates if node.file_path == target_file]
+        if len(in_file) == 1:
+            return in_file[0]
+    return None
+
+
+def _matches_name(node: Node, name: str) -> bool:
+    details = node.details or {}
+    for key in (
+        "function_name",
+        "class_name",
+        "test_name",
+        "name",
+        "method",
+    ):
+        if str(details.get(key) or "") == name:
+            return True
+    return node.label == name
+
+
+def _plan_node(kind: str, node_id: str, plan: Plan, name: str, file_path: str) -> Node:
+    details = _planned_details(kind, name, {})
+    if kind == "endpoint":
+        details["http_method"] = plan.http_method
+        details["path"] = plan.path
+    return Node(
+        id=node_id,
+        kind=kind,  # type: ignore[arg-type]
+        label=_label(kind, name, details),
+        file_path=file_path,
+        line=0,
+        end_line=0,
+        details=details,
+        description=plan.description,
+        acceptance=list(plan.acceptance),
+        domain=normalize_domain(plan.domain) if kind == "endpoint" else "",
+        planned=True,
+        plan=plan.slug,
+        layer=kind,
+    )
+
+
+def _apply_plans(builder: GraphBuilder, plans: dict[str, Plan]) -> None:
+    """Планируемые узлы и рёбра планов: endpoint → scenario, test → endpoint."""
+    for slug, plan in sorted(plans.items()):
+        nodes: dict[str, Node] = {}
+        for kind in ("endpoint", "scenario", "test"):
+            name = layer_name(plan, kind)
+            target_file = layer_file(plan, kind)
+            if not name or not target_file:
+                continue
+            node_id = _plan_node_id(kind, target_file, name)
+            node = _find_plan_target(builder, kind, name, target_file, slug)
+            if node is None:
+                node = _plan_node(kind, node_id, plan, name, target_file)
+                builder.add_node(node)
+            node.plan = slug
+            node.layer = kind
+            nodes[kind] = node
+
+        endpoint = nodes.get("endpoint")
+        scenario = nodes.get("scenario")
+        test = nodes.get("test")
+        if endpoint is not None and scenario is not None:
+            edge_id = f"{endpoint.id}::dispatch::{scenario.id}"
+            if not builder.has_edge(edge_id):
+                builder.add_edge(
+                    Edge(
+                        id=edge_id,
+                        from_node=endpoint.id,
+                        to_node=scenario.id,
+                        kind="dispatch",
+                        label="план: " + (plan.title or slug),
+                        origin="metadata",
+                    )
+                )
+        if test is not None and endpoint is not None:
+            edge_id = f"{test.id}::tests::{endpoint.id}"
+            if not builder.has_edge(edge_id):
+                builder.add_edge(
+                    Edge(
+                        id=edge_id,
+                        from_node=test.id,
+                        to_node=endpoint.id,
+                        kind="tests",
+                        label="план: " + (plan.title or slug),
+                        origin="metadata",
+                    )
+                )
+
+
 def apply_metadata(builder: GraphBuilder, metadata: Metadata, sink: Sink | None = None) -> None:
     """Добавить плановые узлы, подмешать описания и связи из metadata.json."""
     for node_id, record in sorted(metadata.nodes.items()):
@@ -285,6 +411,8 @@ def apply_metadata(builder: GraphBuilder, metadata: Metadata, sink: Sink | None 
                 origin="code" if same_pair else "metadata",
             )
         )
+
+    _apply_plans(builder, metadata.plans)
 
 
 __all__ = ["apply_metadata"]

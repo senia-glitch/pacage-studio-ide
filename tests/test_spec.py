@@ -123,7 +123,7 @@ def test_fuzz_скан_не_падает(tmp_path: Path):
         data = bytes(rng.randrange(0, 256) for _ in range(rng.randrange(0, 400)))
         (tmp_path / f"app/scenarios/fuzz_{index}.py").write_bytes(data)
     graph = _scan(tmp_path)
-    assert graph.version == 6
+    assert graph.version == 7
     assert any(n.kind == "endpoint" for n in graph.nodes)
 
 

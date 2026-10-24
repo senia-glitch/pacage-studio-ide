@@ -15,7 +15,7 @@ from studio.metamodel import Graph
 STUDIO_DIR = ".studio"
 GRAPH_NAME = "graph.json"
 
-GRAPH_VERSION = 6
+GRAPH_VERSION = 7
 
 
 def studio_dir(project_root: Path) -> Path:
