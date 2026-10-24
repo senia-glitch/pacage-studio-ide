@@ -1,10 +1,47 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
+from studio import __version__
+from studio.cli import build_parser
 from studio.diagnostics import CODES
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# Удалённые в 5.0 функции и редакторы: в документации (кроме CHANGELOG) их быть не должно.
+FORBIDDEN = ("# studio:", "/api/undo", "studio export", "Cursor", "PyCharm", "Zed", "Windsurf")
+
+
+def _subcommands() -> set[str]:
+    """Имена подкоманд, объявленных в argparse."""
+    parser = build_parser()
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return set(action.choices)
+    return set()
+
+
+def test_usage_описывает_каждую_подкоманду():
+    usage = (ROOT / "docs/usage.md").read_text(encoding="utf-8")
+    commands = _subcommands()
+    assert commands
+    for name in sorted(commands):
+        assert f"studio {name}" in usage, name
+
+
+def test_документация_не_упоминает_удалённое():
+    files = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        for phrase in FORBIDDEN:
+            assert phrase not in text, f"{phrase!r} в {path.relative_to(ROOT).as_posix()}"
+
+
+def test_версия_в_README():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    major_minor = ".".join(__version__.split(".")[:2])
+    assert f"pacage-studio {major_minor}" in readme
 
 
 def test_rules_in_sync():
