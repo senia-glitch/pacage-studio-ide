@@ -131,7 +131,8 @@ def _merge_fields(node: Node, record: dict) -> None:
     node.acceptance = [str(item) for item in record.get("acceptance") or []]
     if node.kind == "endpoint":
         node.domain = normalize_domain(str(record.get("domain") or ""))
-    node.planned = bool(record.get("planned"))
+    # Код важнее записи: найденный узел больше не «планируемый».
+    node.planned = bool(record.get("planned")) and node.line <= 0
 
 
 def _find_by_name(builder: GraphBuilder, anchor: str) -> list[Node]:
@@ -292,8 +293,38 @@ def _apply_plans(builder: GraphBuilder, plans: dict[str, Plan]) -> None:
                 )
 
 
+def _plan_slug_for_record(metadata: Metadata, record: dict) -> str:
+    """Какой план владеет планируемой записью."""
+    direct = str(record.get("plan") or "")
+    if direct in metadata.plans:
+        return direct
+    kind = str(record.get("kind") or "")
+    name = str(record.get("name") or "")
+    target = str(record.get("target_file") or record.get("file_path") or "")
+    for slug, plan in metadata.plans.items():
+        for layer in plan.layers:
+            if layer.layer != kind:
+                continue
+            if layer_name(plan, layer.layer) != name:
+                continue
+            if target and layer_file(plan, layer.layer) != target:
+                continue
+            return slug
+    return ""
+
+
+def _resolved_plan_node(builder: GraphBuilder, slug: str, kind: str) -> Node | None:
+    for node in builder._nodes.values():
+        if node.plan == slug and node.layer == kind and not node.planned:
+            return node
+    return None
+
+
 def apply_metadata(builder: GraphBuilder, metadata: Metadata, sink: Sink | None = None) -> None:
     """Добавить плановые узлы, подмешать описания и связи из metadata.json."""
+    # Планы привязываются к коду первыми: так видно, какие planned-записи
+    # агент заменил (в том числе с другим именем).
+    _apply_plans(builder, metadata.plans)
     for node_id, record in sorted(metadata.nodes.items()):
         kind = str(record.get("kind") or node_id.split(":", 1)[0])
         if kind not in NODE_KINDS:
@@ -309,6 +340,18 @@ def apply_metadata(builder: GraphBuilder, metadata: Metadata, sink: Sink | None 
         if node is not None:
             _merge_fields(node, record)
             continue
+        if record.get("planned"):
+            slug = _plan_slug_for_record(metadata, record)
+            resolved = _resolved_plan_node(builder, slug, kind) if slug else None
+            if resolved is not None:
+                mark_node(
+                    resolved,
+                    sink,
+                    "W_METADATA_ORPHAN",
+                    f"Планируемая запись {node_id!r} не совпала с кодом, найденным по файлу",
+                    hint=f"Узел привязан к плану {slug} — обновите план или имя.",
+                )
+                continue
         builder.add_node(_node_from_record(node_id, record, sink))
 
     scenarios: dict[str, str] = {}
@@ -411,8 +454,6 @@ def apply_metadata(builder: GraphBuilder, metadata: Metadata, sink: Sink | None 
                 origin="code" if same_pair else "metadata",
             )
         )
-
-    _apply_plans(builder, metadata.plans)
 
 
 __all__ = ["apply_metadata"]

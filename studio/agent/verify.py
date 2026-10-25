@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import re
 
+from studio.metadata.plans import Plan, PlanError, PlanLayer, plan_from_record
 from studio.metamodel import Graph, Node, node_anchor
+from studio.scanner.plans import resolve_plan
 
 STATUS_DONE = "выполнено"
 STATUS_PARTIAL = "частично"
@@ -91,16 +93,29 @@ def _tests_for(graph: Graph, node: Node) -> list[Node]:
     return out
 
 
+def _tokens(text: str) -> list[str]:
+    return [part for part in _token(text).split("_") if part]
+
+
+def _test_tokens(text: str) -> list[str]:
+    parts = _tokens(text)
+    if parts and parts[0] == "test":
+        parts = parts[1:]
+    return parts
+
+
 def _name_test(graph: Graph, node: Node, anchor: str) -> Node | None:
-    target = _token(anchor or node_anchor(node) or node.label)
+    target = _tokens(anchor or node_anchor(node) or node.label)
     if not target:
         return None
     for test in sorted(
         (item for item in graph.nodes if item.kind == "test" and item.line > 0),
         key=lambda item: (item.file_path, item.line, item.id),
     ):
-        name = _token((test.details or {}).get("test_name") or test.label)
-        if target in name or name in target:
+        name = _test_tokens((test.details or {}).get("test_name") or test.label)
+        if not name:
+            continue
+        if name[: len(target)] == target or target[: len(name)] == name:
             return test
     return None
 
@@ -114,7 +129,226 @@ def _test_for(graph: Graph, node: Node, anchor: str) -> Node | None:
     return _name_test(graph, node, anchor)
 
 
+def _layer_node(graph: Graph, state, layer: str) -> Node | None:
+    item = next((entry for entry in state.layers if entry.layer == layer), None)
+    if item is None or not item.node_ids:
+        return None
+    return graph.by_id().get(item.node_ids[0])
+
+
+def _has_code_link(
+    graph: Graph, sources: set[str], targets: set[str], kinds: set[str]
+) -> bool:
+    if not sources or not targets:
+        return False
+    return any(
+        edge.origin == "code"
+        and edge.kind in kinds
+        and edge.from_node in sources
+        and edge.to_node in targets
+        for edge in graph.edges
+    )
+
+
+def _all_targets_linked(
+    graph: Graph, sources: set[str], targets: set[str], kinds: set[str]
+) -> bool:
+    if not targets:
+        return True
+    return all(
+        _has_code_link(graph, sources, {target}, kinds) for target in targets
+    )
+
+
+def _plan_from_task(task: dict):
+    record = task.get("plan")
+    slug = str(task.get("slug") or "")
+    if not slug:
+        raise PlanError("в задаче плана нет slug")
+    if isinstance(record, dict):
+        return plan_from_record(slug, record)
+    raw_layers = task.get("layers") or []
+    if not isinstance(raw_layers, list) or not raw_layers:
+        raise PlanError("в задаче плана нет слоёв")
+    layers = []
+    for item in raw_layers:
+        if not isinstance(item, dict) or not item.get("layer"):
+            raise PlanError("слой плана в задаче не читается")
+        layers.append(
+            PlanLayer(
+                layer=str(item.get("layer")),
+                suggested_name=str(item.get("suggested_name") or ""),
+                target_file=str(item.get("target_file") or ""),
+            )
+        )
+    return Plan(
+        slug=slug,
+        title=str(task.get("title") or slug),
+        description=str(task.get("description") or ""),
+        acceptance=[str(item) for item in task.get("acceptance") or []],
+        domain=str(task.get("domain") or ""),
+        http_method=str(task.get("http_method") or ""),
+        path=str(task.get("path") or ""),
+        uses_db=bool(task.get("uses_db")),
+        with_test=bool(task.get("with_test")) or any(
+            layer.layer == "test" for layer in layers
+        ),
+        layers=layers,
+    )
+
+
+def _verify_plan(graph: Graph, task: dict) -> dict:
+    number = task.get("number")
+    slug = str(task.get("slug") or "")
+    title = str(task.get("title") or slug)
+    item = {
+        "number": number,
+        "type": "plan",
+        "slug": slug,
+        "title": title,
+        "kind": "plan",
+        "anchor": slug,
+        "status": STATUS_NOT_DONE,
+        "file": "",
+        "line": 0,
+        "layers": [],
+        "node": {"ok": False, "file": "", "line": 0},
+        "edges": {"ok": False, "missing": []},
+        "test": {"ok": False, "name": "", "file": "", "line": 0},
+        "message": "",
+    }
+    try:
+        plan = _plan_from_task(task)
+    except PlanError as exc:
+        item["message"] = str(exc)
+        return item
+    state = resolve_plan(graph, plan)
+    by_layer = {layer.layer: layer for layer in state.layers}
+    layers_info: list[dict] = []
+    missing_layers: list[str] = []
+    for plan_layer in plan.layers:
+        layer_state = by_layer.get(plan_layer.layer)
+        if layer_state is None:
+            missing_layers.append(plan_layer.layer)
+            continue
+        nodes = [
+            graph.by_id()[node_id]
+            for node_id in layer_state.node_ids
+            if node_id in graph.by_id()
+        ]
+        names = [
+            node_anchor(node) or node.label
+            for node in nodes
+        ] or list(layer_state.actual_names or [])
+        name = names[0] if names else layer_state.suggested_name
+        file = nodes[0].file_path if nodes else layer_state.target_file
+        line = nodes[0].line if nodes else 0
+        layers_info.append(
+            {
+                "layer": plan_layer.layer,
+                "status": "done" if layer_state.status == "done" else "missing",
+                "name": name,
+                "actual_names": names,
+                "file": file,
+                "line": line,
+                "node_ids": list(layer_state.node_ids),
+            }
+        )
+        if layer_state.status != "done":
+            missing_layers.append(plan_layer.layer)
+    item["layers"] = layers_info
+    endpoint_state = by_layer.get("endpoint")
+    endpoint = _layer_node(graph, state, "endpoint")
+    scenario = _layer_node(graph, state, "scenario")
+    if endpoint is not None:
+        item["file"] = endpoint.file_path
+        item["line"] = endpoint.line
+    item["node"] = {
+        "ok": endpoint_state is not None and endpoint_state.status == "done",
+        "file": endpoint.file_path if endpoint is not None else "",
+        "line": endpoint.line if endpoint is not None else 0,
+    }
+
+    missing_links: list[str] = []
+    if "endpoint" in by_layer and "scenario" in by_layer:
+        ok = _has_code_link(
+            graph,
+            set(by_layer["endpoint"].node_ids),
+            set(by_layer["scenario"].node_ids),
+            {"dispatch", "scenario_call"},
+        )
+        if not ok:
+            missing_links.append("endpoint → scenario")
+    if "scenario" in by_layer and "io" in by_layer:
+        if not by_layer["io"].node_ids:
+            missing_links.append("scenario → io")
+        else:
+            ok = _all_targets_linked(
+                graph,
+                set(by_layer["scenario"].node_ids),
+                set(by_layer["io"].node_ids),
+                {"port_call"},
+            )
+            if not ok:
+                missing_links.append("scenario → io")
+    if "io" in by_layer and "model" in by_layer:
+        if not by_layer["model"].node_ids:
+            missing_links.append("io → model")
+        else:
+            ok = _all_targets_linked(
+                graph,
+                set(by_layer["io"].node_ids),
+                set(by_layer["model"].node_ids),
+                {"table"},
+            )
+            if not ok:
+                missing_links.append("io → model")
+    item["edges"] = {"ok": not missing_links, "missing": missing_links}
+
+    test_layer = by_layer.get("test")
+    test_node = _layer_node(graph, state, "test")
+    test_required = "test" in by_layer
+    test_ok = (
+        bool(test_layer is not None and test_layer.status == "done")
+        if test_required
+        else True
+    )
+    if test_node is not None:
+        item["test"] = {
+            "ok": True,
+            "name": node_anchor(test_node) or test_node.label,
+            "file": test_node.file_path,
+            "line": test_node.line,
+        }
+    elif test_required:
+        item["test"] = {"ok": False, "name": "", "file": "", "line": 0}
+
+    layers_ok = not missing_layers
+    links_ok = not missing_links
+    endpoint_missing = endpoint is None
+    scenario_missing = scenario is None
+    if layers_ok and links_ok and test_ok:
+        item["status"] = STATUS_DONE
+        item["message"] = "слои, связи и тест есть"
+    elif endpoint_missing and scenario_missing:
+        item["status"] = STATUS_NOT_DONE
+    else:
+        item["status"] = STATUS_PARTIAL
+    problems: list[str] = []
+    if missing_layers:
+        problems.append("нет слоёв: " + ", ".join(missing_layers))
+    if missing_links:
+        problems.append("нет связей: " + "; ".join(missing_links))
+    if test_required and not test_ok:
+        problems.append("нет теста")
+    if problems and item["status"] != STATUS_DONE:
+        item["message"] = "; ".join(problems)
+    return item
+
+
 def verify_task(graph: Graph, task: dict) -> dict:
+    if task.get("type") == "plan":
+        return _verify_plan(graph, task)
     number = task.get("number")
     kind = str(task.get("kind") or "")
     anchor = str(task.get("anchor") or "")
@@ -214,6 +448,21 @@ def render_report(report: dict) -> str:
         f"{report['done']} из {report['total']} · {report['status']}"
     ]
     for item in report.get("items") or []:
+        if item.get("type") == "plan":
+            lines.append(
+                f"  T{item.get('number')} план «{item.get('title') or item.get('slug')}» "
+                f"({item.get('slug')}) — {STATUS_RU.get(item.get('status'), item.get('status'))}"
+            )
+            for layer in item.get("layers") or []:
+                where = _where(layer.get("file", ""), layer.get("line", 0))
+                name = layer.get("name") or "—"
+                lines.append(
+                    f"    {layer.get('layer')}: {name} ({where}) — "
+                    f"{'есть' if layer.get('status') == 'done' else 'нет'}"
+                )
+            if item.get("message"):
+                lines.append(f"    {item['message']}")
+            continue
         node = item.get("node") or {}
         edges = item.get("edges") or {}
         test = item.get("test") or {}

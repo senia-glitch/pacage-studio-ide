@@ -46,6 +46,16 @@ test("запрос ТЗ не теряет пустой выбор", () => {
   });
 });
 
+test("чип N/M считает планы и старые узлы", () => {
+  const mixed = {
+    plans: [{slug: "refund", description: "План", layers: []}],
+    nodes: [{id: "scenario:a.py:A", kind: "scenario", planned: true, description: "Старый"}],
+  };
+  assert.equal(plannedStats(mixed).total, 2);
+  assert.equal(plannedStats(mixed).tasks, 2);
+  assert.equal(verifyLabel({total: 2, done: 1, partial: 1, not_done: 0}, mixed).text, "Выполнено 1/2");
+});
+
 test("подписи чипа и промпт", () => {
   assert.equal(verifyLabel(null, graph).text, "К реализации: 1");
   assert.equal(verifyLabel(null, graph).urgent, true);

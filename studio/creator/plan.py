@@ -354,6 +354,7 @@ def _node_records(plan: Plan) -> dict[str, dict]:
             "description": plan.description,
             "acceptance": list(plan.acceptance),
             "planned": True,
+            "plan": plan.slug,
             "target_file": target,
             "details": details,
         }
