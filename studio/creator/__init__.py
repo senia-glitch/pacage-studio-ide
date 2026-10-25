@@ -6,12 +6,12 @@
 
 from __future__ import annotations
 
-import contextlib
 import keyword
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from studio import log as slog
 from studio._atomic import atomic_write
 from studio.env import ProjectEnv, dotted_to_path
 from studio.metadata import (
@@ -27,11 +27,15 @@ ENDPOINT_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
 CLASS_RE = re.compile(r"^[A-Z][A-Za-z0-9]*$")
 TEST_RE = re.compile(r"^test_[a-z0-9_]+$")
 HTTP_METHODS = ("get", "post", "put", "patch", "delete")
-TODO_LINE = "# TODO: {kind} {name} — скелет студии, описание в .studio/metadata.json"
+TODO_LINE = "# TODO: {kind} {name}"
 
 
 class CreateError(Exception):
-    """Конструктор отклонён: понятное пользователю сообщение."""
+    """Конструктор отклонён: понятное пользователю сообщение и машинный код."""
+
+    def __init__(self, message: str, code: str = "create_rejected"):
+        self.code = code
+        super().__init__(message)
 
 
 @dataclass
@@ -210,8 +214,10 @@ def _existing_anchors(env: ProjectEnv) -> dict[str, str]:
 
     try:
         graph = scan(env.project_root)
-    except Exception:  # noqa: BLE001 — конструктор не должен падать из-за скана
-        return {}
+    except Exception as exc:  # noqa: BLE001 — сбой скана не должен разрешать дубли
+        raise CreateError(
+            f"Не удалось проверить занятость имён: {exc}", "W_PLAN_INVALID"
+        ) from exc
     out: dict[str, str] = {}
     for node in graph.nodes:
         for key in (node.id, node_anchor(node), node.label):
@@ -221,45 +227,8 @@ def _existing_anchors(env: ProjectEnv) -> dict[str, str]:
 
 
 def _skeleton(node: NodeSpec) -> str:
-    todo = TODO_LINE.format(kind=node.kind, name=node.name)
-    if node.kind == "endpoint":
-        method = str(node.details.get("http_method") or "")
-        path = str(node.details.get("path") or "")
-        lines = ["from fastapi import APIRouter", "", "router = APIRouter()", "", todo]
-        if method and path:
-            lines.extend(
-                [
-                    f'@router.{method}("{path}")',
-                    f"async def {node.name}():",
-                    "    ...",
-                ]
-            )
-        else:
-            lines.extend([f"async def {node.name}():", "    ..."])
-        return "\n".join(lines) + "\n"
-    if node.kind == "scenario":
-        scenario_name = str(node.details.get("scenario_name") or node.name)
-        return (
-            "from core import BaseScenario, register_scenario\n\n"
-            f"{todo}\n"
-            f'@register_scenario("{scenario_name}")\n'
-            f"class {node.name}(BaseScenario):\n"
-            "    async def execute(self):\n"
-            "        ...\n"
-        )
-    if node.kind == "model":
-        table = str(node.details.get("tablename") or _snake(node.name))
-        return (
-            "from sqlmodel import SQLModel\n\n"
-            f"{todo}\n"
-            f"class {node.name}(SQLModel, table=True):\n"
-            f'    __tablename__ = "{table}"\n'
-        )
-    if node.kind == "test":
-        return f"{todo}\n\ndef {node.name}():\n    ...\n"
-    if node.kind == "io":
-        return f"{todo}\n"
-    return f"{todo}\n"
+    """Ровно одна TODO-строка: код не регистрирует пустой роут или сценарий."""
+    return TODO_LINE.format(kind=node.kind, name=node.name) + "\n"
 
 
 def _plan(
@@ -334,17 +303,26 @@ def plan_creation(
     return files, created
 
 
-def _restore_metadata(root: Path, backup: bytes | None) -> None:
+def _restore_metadata(root: Path, backup: bytes | None) -> list[str]:
+    """Вернуть metadata.json из бэкапа атомарно; вернуть тексты сбоев."""
     path = metadata_path(root)
-    try:
-        if backup is None:
+    if backup is None:
+        try:
             if path.is_file():
                 path.unlink()
-        else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(backup)
-    except OSError:
-        pass
+        except OSError as exc:
+            return [f"{path}: {exc}"]
+        return []
+    try:
+        text = backup.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return [f"{path}: бэкап не в UTF-8 ({exc})"]
+    try:
+        if atomic_write(path, text):
+            return []
+    except OSError as exc:
+        return [f"{path}: {exc}"]
+    return [f"{path}: запись не удалась"]
 
 
 def create_metadata_files(data: dict, env: ProjectEnv) -> list[CreatedFile]:
@@ -377,10 +355,23 @@ def create_metadata_files(data: dict, env: ProjectEnv) -> list[CreatedFile]:
         if not write_metadata(root, metadata):
             raise CreateError("не удалось записать .studio/metadata.json")
     except (CreateError, OSError, MetadataError) as exc:
+        failures: list[str] = []
         for target in reversed(written):
-            with contextlib.suppress(OSError):
+            try:
                 target.unlink()
-        _restore_metadata(root, backup)
+            except FileNotFoundError:
+                pass
+            except OSError as unlink_error:
+                failures.append(f"{target}: {unlink_error}")
+        failures.extend(_restore_metadata(root, backup))
+        if failures:
+            message = "; ".join(failures)
+            slog.step(f"откат создания: {message}")
+            prefix = str(exc)
+            suffix = f"файлы не удалось убрать: {message}"
+            if isinstance(exc, CreateError):
+                raise CreateError(f"{prefix}; {suffix}", exc.code) from exc
+            raise CreateError(f"{prefix}; {suffix}") from exc
         if isinstance(exc, CreateError):
             raise
         raise CreateError(f"не удалось создать файлы: {exc}") from exc
@@ -392,6 +383,32 @@ __all__ = [
     "CreateError",
     "CreatedFile",
     "NodeSpec",
+    "PlanDeleteResult",
+    "PlanResult",
     "create_metadata_files",
+    "create_plan",
+    "delete_plan",
     "plan_creation",
+    "preview_plan",
+    "update_plan",
 ]
+
+_PLAN_EXPORTS = frozenset(
+    {
+        "PlanDeleteResult",
+        "PlanResult",
+        "create_plan",
+        "delete_plan",
+        "preview_plan",
+        "update_plan",
+    }
+)
+
+
+def __getattr__(name: str):
+    """Ленивый реэкспорт плановых функций: без циклического импорта."""
+    if name in _PLAN_EXPORTS:
+        from studio.creator import plan as plan_module
+
+        return getattr(plan_module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -1,4 +1,4 @@
-﻿"""Единое состояние студии: граф в памяти, ревизии, watcher, метаданные."""
+"""Единое состояние студии: граф в памяти, ревизии, watcher, метаданные."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from studio.agent import (
     verify_brief as verify_brief_data,
 )
 from studio.creator import CreateError, create_metadata_files
+from studio.creator.plan import create_plan, delete_plan, preview_plan, update_plan
 from studio.env import read_env
 from studio.metadata import MetadataError, save_node_metadata
 from studio.metamodel import Graph, Node
@@ -169,6 +170,59 @@ class ProjectState:
                     {"path": item.path, "kind": item.kind, "name": item.name}
                     for item in created
                 ],
+                "graph": graph.model_dump(),
+            }
+
+    # ----------------------------------------------------------------- plans
+
+    @staticmethod
+    def _plan_state(graph, slug: str):
+        for item in graph.plans:
+            if item.slug == slug:
+                return item
+        return None
+
+    def plan_preview(self, data: dict) -> dict:
+        with self.lock:
+            return preview_plan(data, read_env(self.root))
+
+    def plan_create(self, data: dict) -> dict:
+        with self.lock:
+            env = read_env(self.root)
+            result = create_plan(data, env)
+            graph = self.rescan("plan")
+            state = self._plan_state(graph, result.plan.slug)
+            return {
+                "created": [
+                    {"path": item.path, "kind": item.kind, "name": item.name}
+                    for item in result.created
+                ],
+                "plan": state.model_dump() if state is not None else None,
+                "graph": graph.model_dump(),
+            }
+
+    def plan_update(self, data: dict) -> dict:
+        with self.lock:
+            env = read_env(self.root)
+            plan = update_plan(data, env)
+            graph = self.rescan("plan")
+            state = self._plan_state(graph, plan.slug)
+            return {
+                "plan": state.model_dump() if state is not None else None,
+                "graph": graph.model_dump(),
+            }
+
+    def plan_delete(self, data: dict) -> dict:
+        with self.lock:
+            env = read_env(self.root)
+            result = delete_plan(data, env)
+            graph = self.rescan("plan")
+            return {
+                "slug": result.slug,
+                "deleted_files": result.deleted_files,
+                "kept_files": result.kept_files,
+                "removed_nodes": result.removed_nodes,
+                "removed_edges": result.removed_edges,
                 "graph": graph.model_dump(),
             }
 

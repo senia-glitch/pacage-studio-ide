@@ -118,18 +118,6 @@ def test_после_создания_скан_не_падает(demo: Path):
     assert {node.kind for node in planned} >= {"endpoint", "scenario", "model", "test"}
 
 
-def test_после_скелета_узел_остаётся_планом(demo: Path):
-    create_metadata_files(_payload(), read_env(demo))
-    graph = scan(demo)
-    endpoint = next(
-        node
-        for node in graph.nodes
-        if node.kind == "endpoint" and node.details.get("function_name") == "refund_order"
-    )
-    assert endpoint.planned is True
-    assert endpoint.line > 0
-
-
 def test_имя_занято_существующим_узлом(demo: Path):
     payload = {"nodes": [{"kind": "scenario", "name": "ListOrdersScenario"}]}
     with pytest.raises(CreateError, match="занято"):

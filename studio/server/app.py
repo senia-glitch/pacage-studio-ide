@@ -106,6 +106,13 @@ def make_handler(ctx):
                 self.close_connection = True
             self._json({"error": error}, status, extra)
 
+        def _plan_error(self, status: int, code: str, message: str) -> None:
+            """Ошибка плана без трейсбека: плоские error и code, как в ТЗ."""
+            extra = {"Connection": "close"} if self.command == "POST" else None
+            if self.command == "POST":
+                self.close_connection = True
+            self._json({"error": message, "code": code}, status, extra)
+
         # --------------------------------------------------------- безопасность
 
         def _discard_body(self) -> None:
@@ -186,7 +193,17 @@ def make_handler(ctx):
                 status = 422 if exc.code == "not_writable" else 400
                 self._error(status, exc.code, exc.message)
             except CreateError as exc:
-                self._error(409, "create_rejected", str(exc))
+                code = getattr(exc, "code", "create_rejected")
+                if code.startswith("W_PLAN_") or code in (
+                    "E_INTERNAL",
+                    "W_METADATA_INVALID",
+                    "plan_not_found",
+                    "not_writable",
+                ):
+                    status = {"plan_not_found": 404, "not_writable": 422}.get(code, 400)
+                    self._plan_error(status, code, str(exc))
+                else:
+                    self._error(409, "create_rejected", str(exc))
             except (BrokenPipeError, ConnectionResetError):
                 pass
             except Exception as exc:  # noqa: BLE001 — граница HTTP-запроса
@@ -278,6 +295,14 @@ def make_handler(ctx):
                 return self._json(graph.model_dump())
             if url.path == "/api/metadata/node":
                 return self._json(state.save_metadata(data))
+            if url.path == "/api/plan/preview":
+                return self._json(state.plan_preview(data))
+            if url.path == "/api/plan":
+                return self._json(state.plan_create(data))
+            if url.path == "/api/plan/update":
+                return self._json(state.plan_update(data))
+            if url.path == "/api/plan/delete":
+                return self._json(state.plan_delete(data))
             if url.path == "/api/create":
                 return self._json(state.create(data))
             if url.path == "/api/brief":
