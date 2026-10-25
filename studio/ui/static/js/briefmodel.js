@@ -1,8 +1,14 @@
 const MAP_MODES = ["related", "full", "compact", "none"];
 
+export function planStates(graph) {
+  return ((graph && graph.plans) || [])
+    .slice()
+    .sort((a, b) => String(a.slug).localeCompare(String(b.slug)));
+}
+
 export function plannedNodes(graph) {
   return ((graph && graph.nodes) || [])
-    .filter((node) => node && node.planned)
+    .filter((node) => node && node.planned && !node.plan)
     .slice()
     .sort((a, b) => {
       const kinds = {model: 0, io: 1, scenario: 2, endpoint: 3, test: 4};
@@ -12,17 +18,22 @@ export function plannedNodes(graph) {
 
 export function plannedStats(graph) {
   const nodes = plannedNodes(graph);
-  const ready = nodes.filter((node) => String(node.description || "").trim()).length;
-  return {tasks: ready, unready: nodes.length - ready, total: nodes.length};
+  const plans = planStates(graph);
+  const readyNodes = nodes.filter((node) => String(node.description || "").trim()).length;
+  const readyPlans = plans.filter((plan) => String(plan.description || "").trim()).length;
+  const tasks = readyNodes + readyPlans;
+  const total = nodes.length + plans.length;
+  return {tasks, unready: total - tasks, total};
 }
 
 export function defaultMapMode(nodeCount) {
   return Number(nodeCount) > 150 ? "related" : "full";
 }
 
-export function briefRequest({selected, map, includeEmpty, scenario}) {
+export function briefRequest({selected, plans, map, includeEmpty, scenario}) {
   const payload = {
     only: Array.isArray(selected) ? selected : [...(selected || [])],
+    plans: Array.isArray(plans) ? plans : [...(plans || [])],
     map: MAP_MODES.includes(map) ? map : "full",
     include_empty: !!includeEmpty,
   };

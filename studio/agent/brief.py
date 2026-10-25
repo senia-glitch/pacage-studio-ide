@@ -1,4 +1,4 @@
-﻿"""ТЗ для AI-агента: карта проекта + задачи на планируемые узлы (S12).
+"""ТЗ для AI-агента: карта проекта + задачи на планируемые узлы (S12).
 
 Генерация локальная и детерминированная: один и тот же граф и параметры дают
 одинаковые байты, кроме строки «Сформировано». Код проекта не пишется.
@@ -25,7 +25,7 @@ from studio.metamodel import (
 from studio.scanner.anchors import AnchorResolver
 from studio.source import SourceSet
 
-BRIEF_VERSION = "v1"
+BRIEF_VERSION = 2
 RULES_VERSION = "1"
 BRIEF_FILENAME = "agent-brief.md"
 BRIEFS_DIR = "briefs"
@@ -75,6 +75,7 @@ class BriefNotFound(BriefError):
 class BriefOptions:
     map_mode: str = ""
     only: tuple[str, ...] | None = None
+    plans: tuple[str, ...] | None = None
     scenario: str = ""
     include_empty: bool = False
     generated_at: str = ""
@@ -103,6 +104,7 @@ class Brief:
             "options": {
                 "map": self.options.map_mode,
                 "only": list(self.options.only or ()),
+                "plans": list(self.options.plans or ()),
                 "scenario": self.options.scenario,
                 "include_empty": self.options.include_empty,
             },
@@ -231,10 +233,46 @@ def _resolve_scope(
 
 
 def _planned_nodes(graph: Graph) -> list[Node]:
+    """Старые planned-узлы без плана. Узлы плана идут одной задачей-планом."""
     return sorted(
-        (node for node in graph.nodes if node.planned),
+        (node for node in graph.nodes if node.planned and not node.plan),
         key=lambda node: node.id,
     )
+
+
+def _plan_states(graph: Graph) -> list:
+    return sorted(graph.plans, key=lambda item: item.slug)
+
+
+def _plan_record(state) -> dict:
+    return {
+        "slug": state.slug,
+        "title": state.title,
+        "domain": state.domain,
+        "http_method": state.http_method,
+        "path": state.path,
+        "uses_db": bool(state.uses_db),
+        "with_test": bool(state.with_test),
+        "created_at": "",
+        "layers": [
+            {
+                "layer": layer.layer,
+                "suggested_name": layer.suggested_name,
+                "target_file": layer.target_file,
+            }
+            for layer in state.layers
+        ],
+    }
+
+
+def _plan_unready(state) -> dict:
+    return {
+        "type": "plan",
+        "slug": state.slug,
+        "title": state.title,
+        "file": ".studio/metadata.json",
+        "missing": [] if (state.description or "").strip() else ["описание"],
+    }
 
 
 def _topological(tasks: list[Node], graph: Graph) -> tuple[list[Node], bool]:
@@ -893,6 +931,204 @@ def _render_task(
     return "\n".join(lines), task_payload
 
 
+PLAN_CHAIN_ORDER = ("endpoint", "scenario", "io", "model", "test")
+PLAN_IMPL_ORDER = ("model", "io", "scenario", "endpoint", "test")
+
+
+def _plan_layer_text(layer: str) -> str:
+    return {
+        "endpoint": "принимает HTTP-запрос и вызывает сценарий",
+        "scenario": "содержит логику сценария и вызывает порт БД",
+        "io": "сценарий вызывает порт БД",
+        "model": "порт обращается к модели",
+        "test": "тест покрывает endpoint и сценарий",
+    }.get(layer, "слой плана")
+
+
+def _plan_pseudo_node(state, layer: str) -> Node:
+    item = next((entry for entry in state.layers if entry.layer == layer), None)
+    name = (item.suggested_name if item else "") or layer
+    target = (item.target_file if item else "") or ""
+    details: dict = {}
+    if layer == "endpoint":
+        details = {
+            "function_name": name,
+            "http_method": state.http_method,
+            "path": state.path,
+        }
+    elif layer == "scenario":
+        details = {"class_name": name, "name": name}
+    elif layer == "model":
+        details = {"class_name": name}
+    elif layer == "test":
+        details = {"test_name": name}
+    elif layer == "io":
+        details = {"method": name}
+    return Node(
+        id=f"plan:{state.slug}:{layer}",
+        kind=layer,  # type: ignore[arg-type]
+        label=name,
+        file_path=target,
+        line=0,
+        details=details,
+        domain=state.domain,
+        planned=True,
+        plan=state.slug,
+        layer=layer,
+    )
+
+
+def _plan_reuse(graph: Graph, state, samples: list[Node]) -> list[Node]:
+    found: dict[str, Node] = {}
+    for layer in PLAN_IMPL_ORDER:
+        pseudo = _plan_pseudo_node(state, layer)
+        for sample in samples:
+            for node in _reuse_nodes(graph, pseudo, sample):
+                found[node.id] = node
+    domains = {part.strip() for part in str(state.domain or "").split(",") if part.strip()}
+    if domains:
+        for node in graph.nodes:
+            if node.planned or node.kind not in ("model", "scenario"):
+                continue
+            node_domains = {
+                part.strip() for part in str(node.domain or "").split(",") if part.strip()
+            }
+            if domains & node_domains:
+                found[node.id] = node
+    return sorted(found.values(), key=lambda node: (node.file_path, node.line, node.id))
+
+
+def _render_plan_task(
+    graph: Graph,
+    sources: SourceSet,
+    state,
+    number: int,
+    source_tasks: list[Node],
+    warnings: list[str],
+) -> tuple[str, dict]:
+    title = state.title or state.slug
+    lines = [f"### T{number}. План сценария «{title}» ({state.slug})  [ПЛАН]", ""]
+    route = " ".join(
+        part for part in (str(state.http_method or "").upper(), state.path or "") if part
+    )
+    if route:
+        lines.append(f"- Эндпоинт: {route}")
+    lines.append(f"- Домен: {state.domain or 'не указано'}")
+    if state.description.strip():
+        lines.append(f"- Описание сценария: {state.description.strip()}")
+    else:
+        lines.append(
+            "- Описание сценария: не заполнено — реализуй безопасный минимум и задай вопрос."
+        )
+    lines.append("- Критерии приёмки:")
+    if state.acceptance:
+        lines.extend(f"  - [ ] {item}" for item in state.acceptance)
+    else:
+        lines.append("  - [ ] не указано")
+    lines.append("")
+    lines.append("| слой | целевой файл | предлагаемое имя | что связывается с чем |")
+    lines.append("|---|---|---|---|")
+    layers_by_name = {item.layer: item for item in state.layers}
+    for layer in PLAN_CHAIN_ORDER:
+        item = layers_by_name.get(layer)
+        if item is None:
+            continue
+        name = item.suggested_name or ""
+        if layer in ("io", "model"):
+            name_cell = "имя выбираешь ты; сначала найди существующее"
+        else:
+            name_cell = name or "будет выведено из slug"
+        file_cell = item.target_file or "выбери сам"
+        lines.append(
+            f"| {_kind_name(layer)} | {file_cell} | {name_cell} | {_plan_layer_text(layer)} |"
+        )
+    lines.append("")
+    order = [layer for layer in PLAN_IMPL_ORDER if layer in layers_by_name]
+    lines.append("- Порядок реализации:")
+    for index, layer in enumerate(order, start=1):
+        if layer == "model":
+            text = "модель: переиспользуй существующую модель, если подходит"
+        elif layer == "io":
+            text = "io: метод порта к выбранной модели"
+        elif layer == "scenario":
+            text = "scenario: логика сценария поверх порта"
+        elif layer == "endpoint":
+            text = "endpoint: только валидация и вызов сценария"
+        else:
+            text = "test: проверка критериев приёмки"
+        lines.append(f"  {index}. {text}")
+    samples: list[Node] = []
+    sample_lines: list[str] = []
+    for layer in PLAN_CHAIN_ORDER:
+        if layer not in layers_by_name:
+            continue
+        pseudo = _plan_pseudo_node(state, layer)
+        sample = _choose_sample(pseudo, source_tasks)
+        if sample is None:
+            sample_lines.append(
+                f"- {_kind_name(layer)}: образца нет — ориентируйся на ближайшие узлы карты"
+            )
+            _warn(
+                warnings,
+                f"T{number} план {state.slug}: нет реализованного образца слоя {layer}.",
+            )
+            continue
+        samples.append(sample)
+        code = _sample_code(sources, sample)
+        sample_lines.append(f"- {_kind_name(layer)}: образец {_where(sample)}")
+        if code is not None:
+            text, _start, _end = code
+            sample_lines.append("  ~~~python")
+            sample_lines.extend(f"  {line}" if line else "" for line in text.splitlines())
+            sample_lines.append("  ~~~")
+    reuse = _plan_reuse(graph, state, samples)
+    lines.append("- Что можно переиспользовать:")
+    if reuse:
+        for node in reuse:
+            lines.append(
+                f"  - {_where(node)} — {_kind_name(node.kind)} {node_anchor(node) or node.label}"
+            )
+    else:
+        lines.append("  - (нет готовых узлов того же домена)")
+    lines.append("- Образцы кода по слоям:")
+    lines.extend(sample_lines)
+    lines.append("- Решения за тобой:")
+    lines.append(
+        "  - имена io-методов и модели, поля модели, SQL; запиши принятые решения в отчёт."
+    )
+    lines.append(
+        "- Проверка (studio verify): слои цепочки, связи origin=code "
+        "(endpoint → scenario → io → model) и тест."
+    )
+    lines.append("")
+    payload = {
+        "type": "plan",
+        "number": number,
+        "slug": state.slug,
+        "title": title,
+        "domain": state.domain,
+        "http_method": state.http_method,
+        "path": state.path,
+        "uses_db": bool(state.uses_db),
+        "with_test": bool(state.with_test),
+        "layers": [
+            {
+                "layer": item.layer,
+                "suggested_name": item.suggested_name,
+                "target_file": item.target_file,
+                "name_by_agent": item.layer in ("io", "model"),
+            }
+            for item in state.layers
+        ],
+        "plan": _plan_record(state),
+        "reuse": [
+            {"file": node.file_path, "line": node.line, "label": node.label}
+            for node in reuse
+        ],
+    }
+    return "\n".join(lines), payload
+
+
 def _unready_payload(node: Node) -> dict:
     missing = [] if (node.description or "").strip() else ["описание"]
     return {
@@ -908,8 +1144,10 @@ def _build_markdown(
     graph: Graph,
     sources: SourceSet,
     options: BriefOptions,
+    plans: list,
     tasks: list[Node],
-    unready: list[Node],
+    unready_plans: list,
+    unready_nodes: list[Node],
     numbers: dict[str, int],
     generated_at: str,
     brief_id: str,
@@ -918,6 +1156,8 @@ def _build_markdown(
     project_root = Path(graph.project_root)
     project_name = project_root.name or "проект"
     map_mode = options.map_mode or ("related" if len(graph.nodes) > 150 else "full")
+    total_tasks = len(plans) + len(tasks)
+    total_unready = len(unready_plans) + len(unready_nodes)
     lines = [f"# ТЗ для AI-агента: {project_name}", ""]
     lines.append(
         f"Сформировано: {generated_at} · studio {__version__} · brief {brief_id} · "
@@ -926,20 +1166,21 @@ def _build_markdown(
     lines.append(
         f"Область: {'выбрано ' + str(len(options.only or ())) if options.only else 'все узлы'}"
         f"{' · сценарий ' + options.scenario if options.scenario else ''}"
-        f" · Карта: {map_mode} · Задач: {len(tasks)} · Не готово: {len(unready)}"
+        f"{' · планы: ' + ', '.join(options.plans or ()) if options.plans else ''}"
+        f" · Карта: {map_mode} · Задач: {total_tasks} · Не готово: {total_unready}"
     )
     lines.append("")
     lines.append("## 1. Что нужно сделать")
     lines.append("")
-    if tasks:
+    if total_tasks:
         lines.append(
-            f"Реализуй {len(tasks)} планируемый узел(ов) строго по задачам ниже. "
-            "Карта показывает, как узлы связаны с уже существующим кодом; "
+            f"Реализуй {total_tasks} задачу(и) строго по задачам ниже. "
+            "Карта показывает, как задачи связаны с уже существующим кодом; "
             "связи и критерии приёмки обязательны."
         )
         lines.append(
-            "Каждая задача — один узел карты. Описания и связи взяты из "
-            ".studio/metadata.json; код проекта студия не изменяет."
+            "Сценарий — это одна цепочка слоёв. Описание относится ко всему сценарию: "
+            "сам выведи, что делает каждый слой, и не создавай слоёв сверх цепочки."
         )
         lines.append(
             "Порядок задач учитывает зависимости: модели → io → сценарии → "
@@ -948,6 +1189,12 @@ def _build_markdown(
         lines.append("")
         lines.append("| № | вид | имя | целевой файл | зависит от |")
         lines.append("|---|---|---|---|---|")
+        for state in plans:
+            number = numbers[f"plan:{state.slug}"]
+            lines.append(
+                f"| T{number} | план | {state.title or state.slug} "
+                f"({state.slug}) | — | — |"
+            )
         for node in tasks:
             number = numbers[node.id]
             dependencies = sorted(
@@ -966,7 +1213,7 @@ def _build_markdown(
     else:
         lines.append(
             "Планируемых задач нет. Ниже — карта проекта как контекст; "
-            "добавьте описания планируемых узлов в студии и соберите ТЗ снова."
+            "добавьте описание сценария или планируемых узлов в студии и соберите ТЗ снова."
         )
     lines.append("")
     lines.append("## 2. Правила работы (обязательны)")
@@ -981,9 +1228,19 @@ def _build_markdown(
         extra_rules = ""
     lines.append(extra_rules or "Правила проекта не заданы (файла `studio.rules.md` нет).")
     lines.append("")
-    if tasks:
+    if total_tasks:
         lines.append("## 4. Задачи")
         lines.append("")
+        for state in plans:
+            block, _payload = _render_plan_task(
+                graph,
+                sources,
+                state,
+                numbers[f"plan:{state.slug}"],
+                [candidate for candidate in graph.nodes if not candidate.planned],
+                warnings,
+            )
+            lines.extend(block.splitlines())
         for node in tasks:
             block, _payload = _render_task(
                 graph,
@@ -995,14 +1252,19 @@ def _build_markdown(
                 warnings,
             )
             lines.extend(block.splitlines())
-    lines.extend(_section_map(graph, map_mode, set(numbers)))
+    lines.extend(_section_map(graph, map_mode, {node.id for node in tasks}))
     lines.append("## 6. Не готово к реализации")
     lines.append("")
-    if not unready:
+    if not unready_plans and not unready_nodes:
         lines.append("(нет)")
         lines.append("")
     else:
-        for node in unready:
+        for state in unready_plans:
+            lines.append(
+                f"- план «{state.title or state.slug}» ({state.slug}) — "
+                "`.studio/metadata.json`: добавьте описание в студии"
+            )
+        for node in unready_nodes:
             lines.append(
                 f"- `{_kind_name(node.kind)}` `{node_anchor(node) or node.label}` — "
                 f"`{node.file_path}`: добавьте описание в студии"
@@ -1044,20 +1306,55 @@ def _fingerprint_tasks(tasks: list[Node]) -> str:
     return digest.hexdigest()
 
 
-def _make_brief_id(graph: Graph, options: BriefOptions, tasks: list[Node]) -> str:
+def _fingerprint_plans(plans: list) -> str:
+    digest = hashlib.sha1()
+    for state in sorted(plans, key=lambda item: item.slug):
+        layers = "|".join(
+            f"{layer.layer}:{layer.suggested_name}:{layer.target_file}"
+            for layer in state.layers
+        )
+        digest.update(
+            (
+                f"{state.slug}:{state.title}:{state.description}:"
+                f"{'|'.join(state.acceptance or [])}:{state.domain}:{layers}\n"
+            ).encode()
+        )
+    return digest.hexdigest()
+
+
+def _make_brief_id(graph: Graph, options: BriefOptions, tasks: list[Node], plans: list) -> str:
     key = json.dumps(
         {
             "fingerprint": graph.fingerprint,
             "map": options.map_mode,
             "only": sorted(options.only or ()),
+            "plans": sorted(options.plans or ()),
             "scenario": options.scenario,
             "include_empty": options.include_empty,
             "tasks": _fingerprint_tasks(tasks),
+            "plan_tasks": _fingerprint_plans(plans),
         },
         ensure_ascii=False,
         sort_keys=True,
     )
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+
+
+def _truncate_markdown(body: str, marker: str, warnings: list[str]) -> str:
+    suffix = (
+        "\n\n> ТЗ усечено: достигнут лимит "
+        f"{MAX_BRIEF_CHARS} символов. Сузьте область (--only/--plan/--scenario) "
+        "или выберите более краткий режим карты.\n"
+    )
+    room = MAX_BRIEF_CHARS - len(marker) - len(suffix)
+    if room < 0:
+        room = 0
+    _warn(
+        warnings,
+        "ТЗ большое: сузьте область (--only/--plan/--scenario) или выберите "
+        "более краткий режим карты.",
+    )
+    return body[:room].rstrip() + suffix
 
 
 def build_brief(
@@ -1074,6 +1371,16 @@ def build_brief(
         options = BriefOptions(
             map_mode=options.map_mode,
             only=(options.only,),
+            plans=options.plans,
+            scenario=options.scenario,
+            include_empty=options.include_empty,
+            generated_at=options.generated_at,
+        )
+    if isinstance(options.plans, str):
+        options = BriefOptions(
+            map_mode=options.map_mode,
+            only=options.only,
+            plans=(options.plans,),
             scenario=options.scenario,
             include_empty=options.include_empty,
             generated_at=options.generated_at,
@@ -1084,18 +1391,35 @@ def build_brief(
     options = BriefOptions(
         map_mode=options.map_mode or ("related" if len(graph.nodes) > 150 else "full"),
         only=options.only,
+        plans=options.plans,
         scenario=options.scenario,
         include_empty=options.include_empty,
         generated_at=options.generated_at,
     )
 
+    all_plans = _plan_states(graph)
+    plan_filter = set(options.plans) if options.plans is not None else None
+    if plan_filter is not None:
+        known = {state.slug: state for state in all_plans}
+        missing = sorted(plan_filter - set(known))
+        if missing:
+            raise BriefError(
+                "plan_not_found",
+                f"План не найден: {', '.join(missing)}. "
+                "Проверьте slug в .studio/metadata.json.",
+            )
+        selected_plans = [known[slug] for slug in sorted(plan_filter)]
+    else:
+        selected_plans = list(all_plans)
+
     scope, scope_warning = _resolve_scope(graph, options.only, options.scenario)
     planned = _planned_nodes(graph)
-    selected = [
-        node
-        for node in planned
-        if scope is None or node.id in scope
-    ]
+    if options.only is not None:
+        selected_nodes = [node for node in planned if scope is None or node.id in scope]
+    elif plan_filter is not None:
+        selected_nodes = []
+    else:
+        selected_nodes = [node for node in planned if scope is None or node.id in scope]
     warnings: list[str] = []
     if scope_warning:
         warnings.append(scope_warning)
@@ -1104,48 +1428,72 @@ def build_brief(
             "По фильтру --only не найден ни один узел — выберите другой якорь или id."
         )
 
-    ready = [node for node in selected if (node.description or "").strip()]
-    unready = [node for node in selected if not (node.description or "").strip()]
+    ready_plans = [state for state in selected_plans if (state.description or "").strip()]
+    unready_plans = [state for state in selected_plans if not (state.description or "").strip()]
+    ready_nodes = [node for node in selected_nodes if (node.description or "").strip()]
+    unready_nodes = [node for node in selected_nodes if not (node.description or "").strip()]
     if options.include_empty:
-        ready.extend(unready)
-        unready = []
-    ordered, cycle = _topological(ready, graph)
+        ready_plans.extend(unready_plans)
+        unready_plans = []
+        ready_nodes.extend(unready_nodes)
+        unready_nodes = []
+    ordered_plans = sorted(ready_plans, key=lambda state: state.slug)
+    ordered_nodes, cycle = _topological(ready_nodes, graph)
     if cycle:
         warnings.append(
             "В графе задач есть цикл зависимостей — порядок задач восстановлен по виду и id."
         )
-    numbers = {node.id: index for index, node in enumerate(ordered, start=1)}
-    brief_id = _make_brief_id(graph, options, ordered)
+    numbers: dict[str, int] = {}
+    for index, state in enumerate(ordered_plans, start=1):
+        numbers[f"plan:{state.slug}"] = index
+    offset = len(ordered_plans)
+    for index, node in enumerate(ordered_nodes, start=1 + offset):
+        numbers[node.id] = index
+    brief_id = _make_brief_id(graph, options, ordered_nodes, ordered_plans)
     generated_at = options.generated_at or _dt.datetime.now(_dt.UTC).strftime(
         "%Y-%m-%d %H:%M UTC"
     )
-    for _attempt in range(2):
-        markdown = _build_markdown(
-            graph,
-            sources,
-            options,
-            ordered,
-            unready,
-            numbers,
-            generated_at,
-            brief_id,
-            warnings,
-        )
-        if len(markdown) <= MAX_BRIEF_CHARS or any(
-            "ТЗ большое" in warning for warning in warnings
-        ):
-            break
-        warnings.append(
-            "ТЗ большое: сузьте область (--only/--scenario) или выберите более краткий режим карты."
-        )
-    stats = {
-        "tasks": len(ordered),
-        "unready": len(unready),
-        "chars": len(markdown),
-        "approx_tokens": len(markdown) // 3,
+
+    body = _build_markdown(
+        graph,
+        sources,
+        options,
+        ordered_plans,
+        ordered_nodes,
+        unready_plans,
+        unready_nodes,
+        numbers,
+        generated_at,
+        brief_id,
+        warnings,
+    )
+    payload = {
+        "version": BRIEF_VERSION,
+        "brief_id": brief_id,
+        "fingerprint": graph.fingerprint,
+        "generated_at": generated_at,
+        "options": {
+            "map": options.map_mode,
+            "only": list(options.only or ()),
+            "plans": list(options.plans or ()),
+            "scenario": options.scenario,
+            "include_empty": options.include_empty,
+        },
+        "tasks": [],
+        "unready": [],
     }
     task_payloads: list[dict] = []
-    for node in ordered:
+    for state in ordered_plans:
+        _block, task_payload = _render_plan_task(
+            graph,
+            sources,
+            state,
+            numbers[f"plan:{state.slug}"],
+            [candidate for candidate in graph.nodes if not candidate.planned],
+            warnings,
+        )
+        task_payloads.append(task_payload)
+    for node in ordered_nodes:
         _block, task_payload = _render_task(
             graph,
             sources,
@@ -1156,24 +1504,22 @@ def build_brief(
             warnings,
         )
         task_payloads.append(task_payload)
-    payload = {
-        "version": BRIEF_VERSION,
-        "brief_id": brief_id,
-        "fingerprint": graph.fingerprint,
-        "generated_at": generated_at,
-        "options": {
-            "map": options.map_mode,
-            "only": list(options.only or ()),
-            "scenario": options.scenario,
-            "include_empty": options.include_empty,
-        },
-        "tasks": task_payloads,
-        "unready": [_unready_payload(node) for node in unready],
+    payload["tasks"] = task_payloads
+    payload["unready"] = [
+        *[_plan_unready(state) for state in unready_plans],
+        *[_unready_payload(node) for node in unready_nodes],
+    ]
+    marker_payload = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    marker = f"\n<!-- studio-brief:v{BRIEF_VERSION} {marker_payload} -->\n"
+    if len(body) + len(marker) > MAX_BRIEF_CHARS:
+        body = _truncate_markdown(body, marker, warnings)
+    markdown = body + marker
+    stats = {
+        "tasks": len(ordered_plans) + len(ordered_nodes),
+        "unready": len(unready_plans) + len(unready_nodes),
+        "chars": len(markdown),
+        "approx_tokens": len(markdown) // 3,
     }
-    marker = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    markdown += f"\n<!-- studio-brief:{BRIEF_VERSION} {marker} -->\n"
-    stats["chars"] = len(markdown)
-    stats["approx_tokens"] = len(markdown) // 3
     return Brief(
         markdown=markdown,
         brief_id=brief_id,
@@ -1185,6 +1531,7 @@ def build_brief(
         options=options,
         generated_at=generated_at,
     )
+
 
 
 def _studio_dir(project_root: Path) -> Path:
@@ -1223,7 +1570,7 @@ def save_brief(project_root: Path, brief: Brief, target: Path | None = None) -> 
 
 def _read_marker(text: str) -> dict | None:
     match = re.search(
-        r"<!--\s*studio-brief:v1\s+(\{.*?\})\s*-->", text, re.DOTALL
+        r"<!--\s*studio-brief:v[12]\s+(\{.*?\})\s*-->", text, re.DOTALL
     )
     if match is None:
         return None

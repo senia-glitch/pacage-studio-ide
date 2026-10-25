@@ -8,7 +8,7 @@ studio                         # автоскан + интерфейс, откр
 studio dev                     # то же явно: --host, --port, --no-open, --poll, --verbose
 studio scan [--json]           # только скан → .studio/graph.json
 studio list [--json]           # сценарии в терминале
-studio brief [--stdout] [--only ANCHOR] [--scenario NAME]
+studio brief [--stdout] [--plan SLUG] [--only ANCHOR] [--scenario NAME]
 studio verify [BRIEF]          # проверить выполнение ТЗ
 studio install-full            # fastbase[full] в текущий venv
 studio help                    # все команды

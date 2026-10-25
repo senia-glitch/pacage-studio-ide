@@ -1,6 +1,6 @@
-﻿import {api} from "./api.js";
+import {api} from "./api.js";
 import {
-  briefRequest, defaultMapMode, plannedNodes, plannedStats, shortPrompt,
+  briefRequest, defaultMapMode, plannedNodes, plannedStats, planStates, shortPrompt,
   statusText, verifyLabel,
 } from "./briefmodel.js";
 import {
@@ -39,6 +39,14 @@ async function refreshBriefStatus(){
   }
   updateBriefBadge();
 }
+function briefPlanChoice(plan,selected){
+  const ready=!!String(plan.description||"").trim();
+  const hint=ready?`слоёв: ${(plan.layers||[]).length}`:"нет описания — заполните в студии";
+  return `<label class="brief-node${ready?"":" disabled"}" title="${esc(plan.slug)}">
+    <input type="checkbox" data-plan="${esc(plan.slug)}" ${selected.has(plan.slug)&&ready?"checked":""} ${ready?"":"disabled"}>
+    <span><b>план ${esc(plan.title||plan.slug)}</b>
+    <small>${esc(plan.slug)} · ${esc(hint)}</small></span></label>`;
+}
 function briefNodeChoice(node,selected){
   const ready=!!String(node.description||"").trim();
   const hint=ready?"готов к реализации":"нет описания — заполните в студии";
@@ -65,11 +73,14 @@ function openBriefStatus(){
     button.onclick=()=>openEditorForNode({file_path:button.dataset.file,line:Number(button.dataset.line)||1,planned:false});
   });
 }
-async function openBriefDialog(){
+async function openBriefDialog(options={}){
   await flushPending();
   const nodes=plannedNodes(S.G);
+  const plans=planStates(S.G);
+  const onlyPlans=Array.isArray(options.plans)?new Set(options.plans.filter(Boolean)):null;
   const includeEmpty=false;
-  const selected=new Set(nodes.filter(node=>String(node.description||"").trim()).map(node=>node.id));
+  const selected=new Set(onlyPlans?[]:nodes.filter(node=>String(node.description||"").trim()).map(node=>node.id));
+  const selectedPlans=new Set(onlyPlans||plans.filter(plan=>String(plan.description||"").trim()).map(plan=>plan.slug));
   const mapMode=defaultMapMode(((S.G&&S.G.nodes)||[]).length);
   const overlay=document.createElement("div");
   overlay.className="studio-modal";
@@ -85,10 +96,11 @@ async function openBriefDialog(){
               <option value="none">нет</option>
             </select>
           </label>
-          <label class="hint"><input type="checkbox" id="briefEmpty"> включать узлы без описания</label>
-          <div class="hint">Планируемые узлы: ${nodes.length} · отмечены готовые.</div>
+          <label class="hint"><input type="checkbox" id="briefEmpty"> включать без описания</label>
+          <div class="hint">Планы: ${plans.length} · старые планируемые узлы: ${nodes.length} · отмечены готовые.</div>
         </div>
-        <div id="briefNodes">${nodes.length?nodes.map(node=>briefNodeChoice(node,selected)).join(""):'<p class="hint">Планируемых узлов нет. Добавьте их во вкладке «Создание».</p>'}</div>
+        <div id="briefPlans">${plans.length?plans.map(plan=>briefPlanChoice(plan,selectedPlans)).join(""):'<p class="hint">Планов нет. Создайте сценарий во вкладке «Создание».</p>'}</div>
+        <div id="briefNodes">${nodes.length?nodes.map(node=>briefNodeChoice(node,selected)).join(""):'<p class="hint">Старых планируемых узлов нет.</p>'}</div>
       </div>
       <div class="brief-preview">
         <div class="brief-stats" id="briefStats">Подготовка…</div>
@@ -117,7 +129,8 @@ async function openBriefDialog(){
   let currentPath=".studio/agent-brief.md";
   const collect=()=>{
     const chosen=[...overlay.querySelectorAll('#briefNodes input[data-bid]:checked')].map(input=>input.dataset.bid);
-    return briefRequest({selected:chosen,map:mapSelect.value,includeEmpty:includeEmptyValue});
+    const chosenPlans=[...overlay.querySelectorAll('#briefPlans input[data-plan]:checked')].map(input=>input.dataset.plan);
+    return briefRequest({selected:chosen,plans:chosenPlans,map:mapSelect.value,includeEmpty:includeEmptyValue});
   };
   const generate=async()=>{
     statsBox.textContent="Собираю ТЗ…";
@@ -142,7 +155,7 @@ async function openBriefDialog(){
     }
   };
   const scheduleGenerate=()=>{clearTimeout(overlay._timer);overlay._timer=setTimeout(generate,220)};
-  overlay.querySelectorAll('#briefNodes input[data-bid]').forEach(input=>input.onchange=scheduleGenerate);
+  overlay.querySelectorAll('#briefNodes input[data-bid],#briefPlans input[data-plan]').forEach(input=>input.onchange=scheduleGenerate);
   mapSelect.onchange=scheduleGenerate;
   emptyBox.onchange=()=>{
     includeEmptyValue=emptyBox.checked;
@@ -150,6 +163,15 @@ async function openBriefDialog(){
       const input=[...overlay.querySelectorAll("#briefNodes input[data-bid]")].find(el=>el.dataset.bid===node.id);
       if(!input)return;
       const ready=!!String(node.description||"").trim();
+      if(!ready){
+        input.disabled=!includeEmptyValue;
+        if(includeEmptyValue)input.checked=true;
+      }
+    });
+    plans.forEach(plan=>{
+      const input=[...overlay.querySelectorAll("#briefPlans input[data-plan]")].find(el=>el.dataset.plan===plan.slug);
+      if(!input)return;
+      const ready=!!String(plan.description||"").trim();
       if(!ready){
         input.disabled=!includeEmptyValue;
         if(includeEmptyValue)input.checked=true;

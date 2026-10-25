@@ -32,13 +32,15 @@ test("режим карты по умолчанию", () => {
 });
 
 test("запрос ТЗ не теряет пустой выбор", () => {
-  assert.deepEqual(briefRequest({selected: [], map: "none", includeEmpty: false}), {
+  assert.deepEqual(briefRequest({selected: [], plans: [], map: "none", includeEmpty: false}), {
     only: [],
+    plans: [],
     map: "none",
     include_empty: false,
   });
-  assert.deepEqual(briefRequest({selected: ["A"], map: "bad", includeEmpty: true}), {
+  assert.deepEqual(briefRequest({selected: ["A"], plans: ["cancel_order"], map: "bad", includeEmpty: true}), {
     only: ["A"],
+    plans: ["cancel_order"],
     map: "full",
     include_empty: true,
   });

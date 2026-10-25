@@ -219,9 +219,11 @@ def cmd_list(args) -> int:
 
 def _brief_options(args) -> BriefOptions:
     raw_only = getattr(args, "only", None)
+    raw_plans = getattr(args, "plan", None)
     return BriefOptions(
         map_mode=str(getattr(args, "map", "") or ""),
         only=tuple(str(item) for item in raw_only) if raw_only else None,
+        plans=tuple(str(item) for item in raw_plans) if raw_plans else None,
         scenario=str(getattr(args, "scenario", "") or ""),
         include_empty=bool(getattr(args, "include_empty", False)),
     )
@@ -235,7 +237,7 @@ def cmd_brief(args) -> int:
         sources = load_sources(read_env(root))
         brief = build_brief(graph, sources, _brief_options(args))
     except BriefError as exc:
-        raise CliError(exc.message) from exc
+        raise CliError(exc.message, 2 if exc.code == "plan_not_found" else 1) from exc
 
     if getattr(args, "json", False):
         try:
@@ -254,9 +256,11 @@ def cmd_brief(args) -> int:
                     "tasks": [
                         {
                             "number": item["number"],
-                            "kind": item["kind"],
-                            "anchor": item["anchor"],
-                            "target_file": item["target_file"],
+                            "kind": item.get("kind") or item.get("type", ""),
+                            "anchor": item.get("anchor")
+                            or item.get("slug")
+                            or item.get("title", ""),
+                            "target_file": item.get("target_file", ""),
                         }
                         for item in brief.tasks
                     ],
@@ -499,8 +503,8 @@ def cmd_help(_args) -> int:
     print("                                       автоскан и интерфейс")
     print("  scan  [--project .] [--json]       код → .studio/graph.json")
     print("  list  [--project .] [--json]       сценарии в терминале")
-    print("  brief [--out PATH | --stdout] [--only A ...] [--scenario NAME]")
-    print("        [--map full|related|compact|none] [--include-empty] [--json]")
+    print("  brief [--out PATH | --stdout] [--plan SLUG ...] [--only A ...]")
+    print("        [--scenario NAME] [--map full|related|compact|none] [--include-empty] [--json]")
     print("                                       ТЗ для AI-агента")
     print("  verify [BRIEF] [--json]            проверить выполнение ТЗ")
     print("  doctor [--project .] [--json] [--strict]  диагностика одной командой")
@@ -548,6 +552,7 @@ def build_parser() -> argparse.ArgumentParser:
     brief_out = brief_p.add_mutually_exclusive_group()
     brief_out.add_argument("--out", default=None, help="куда записать markdown")
     brief_out.add_argument("--stdout", action="store_true", help="печатать ТЗ в stdout")
+    brief_p.add_argument("--plan", action="append", default=[], metavar="SLUG")
     brief_p.add_argument("--only", action="append", default=[], metavar="ANCHOR")
     brief_p.add_argument("--scenario", default="", metavar="NAME")
     brief_p.add_argument("--map", choices=["full", "related", "compact", "none"], default="")

@@ -224,9 +224,17 @@ class ProjectState:
             if isinstance(raw_only, str):
                 raw_only = [raw_only]
             only = tuple(str(item) for item in raw_only if str(item).strip())
+        raw_plans = data.get("plans")
+        if raw_plans is None:
+            plans = None
+        else:
+            if isinstance(raw_plans, str):
+                raw_plans = [raw_plans]
+            plans = tuple(str(item) for item in raw_plans if str(item).strip())
         return BriefOptions(
             map_mode=str(data.get("map") or ""),
             only=only,
+            plans=plans,
             scenario=str(data.get("scenario") or ""),
             include_empty=bool(data.get("include_empty")),
         )
@@ -248,9 +256,11 @@ class ProjectState:
                 "tasks": [
                     {
                         "number": item["number"],
-                        "kind": item["kind"],
-                        "anchor": item["anchor"],
-                        "target_file": item["target_file"],
+                        "kind": item.get("kind") or item.get("type", ""),
+                        "anchor": item.get("anchor")
+                        or item.get("slug")
+                        or item.get("title", ""),
+                        "target_file": item.get("target_file", ""),
                     }
                     for item in brief.tasks
                 ],
