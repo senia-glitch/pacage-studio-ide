@@ -50,3 +50,15 @@ test("позиции несуществующих узлов отбрасыва�
   assert.equal(result["scope|gone"], undefined);
   assert.equal(result["incomplete|gone"].x, 5);
 });
+
+
+test("ошибки записи и сброса не бросают", () => {
+  const bad = {
+    getItem: () => null,
+    setItem: () => { throw new Error("quota"); },
+    removeItem: () => { throw new Error("denied"); },
+  };
+  const store = createStorage(bad, "k");
+  assert.equal(store.save({x: 1}), false);
+  assert.equal(store.reset(), false);
+});

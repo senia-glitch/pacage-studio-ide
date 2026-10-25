@@ -67,3 +67,15 @@ test("подписи чипа и промпт", () => {
     "Прочитай и выполни ТЗ из файла .studio/agent-brief.md, следуй его правилам",
   );
 });
+
+import {planStates, statusText} from "../../studio/ui/static/js/briefmodel.js";
+
+test("сортировка планов и статус проверки", () => {
+  assert.deepEqual(planStates({plans: [{slug: "b"}, {slug: "a"}]}).map((p) => p.slug), ["a", "b"]);
+  assert.deepEqual(planStates(null), []);
+  assert.equal(statusText(null), "ТЗ ещё не проверялось");
+  assert.equal(statusText({total: 0}), "В ТЗ нет задач");
+  assert.equal(statusText({total: 2, done: 1, partial: 1, not_done: 0}), "выполнено 1, частично 1, не сделано 0");
+  assert.equal(verifyLabel(null, {nodes: [], plans: [{slug: "p", description: "d"}]}).urgent, false);
+  assert.deepEqual(briefRequest({selected: new Set(["a"]), plans: new Set(), map: "compact", includeEmpty: 0, scenario: "s"}).only, ["a"]);
+});

@@ -9,6 +9,8 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+import pytest
+
 import studio
 from studio.agent import BriefOptions, build_brief, load_brief, save_brief
 from studio.agent.brief import _choose_sample
@@ -467,6 +469,7 @@ class _Server:
                 exc.close()
 
 
+@pytest.mark.integration
 def test_api_brief_и_токен(demo: Path):
     with _Server(demo) as server:
         request = urllib.request.Request(

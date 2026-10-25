@@ -9,7 +9,11 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+import pytest
+
 from studio.server import Ctx, make_handler
+
+pytestmark = pytest.mark.integration
 
 PLAN = {
     "title": "Отмена заказа",

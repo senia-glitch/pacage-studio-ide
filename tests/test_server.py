@@ -13,6 +13,8 @@ import pytest
 from studio._constants import MAX_HTTP_BODY
 from studio.server import Ctx, make_handler
 
+pytestmark = pytest.mark.integration
+
 
 class _Server:
     def __init__(self, root: Path):
@@ -347,4 +349,3 @@ def test_правка_файла_поднимает_ревизию(demo: Path):
         with srv.get("/api/state", {"X-Studio-Token": srv.token}) as response:
             second = json.loads(response.read().decode("utf-8"))["revision"]
     assert second > first
-

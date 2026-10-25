@@ -46,5 +46,5 @@ studio                      # скан + интерфейс в браузере
 - [docs/agent-brief.md](docs/agent-brief.md) — ТЗ для AI-агента и `studio verify`.
 - [docs/SPEC.md](docs/SPEC.md) — краткое устройство пакета.
 
-Разработка: `pip install -e ".[dev]"`, затем `ruff check` и `pytest`.
-
+Разработка: `pip install -e ".[dev]"`, затем `ruff check` и `pytest -m "not integration"`;
+интеграционные тесты запускаются отдельно: `pytest -m integration`.

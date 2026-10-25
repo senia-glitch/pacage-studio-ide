@@ -7,6 +7,8 @@ import pytest
 
 from studio.scanner import scan
 
+pytestmark = pytest.mark.integration
+
 
 def _write(root: Path, rel: str, text: str) -> None:
     path = root / rel

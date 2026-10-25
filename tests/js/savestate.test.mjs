@@ -18,3 +18,13 @@ test("все переходы формы", () => {
   assert.equal(state, "error");
   assert.equal(nextState("unknown", "edit"), "idle");
 });
+
+
+test("подписи всех состояний", () => {
+  assert.equal(saveLabel("idle"), "");
+  assert.equal(saveLabel("dirty"), "Не сохранено");
+  assert.equal(saveLabel("saving"), "Сохранение…");
+  assert.equal(saveLabel("saved"), "Сохранено ✓");
+  assert.equal(saveLabel("error"), "Ошибка — повторить");
+  assert.equal(saveLabel("unknown"), "");
+});

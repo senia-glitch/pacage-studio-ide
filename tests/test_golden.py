@@ -4,7 +4,11 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from studio.scanner import scan
+
+pytestmark = pytest.mark.integration
 
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN = ROOT / "tests/golden/full"

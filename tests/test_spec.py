@@ -604,6 +604,7 @@ def test_план_откатывает_файлы(tmp_path: Path, monkeypatch):
 # --------------------------------------------------------------------- WP6
 
 
+@pytest.mark.integration
 def test_watcher_обновляет_ревизию(demo: Path):
     from studio.server.state import ProjectState
 
@@ -635,6 +636,7 @@ def test_state_не_поднимает_ревизию_без_изменений(
     assert state.revision == revision
 
 
+@pytest.mark.integration
 def test_параллельные_сохранения(tmp_path: Path):
     import threading
 

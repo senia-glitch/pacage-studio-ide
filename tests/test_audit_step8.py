@@ -558,6 +558,7 @@ def test_save_brief_относительный_путь_внутри_проек�
 # ------------------------------------------------------- 16. watcher
 
 
+@pytest.mark.integration
 def test_watcher_переживает_исключение(demo: Path, monkeypatch):
     state = ProjectState(demo, poll_interval=0.02)
     state.ensure_graph()

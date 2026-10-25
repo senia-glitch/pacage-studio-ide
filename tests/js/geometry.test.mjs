@@ -29,3 +29,9 @@ test("порядок методов", () => {
   assert.ok(methodOrder("GET") < methodOrder("POST"));
   assert.equal(methodOrder("BREW"), 99);
 });
+
+import {proposedZoneRect} from "../../studio/ui/static/js/geometry.js";
+
+test("прямоугольник зоны из стиля", () => {
+  assert.deepEqual(proposedZoneRect({style: {left: "12.5px", top: "bad"}}, {w: 100, h: 50}), {x: 12.5, y: 0, w: 100, h: 50});
+});

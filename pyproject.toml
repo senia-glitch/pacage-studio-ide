@@ -55,12 +55,21 @@ addopts = "-q"
 markers = [
     "slow: долгие тесты",
     "e2e: браузерные тесты (нужен Playwright)",
+    "integration: HTTP-сервер, subprocess, watcher или потоки",
 ]
+
+[tool.coverage.run]
+branch = true
+source = ["studio"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["text.py"]
+extend-exclude = ["text.py", ".venv*", "pytest-of-*", ".pytest_tmp*", ".tmp*", "probe*", ".probe_dir", "tmp*", "pip-*"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]

@@ -9,6 +9,8 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+import pytest
+
 from studio import store
 from studio.metadata import metadata_path, save_node_metadata
 from studio.scanner import scan
@@ -163,6 +165,7 @@ def _http_server(root: Path, poll: float):
     return state, http, thread
 
 
+@pytest.mark.integration
 def test_внешняя_правка_metadata_и_etag(demo: Path):
     state, http, thread = _http_server(demo, poll=0.05)
     try:

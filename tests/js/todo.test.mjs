@@ -142,3 +142,20 @@ test("anchorOf повторяет якорь Python-сканера", () => {
   assert.equal(anchorOf(nodes[3]), "Lost._db.read");
   assert.equal(anchorOf(nodes[5]), "test_lost");
 });
+
+import {OFF_PATH_KINDS, OFF_PATH_TITLES, isTodo, offPathCount, planPath} from "../../studio/ui/static/js/todo.js";
+
+test("служебные подписи и граничные узлы", () => {
+  assert.deepEqual(OFF_PATH_KINDS, ["scenario", "io", "model", "test"]);
+  assert.equal(OFF_PATH_TITLES.model, "Модели");
+  assert.equal(isTodo(null), false);
+  assert.equal(planPath(nodes[0]), "app/routes.py");
+  assert.equal(planPath(nodes[6]), "");
+  assert.equal(anchorOf({kind: "nested", label: "N", details: {name: "N"}}), "N");
+  assert.equal(anchorOf({kind: "nested", label: "N"}), "N");
+  assert.equal(anchorOf({kind: "other", details: {}}), "");
+  assert.deepEqual(placeNode(null), {tab: "map", area: "offpath"});
+  assert.deepEqual(groupOffPath(null), {scenario: [], io: [], model: [], test: []});
+  assert.equal(offPathCount(groupOffPath(nodes)), 5);
+  assert.equal(offPathCount({}), 0);
+});

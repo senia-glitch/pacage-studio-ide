@@ -5,8 +5,12 @@ import re
 import tomllib
 from pathlib import Path
 
+import pytest
+
 import studio
 from studio._constants import FASTBASE_FULL_SPEC
+
+pytestmark = pytest.mark.integration
 
 ROOT = Path(__file__).resolve().parent.parent
 

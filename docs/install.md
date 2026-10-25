@@ -24,7 +24,9 @@ python -m venv .venv
 # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 ruff check
-pytest
+pytest -m "not integration"
+# отдельно: HTTP-сервер, subprocess, watcher
+pytest -m integration
 ```
 
 Runtime-зависимость одна — `pydantic>=2`. Всё остальное — стандартная
