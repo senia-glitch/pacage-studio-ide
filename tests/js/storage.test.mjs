@@ -37,7 +37,7 @@ test("битый JSON игнорируется", () => {
 
 test("ключ зависит от пути", () => {
   assert.notEqual(hashText("/a"), hashText("/b"));
-  assert.match(storageKey("/a"), /^studio:v1:/);
+  assert.match(storageKey("/a"), /^studio:v2:/);
 });
 
 test("позиции несуществующих узлов отбрасываются", () => {

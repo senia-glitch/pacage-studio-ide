@@ -21,7 +21,7 @@ from studio.agent import (
 from studio.agent import (
     verify_brief as verify_brief_data,
 )
-from studio.creator import CreateError, create_metadata_files
+from studio.creator import CreateError
 from studio.creator.plan import create_plan, delete_plan, preview_plan, update_plan
 from studio.env import read_env
 from studio.metadata import MetadataError, save_node_metadata
@@ -158,19 +158,6 @@ class ProjectState:
             return {
                 "graph": graph.model_dump(),
                 "changed": result.changed,
-            }
-
-    def create(self, data: dict) -> dict:
-        with self.lock:
-            env = read_env(self.root)
-            created = create_metadata_files(data, env)
-            graph = self.rescan("create")
-            return {
-                "created": [
-                    {"path": item.path, "kind": item.kind, "name": item.name}
-                    for item in created
-                ],
-                "graph": graph.model_dump(),
             }
 
     # ----------------------------------------------------------------- plans

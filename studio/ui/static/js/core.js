@@ -3,6 +3,7 @@ import {enableNodeDrag as enableNodeDragImpl, enableZoneDrag as enableZoneDragIm
 import {EDITORS, buildEditorUrl} from "./editor.js";
 import {drawEdges as drawEdgesImpl} from "./edges.js";
 import {areaSize as geometryAreaSize, proposedOverlap as geometryOverlap, zoneOverlaps as geometryZoneOverlaps} from "./geometry.js";
+import {emptyDraft, normalizeDraft} from "./chainmodel.js";
 import {matchesAll, searchNodes} from "./search.js";
 import {nextState, saveLabel} from "./savestate.js";
 import {createStorage, storageKey} from "./storage.js";
@@ -23,7 +24,6 @@ export const S = {
   hideNested: false,
   scenView: {x: 30, y: 30, k: 1},
   mapView: {x: 30, y: 30, k: 1},
-  createView: {x: 30, y: 30, k: 1},
   scenBoxes: {},
   mapBoxes: {},
   mapPos: new Map(),
@@ -37,8 +37,8 @@ export const S = {
   scenZonePos: new Map(),
   justDraggedAt: 0,
   todoHighlight: false,
-  createState: {nodes: [], edges: [], seq: 1, zones: {}},
-  createConnect: null,
+  createState: emptyDraft(),
+  planPreview: null,
   studioRevision: 0,
   liveFailures: 0,
   liveStarted: false,
@@ -84,8 +84,6 @@ const METHOD_COLORS={GET:"#5aa0ff",POST:"#7fc97f",PUT:"#e8833a",PATCH:"#bb9af7",
 const NO_DOMAIN="Без домена";
 const NO_METHOD="Метод не указан";
 const CARD_W=280,GAPY=24,PAD=30;
-const CREATE_KINDS=["endpoint","scenario","io","model","test"];
-const CREATE_LAYER_X={endpoint:40,scenario:400,io:760,model:1120,test:1480};
 
 // Общие константы и чистые помощники.
 
@@ -236,19 +234,7 @@ async function setTab(name){
 
 /* ---------- viewport ---------- */
 function applyTransform(viewId,view){
-  applyTransformImpl(viewId,view,updateCreateZoneScales);
-}
-function updateCreateZoneScales(){
-  const stage=$("createStage");if(!stage)return;
-  const k=S.createView.k||1;
-  const baseF=Math.max(.75,Math.min(1.6,k))/k;
-  stage.querySelectorAll(".create-zone").forEach(zone=>{
-    const lab=zone.querySelector(".zlab");if(!lab)return;
-    const maxF=Math.max(.35,(zone.offsetWidth-18)/Math.max(1,lab.offsetWidth));
-    const f=Math.min(baseF,maxF);
-    lab.style.transformOrigin="left center";
-    lab.style.transform=`scale(${f})`;
-  });
+  applyTransformImpl(viewId,view);
 }
 
 /* ---------- перемещение узлов ---------- */
@@ -267,7 +253,7 @@ function drawEdges(svg,boxes,edges){
   drawEdgesImpl(svg,boxes,edges,EDGE_COLORS,EDGE_NAMES,esc);
 }
 function areaSize(zone,overrides){
-  const rects=[...zone.querySelectorAll(".card[data-id],.create-card[data-cid]")].map(el=>{
+  const rects=[...zone.querySelectorAll(".card[data-id]")].map(el=>{
     const ov=overrides&&overrides.get(el);
     return{x:ov?ov.x:(parseFloat(el.style.left)||0),y:ov?ov.y:(parseFloat(el.style.top)||0),w:el.offsetWidth,h:el.offsetHeight};
   });
@@ -275,7 +261,7 @@ function areaSize(zone,overrides){
 }
 function proposedOverlap(zone,movingEls,proposed){
   const moving=new Set(movingEls);
-  const others=[...zone.querySelectorAll(".card[data-id],.create-card[data-cid]")].filter(el=>!moving.has(el)).map(styleRect);
+  const others=[...zone.querySelectorAll(".card[data-id]")].filter(el=>!moving.has(el)).map(styleRect);
   const rects=proposed.map(p=>({x:p.x,y:p.y,w:p.el.offsetWidth,h:p.el.offsetHeight}));
   return geometryOverlap(rects,others,6);
 }
@@ -335,10 +321,10 @@ function currentPositions(){
 function uiSnapshot(){
   return{
     tab:S.tab,selectedScenario:S.selectedScenario,selectedNode:S.selectedNode,hideMeta:S.hideMeta,hideNested:S.hideNested,todoHighlight:S.todoHighlight,editor:S.editorId,
-    views:{map:S.mapView,scen:S.scenView,create:S.createView},
+    views:{map:S.mapView,scen:S.scenView},
     positions:currentPositions(),
     listOpen:Object.fromEntries(S.listOpen),
-    createDraft:{nodes:S.createState.nodes,edges:S.createState.edges,seq:S.createState.seq,zones:S.createState.zones},
+    createDraft:S.createState,
   };
 }
 function persistNow(){
@@ -359,10 +345,10 @@ function restoreUiState(saved){
   S.todoHighlight=!!saved.todoHighlight;
   applyTodoHighlight();
   if(EDITORS.some(e=>e.id===saved.editor))S.editorId=saved.editor;
-  for(const key of ["map","scen","create"]){
+  for(const key of ["map","scen"]){
     const view=saved.views&&saved.views[key];
     if(view&&Number.isFinite(view.x)&&Number.isFinite(view.y)&&Number.isFinite(view.k)){
-      const target=key==="map"?S.mapView:key==="scen"?S.scenView:S.createView;
+      const target=key==="map"?S.mapView:S.scenView;
       target.x=view.x;target.y=view.y;target.k=view.k;
     }
   }
@@ -388,11 +374,9 @@ function restoreUiState(saved){
     if(v&&Number.isFinite(v.x)&&Number.isFinite(v.y))S.scenZonePos.set(k,{x:v.x,y:v.y});
   });
   Object.entries(saved.listOpen||{}).forEach(([key,value])=>S.listOpen.set(key,!!value));
-  const draft=saved.createDraft;
-  if(draft&&Array.isArray(draft.nodes)&&draft.nodes.length){
-    S.createState.nodes=draft.nodes;S.createState.edges=Array.isArray(draft.edges)?draft.edges:[];S.createState.seq=draft.seq||1;S.createState.zones=draft.zones&&typeof draft.zones==="object"?draft.zones:{};
-    toast(`Восстановлен черновик (${draft.nodes.length} узлов)`);
-  }
+  const draft=normalizeDraft(saved.createDraft);
+  S.createState=draft;
+  if(draft.title||draft.description)toast("Восстановлен черновик сценария");
 }
 function initUiStorage(){
   try{
@@ -580,8 +564,6 @@ export {
     METHOD_COLORS,
     NO_DOMAIN,
     NO_METHOD,
-    CREATE_KINDS,
-    CREATE_LAYER_X,
     applyGraph,
     methodOfEndpoint,
     urlOfEndpoint,
@@ -600,7 +582,6 @@ export {
     openEndpointScenario,
     setTab,
     applyTransform,
-    updateCreateZoneScales,
     enableZoneDrag,
     enableNodeDrag,
     drawEdges,

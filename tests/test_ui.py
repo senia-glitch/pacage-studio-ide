@@ -61,7 +61,6 @@ def test_есть_ключевые_возможности():
     assert "localStorage" in JS
     assert "incompleteNodes" in JS
     assert "Неполные" in JS or "неполные" in JS
-    assert "inferEdgeKind" in JS
     assert "enableNodeDrag" in JS
     assert "hideNested" in JS
     assert "nestedOf" in JS

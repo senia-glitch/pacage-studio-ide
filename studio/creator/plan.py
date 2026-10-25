@@ -434,6 +434,8 @@ def _rollback(
 def create_plan(data, env: ProjectEnv) -> PlanResult:
     """Проверить, записать скелеты и metadata.json. Всё или ничего."""
     plan = _normalize(data, env)
+    if not plan.title.strip():
+        raise CreateError("нужно название сценария", "W_PLAN_INVALID")
     root = Path(env.project_root).resolve()
     graph = _scan(env)
     metadata, issues = _metadata_problems(root)

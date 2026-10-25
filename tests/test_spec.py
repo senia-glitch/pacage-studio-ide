@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from studio._atomic import atomic_write
-from studio.creator import CreateError, create_metadata_files, plan_creation
+from studio.creator import CreateError
+from studio.creator.plan import create_plan
 from studio.env import read_env
 from studio.metadata import save_node_metadata
 from studio.scanner import scan
@@ -546,22 +546,38 @@ def test_многострочное_описание_в_json(tmp_path: Path):
     assert node.acceptance == ["studio: description end"]
 
 
-def test_создатель_snake_и_занятое_имя(tmp_path: Path):
+def test_план_создаёт_скелеты_и_проверяет_занятое_имя(tmp_path: Path):
     _base_project(tmp_path)
-    created = create_metadata_files(
-        {"nodes": [{"kind": "scenario", "name": "HTTPServer"}]}, read_env(tmp_path)
+    result = create_plan(
+        {
+            "title": "HTTPServer",
+            "slug": "httpserver",
+            "description": "Поднимает сервер.",
+            "uses_db": False,
+            "with_test": False,
+        },
+        read_env(tmp_path),
     )
-    assert created[0].path.endswith("http_server.py")
+    assert result.created[0].path == "app/api/v1/routes/httpserver.py"
     with pytest.raises(CreateError, match="занято"):
-        plan_creation(
-            {"nodes": [{"kind": "endpoint", "name": "create_order"}]}, read_env(tmp_path)
+        create_plan(
+            {
+                "title": "Создать заказ",
+                "slug": "create_order",
+                "description": "Создаёт.",
+                "uses_db": False,
+                "with_test": False,
+            },
+            read_env(tmp_path),
         )
 
 
-def test_создатель_откатывает_файлы(tmp_path: Path, monkeypatch):
+def test_план_откатывает_файлы(tmp_path: Path, monkeypatch):
     _base_project(tmp_path)
     calls = {"count": 0}
-    original = atomic_write
+    import studio.creator.plan as plan_module
+
+    original = plan_module.atomic_write
 
     def failing(path, text):
         calls["count"] += 1
@@ -569,21 +585,20 @@ def test_создатель_откатывает_файлы(tmp_path: Path, monk
             return False
         return original(path, text)
 
-    import studio.creator as creator_module
-
-    monkeypatch.setattr(creator_module, "atomic_write", failing)
+    monkeypatch.setattr(plan_module, "atomic_write", failing)
     with pytest.raises(CreateError):
-        create_metadata_files(
+        create_plan(
             {
-                "nodes": [
-                    {"kind": "scenario", "name": "NewOne"},
-                    {"kind": "model", "name": "NewTwo"},
-                ]
+                "title": "Новый сценарий",
+                "slug": "new_one",
+                "description": "Описание.",
+                "uses_db": False,
+                "with_test": True,
             },
             read_env(tmp_path),
         )
+    assert not (tmp_path / "app/api/v1/routes/new_one.py").exists()
     assert not (tmp_path / "app/scenarios/new_one.py").exists()
-    assert not (tmp_path / "models_new_two.py").exists()
 
 
 # --------------------------------------------------------------------- WP6

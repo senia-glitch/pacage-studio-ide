@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from studio.creator import CreateError, create_metadata_files, plan_creation
+from studio.creator import CreateError
 from studio.creator.plan import (
     create_plan,
     delete_plan,
@@ -365,46 +365,3 @@ def test_update_и_delete_чистые_функции(demo: Path):
     assert result.slug == "cancel_order"
 
 
-# ---------------------------------------------------------- старый создатель
-
-
-def test_старый_создатель_не_глотает_сбой_скана(demo: Path, monkeypatch):
-    import studio.scanner as scanner_module
-
-    monkeypatch.setattr(
-        scanner_module, "scan", lambda root: (_ for _ in ()).throw(RuntimeError("нет доступа"))
-    )
-    with pytest.raises(CreateError, match="Не удалось проверить занятость имён:"):
-        plan_creation({"nodes": [{"kind": "scenario", "name": "NewOne"}]}, read_env(demo))
-
-
-def test_старый_скелет_ровно_одна_todo_строка(demo: Path):
-    created = create_metadata_files(
-        {"nodes": [{"kind": "scenario", "name": "NewScenario"}]}, read_env(demo)
-    )
-    text = (demo / created[0].path).read_text(encoding="utf-8")
-    assert text == "# TODO: scenario NewScenario\n"
-
-
-def test_старый_скелет_остаётся_планом_без_кода(demo: Path):
-    create_metadata_files(
-        {
-            "nodes": [
-                {
-                    "kind": "endpoint",
-                    "name": "refund_order",
-                    "details": {"http_method": "post", "path": "/refund"},
-                }
-            ]
-        },
-        read_env(demo),
-    )
-    graph = scan(demo)
-    endpoint = next(
-        node
-        for node in graph.nodes
-        if node.kind == "endpoint"
-        and node.details.get("function_name") == "refund_order"
-    )
-    assert endpoint.planned is True
-    assert endpoint.line == 0

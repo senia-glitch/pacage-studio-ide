@@ -1,11 +1,11 @@
-﻿import {api, studioToken} from "./api.js";
+import {api, studioToken} from "./api.js";
 import {
   $, S, applyGraph, applyTransform, flushPending, hooks, initEditorChoice, initSearch,
   initUiStorage, modal, openEditorForNode, openPalette, persistNow, schedulePersist, setTab, showAbout,
   setLive, startLive, toast,
 } from "./core.js";
 import {refreshBriefStatus, scheduleBriefStatus, updateBriefBadge, initTodoChip} from "./briefview.js";
-import {renderCreate, renderCreateGraph, submitCreate} from "./createview.js";
+import {renderCreate} from "./createview.js";
 import {openDiagnostics, updateDiagBadge} from "./diagnosticsview.js";
 import {renderInspector, saveMetadata} from "./inspectorview.js";
 import {renderMap} from "./mapview.js";
@@ -22,9 +22,8 @@ hooks.updateDiagBadge = updateDiagBadge;
 hooks.saveMetadata = saveMetadata;
 
 function activeView(){
-  if(S.tab==="map")return{view:S.mapView,id:"mapView",canvas:$("mapCanvas")};
   if(S.tab==="scenario")return{view:S.scenView,id:"scenView",canvas:$("scenCanvas")};
-  return{view:S.createView,id:"createView",canvas:$("createCanvas")};
+  return{view:S.mapView,id:"mapView",canvas:$("mapCanvas")};
 }
 async function boot(){
   try{
@@ -40,7 +39,6 @@ async function boot(){
   document.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
   bindViewport("mapCanvas",S.mapView,()=>applyTransform("mapView",S.mapView));
   bindViewport("scenCanvas",S.scenView,()=>applyTransform("scenView",S.scenView));
-  bindViewport("createCanvas",S.createView,()=>applyTransform("createView",S.createView));
   $("scenCanvas").addEventListener("click",ev=>{
     if(S.tab!=="scenario")return;
     if(Date.now()-S.justDraggedAt<250)return;
@@ -78,14 +76,6 @@ async function boot(){
   $("diagBtn").onclick=openDiagnostics;
   initTodoChip();
   if($("logoBtn"))$("logoBtn").onclick=showAbout;
-  $("createClear").onclick=()=>{
-    if(!S.createState.nodes.length)return;
-    if(!confirm("Очистить предпросмотр? Файлы ещё не созданы."))return;
-    S.createState.nodes=[];S.createState.edges=[];S.createState.seq=1;
-    $("createResult").style.display="none";
-    renderCreateGraph();schedulePersist();
-  };
-  $("createSubmit").onclick=submitCreate;
   initSearch();
   updateDiagBadge();
   updateBriefBadge();

@@ -1,4 +1,4 @@
-﻿"""Единственное место чтения файлов проекта.
+"""Единственное место чтения файлов проекта.
 
 `load_source` никогда не бросает исключение: ошибка кодировки, синтаксиса или
 доступа превращается в диагностику, а остальной скан продолжается.
@@ -15,6 +15,7 @@ from pathlib import Path
 from studio._constants import EXCLUDED_DIRS, MAX_SOURCE_BYTES
 from studio.diagnostics import Diagnostic, Sink
 from studio.env import ENV_FILENAME, ProjectEnv, dotted_to_path
+from studio.metadata import metadata_path
 
 BOM = b"\xef\xbb\xbf"
 
@@ -261,6 +262,9 @@ def iter_source_paths(env: ProjectEnv) -> list[Path]:
     env_file = root / ENV_FILENAME
     if env_file.is_file():
         paths.append(env_file)
+    metadata_file = metadata_path(root)
+    if metadata_file.is_file():
+        paths.append(metadata_file)
     unique: dict[str, Path] = {}
     for path in paths:
         try:

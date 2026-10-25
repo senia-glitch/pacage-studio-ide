@@ -3,7 +3,6 @@ import test from "node:test";
 
 import {
   areaSize,
-  inferEdgeKind,
   methodOrder,
   proposedOverlap,
   rectsOverlap,
@@ -26,10 +25,7 @@ test("предложенное пересечение и зоны", () => {
   assert.equal(zoneOverlaps({x: 0, y: 0, w: 10, h: 10}, [{x: 30, y: 30, w: 10, h: 10}], 0), false);
 });
 
-test("порядок методов и тип связи", () => {
+test("порядок методов", () => {
   assert.ok(methodOrder("GET") < methodOrder("POST"));
   assert.equal(methodOrder("BREW"), 99);
-  assert.equal(inferEdgeKind("endpoint", "scenario"), "dispatch");
-  assert.equal(inferEdgeKind("io", "model"), "table");
-  assert.equal(inferEdgeKind("unknown", "unknown"), "uses");
 });

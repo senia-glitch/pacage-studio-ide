@@ -66,21 +66,60 @@
   </section>
   <section class="tab" id="tab-create">
     <div id="createPane">
-      <div class="createbar">
-        <span class="hint">Конструктор создаёт файлы-скелеты с TODO. Описания и связи — в .studio/metadata.json.</span>
-        <span class="spacer"></span>
-        <button id="createClear" type="button">Очистить</button>
-        <button id="createSubmit" class="primary" type="button">Создать</button>
+      <div class="plan-scroll">
+        <form id="planForm" class="plan-form" autocomplete="off">
+          <h3>Новый сценарий</h3>
+          <label class="field">Название
+            <input id="planTitle" name="title" type="text" placeholder="Например: Отмена заказа">
+          </label>
+          <label class="field">Описание сценария
+            <textarea id="planDescription" name="description" rows="7" placeholder="Опишите сценарий целиком, как ТЗ для человека: что происходит, какие данные приходят и возвращаются, что делать при ошибках. Названия функций и классов указывать не нужно."></textarea>
+          </label>
+          <label class="field">Критерии приёмки <span class="hint">— по одной на строку, необязательно</span>
+            <textarea id="planAcceptance" name="acceptance" rows="3" placeholder="Например: заказ помечен как отменённый"></textarea>
+          </label>
+          <label class="field">Домен <span class="hint">— необязательно</span>
+            <input id="planDomain" name="domain" type="text" list="planDomains" placeholder="например orders">
+            <datalist id="planDomains"></datalist>
+          </label>
+          <details id="planMore">
+            <summary>Дополнительно: HTTP-метод, путь, slug и флажки</summary>
+            <div class="plan-more-grid">
+              <label class="field">HTTP-метод
+                <select id="planMethod" name="http_method">
+                  <option value="">не указан</option>
+                  <option value="get">GET</option>
+                  <option value="post">POST</option>
+                  <option value="put">PUT</option>
+                  <option value="patch">PATCH</option>
+                  <option value="delete">DELETE</option>
+                </select>
+              </label>
+              <label class="field">Путь
+                <input id="planPath" name="path" type="text" placeholder="/orders/{id}/cancel">
+              </label>
+              <label class="field">Slug
+                <input id="planSlug" name="slug" type="text" placeholder="выберется из названия">
+              </label>
+            </div>
+            <label class="hint plan-check"><input id="planUsesDb" type="checkbox" checked> Работает с БД — слои io и model</label>
+            <label class="hint plan-check"><input id="planWithTest" type="checkbox" checked> Нужен тест</label>
+          </details>
+          <div class="plan-actions">
+            <button id="planBuild" type="button">Построить цепочку</button>
+            <button id="planCreate" class="primary" type="button" disabled>Создать сценарий</button>
+          </div>
+        </form>
+        <div class="plan-chain-wrap">
+          <h3>Цепочка слоёв</h3>
+          <div id="planChain" class="plan-chain"><p class="hint">Нажмите «Построить цепочку» — слои появятся даже при пустой форме.</p></div>
+          <div id="createResult" class="create-result"></div>
+        </div>
       </div>
-      <div id="createWrap">
-        <div class="canvas" id="createCanvas"><div class="view" id="createView"><div class="stage" id="createStage"><svg class="edges" id="createEdges"></svg></div></div></div>
-        <aside id="createSide">
-          <h3>Связи</h3>
-          <p class="hint">Потяните за точку справа от узла и отпустите на другом узле. Связь пишется в метаданные при создании. Таблицы БД не выбираются — реализации ещё нет.</p>
-          <div id="createEdgeList"></div>
-        </aside>
+      <div class="plans-wrap">
+        <h3>Планы сценариев</h3>
+        <div id="planList" class="plan-list"><p class="hint">Планов пока нет.</p></div>
       </div>
-      <div id="createResult"></div>
     </div>
   </section>
 </main>

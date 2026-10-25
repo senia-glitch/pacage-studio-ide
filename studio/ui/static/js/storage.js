@@ -8,7 +8,7 @@ export function hashText(value) {
 }
 
 export function storageKey(projectRoot) {
-  return `studio:v1:${hashText(projectRoot)}`;
+  return `studio:v2:${hashText(projectRoot)}`;
 }
 
 export function createStorage(store, key) {

@@ -303,8 +303,6 @@ def make_handler(ctx):
                 return self._json(state.plan_update(data))
             if url.path == "/api/plan/delete":
                 return self._json(state.plan_delete(data))
-            if url.path == "/api/create":
-                return self._json(state.create(data))
             if url.path == "/api/brief":
                 return self._json(state.brief(data))
             if url.path == "/api/brief/save":

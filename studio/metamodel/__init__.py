@@ -157,10 +157,22 @@ class PlanLayerState(BaseModel):
 
 
 class PlanState(BaseModel):
-    """Результат resolve_plan: выполнен ли план и чем подтверждён каждый слой."""
+    """Результат resolve_plan: план целиком и состояние каждого слоя.
+
+    Поля плана продублированы здесь, потому что UI и ТЗ работают с графом и
+    не читают metadata.json напрямую.
+    """
 
     slug: str
     status: Literal["done", "partial", "not_done"] = "not_done"
+    title: str = ""
+    description: str = ""
+    acceptance: list[str] = Field(default_factory=list)
+    domain: str = ""
+    http_method: str = ""
+    path: str = ""
+    uses_db: bool = False
+    with_test: bool = False
     layers: list[PlanLayerState] = Field(default_factory=list)
 
 

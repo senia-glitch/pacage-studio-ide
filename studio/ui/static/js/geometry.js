@@ -34,12 +34,4 @@ export function methodOrder(method, order = ["GET", "POST", "PUT", "PATCH", "DEL
   return index < 0 ? 99 : index;
 }
 
-export function inferEdgeKind(fromKind, toKind) {
-  if (fromKind === "endpoint" && toKind === "scenario") return "dispatch";
-  if (fromKind === "scenario" && toKind === "scenario") return "scenario_call";
-  if (fromKind === "scenario" && toKind === "io") return "port_call";
-  if (fromKind === "io" && toKind === "model") return "table";
-  if (fromKind === "test") return "tests";
-  return "uses";
-}
 

@@ -245,7 +245,19 @@ def resolve_plan(graph: Graph, plan: Plan) -> PlanState:
         status = "not_done"
     else:
         status = "partial"
-    return PlanState(slug=plan.slug, status=status, layers=layer_states)
+    return PlanState(
+        slug=plan.slug,
+        status=status,
+        title=plan.title,
+        description=plan.description,
+        acceptance=list(plan.acceptance),
+        domain=plan.domain,
+        http_method=plan.http_method,
+        path=plan.path,
+        uses_db=plan.uses_db,
+        with_test=plan.with_test,
+        layers=layer_states,
+    )
 
 
 __all__ = ["resolve_plan"]

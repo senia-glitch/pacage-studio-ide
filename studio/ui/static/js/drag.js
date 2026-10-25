@@ -3,7 +3,7 @@ function bindDrag(element, handle, view, onMove, onEnd, hooks = {}) {
   handle.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
     if (element.classList.contains("dragging")) return;
-    if (event.target.closest("button,input,select,textarea,.connector,.no-drag")) return;
+    if (event.target.closest("button,input,select,textarea,.no-drag")) return;
     event.preventDefault();
     event.stopPropagation();
     try {

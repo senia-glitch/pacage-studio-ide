@@ -187,29 +187,6 @@ def test_неизвестный_узел_404(demo: Path):
     assert data["error"]["code"] == "node_not_found"
 
 
-def test_создание_файлов_через_api(demo: Path):
-    payload = {
-        "nodes": [
-            {"kind": "scenario", "name": "NewScenario", "description": "Описание."},
-            {"kind": "model", "name": "NewModel", "description": "Модель."},
-        ],
-        "edges": [{"from": "NewScenario", "to": "NewModel", "kind": "uses"}],
-    }
-    with _Server(demo) as srv:
-        status, data = srv.post("/api/create", payload)
-    assert status == 200
-    assert len(data["created"]) == 2
-    assert all((demo / item["path"]).is_file() for item in data["created"])
-    assert data["graph"]["version"] == 7
-
-
-def test_невалидное_создание_409(demo: Path):
-    with _Server(demo) as srv:
-        status, data = srv.post("/api/create", {"nodes": []})
-    assert status == 409
-    assert data["error"]["code"] == "create_rejected"
-
-
 def test_rescan_и_etag(demo: Path):
     with _Server(demo) as srv:
         status, data = srv.post("/api/rescan", {})

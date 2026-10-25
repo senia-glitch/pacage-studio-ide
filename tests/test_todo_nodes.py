@@ -1,42 +1,82 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from studio.creator import create_metadata_files
-from studio.env import read_env
 from studio.metadata import read_metadata, write_metadata
 from studio.scanner import scan
 
+ENDPOINT = "endpoint:app/api/v1/routes/refund_order.py:refund_order"
+SCENARIO = "scenario:app/scenarios/refund_order.py:RefundOrderScenario"
+IO = "io:app/scenarios/refund_order.py:RefundOrderScenario._db.read#1"
+MODEL = "model:models_refund.py:Refund"
+TEST = "test:tests/test_refund.py:test_refund"
+
 
 def build_todo_matrix(root: Path) -> None:
-    payload = {
-        "nodes": [
-            {
+    meta = {
+        "version": 1,
+        "nodes": {
+            ENDPOINT: {
                 "kind": "endpoint",
                 "name": "refund_order",
+                "file_path": "app/api/v1/routes/refund_order.py",
+                "target_file": "app/api/v1/routes/refund_order.py",
                 "description": "Возврат.",
-                "details": {"http_method": "", "path": ""},
+                "planned": True,
+                "details": {"function_name": "refund_order", "http_method": "", "path": ""},
             },
-            {
+            SCENARIO: {
                 "kind": "scenario",
                 "name": "RefundOrderScenario",
+                "file_path": "app/scenarios/refund_order.py",
+                "target_file": "app/scenarios/refund_order.py",
                 "description": "Сценарий возврата.",
+                "planned": True,
+                "details": {"class_name": "RefundOrderScenario", "name": "refund_order"},
             },
-            {
+            IO: {
                 "kind": "io",
                 "name": "read",
-                "details": {"scenario_class": "RefundOrderScenario", "method": "read"},
+                "file_path": "app/scenarios/refund_order.py",
+                "target_file": "app/scenarios/refund_order.py",
+                "description": "",
+                "planned": True,
+                "details": {
+                    "method": "read",
+                    "scenario_class": "RefundOrderScenario",
+                    "table": "refund",
+                },
             },
-            {"kind": "model", "name": "Refund", "description": ""},
-            {"kind": "test", "name": "test_refund", "description": ""},
-        ],
+            MODEL: {
+                "kind": "model",
+                "name": "Refund",
+                "file_path": "models_refund.py",
+                "target_file": "models_refund.py",
+                "description": "",
+                "planned": True,
+                "details": {"class_name": "Refund", "tablename": "refund"},
+            },
+            TEST: {
+                "kind": "test",
+                "name": "test_refund",
+                "file_path": "tests/test_refund.py",
+                "target_file": "tests/test_refund.py",
+                "description": "",
+                "planned": True,
+                "details": {"test_name": "test_refund"},
+            },
+        },
         "edges": [
-            {"from": "refund_order", "to": "RefundOrderScenario", "kind": "dispatch"},
-            {"from": "RefundOrderScenario", "to": "read", "kind": "port_call"},
-            {"from": "read", "to": "Refund", "kind": "table"},
+            {"from": ENDPOINT, "to": SCENARIO, "kind": "dispatch"},
+            {"from": SCENARIO, "to": IO, "kind": "port_call"},
+            {"from": IO, "to": MODEL, "kind": "table"},
         ],
     }
-    create_metadata_files(payload, read_env(root))
+    (root / ".studio").mkdir(exist_ok=True)
+    (root / ".studio/metadata.json").write_text(
+        json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 def test_all_planned_nodes_present_in_matrix(demo: Path):
@@ -66,6 +106,7 @@ def test_plan_replaced_by_code_reduces_counter(demo: Path):
     scenario = next(node for node in graph.nodes if node.label == "RefundOrderScenario")
     before = endpoint.todo_downstream
     target = demo / scenario.file_path
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
         "from core import BaseScenario, register_scenario\n\n"
         '@register_scenario("RefundOrderScenario")\n'
