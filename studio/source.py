@@ -178,7 +178,9 @@ def _is_inside(root: Path, base: Path) -> bool:
     return base_resolved == root_resolved or root_resolved in base_resolved.parents
 
 
-def module_files(root: Path, dotted: str) -> list[Path]:
+def module_files(
+    root: Path, dotted: str, errors: list[OSError] | None = None
+) -> list[Path]:
     """Dotted-путь → .py-файлы пакета/модуля без захода в служебные каталоги."""
     root = Path(root)
     base = dotted_to_path(root, dotted)
@@ -186,7 +188,9 @@ def module_files(root: Path, dotted: str) -> list[Path]:
         return []
     if base.is_dir():
         out: list[Path] = []
-        for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
+        for dirpath, dirnames, filenames in os.walk(
+            base, followlinks=False, onerror=errors.append if errors is not None else None
+        ):
             dirnames[:] = sorted(
                 name
                 for name in dirnames
@@ -228,12 +232,14 @@ def models_files(env: ProjectEnv) -> list[Path]:
     return [path for path in env.models_paths if path.is_file()]
 
 
-def tests_files(root: Path) -> list[Path]:
+def tests_files(root: Path, errors: list[OSError] | None = None) -> list[Path]:
     tests_dir = Path(root) / "tests"
     if not tests_dir.is_dir():
         return []
     out: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(tests_dir, followlinks=False):
+    for dirpath, dirnames, filenames in os.walk(
+        tests_dir, followlinks=False, onerror=errors.append if errors is not None else None
+    ):
         dirnames[:] = sorted(
             name for name in dirnames if name not in EXCLUDED_DIRS and not name.startswith(".")
         )
@@ -291,12 +297,34 @@ def stat_fingerprint(env: ProjectEnv) -> tuple[tuple[str, int, int], ...]:
 
 def load_sources(env: ProjectEnv, sink: Sink | None = None) -> SourceSet:
     root = Path(env.project_root).resolve()
+    walk_errors: list[OSError] = []
     normal_paths = [
-        *module_files(root, env.routes_package),
-        *module_files(root, env.core_discover),
+        *module_files(root, env.routes_package, walk_errors),
+        *module_files(root, env.core_discover, walk_errors),
         *models_files(env),
-        *tests_files(root),
+        *tests_files(root, walk_errors),
     ]
+    if sink is not None:
+        seen_errors: set[str] = set()
+        for exc in walk_errors:
+            filename = str(getattr(exc, "filename", "") or "")
+            if filename in seen_errors:
+                continue
+            seen_errors.add(filename)
+            try:
+                rel = (
+                    Path(filename).resolve().relative_to(root).as_posix()
+                    if filename
+                    else ""
+                )
+            except (OSError, ValueError):
+                rel = filename
+            sink.add(
+                "W_DIR_UNREADABLE",
+                f"Каталог пропущен: {exc}",
+                file=rel,
+                hint="Проверьте права доступа к каталогу; остальной проект просканирован.",
+            )
     readonly_paths = [
         *(root / rel for rel in ("main.py", "app/main.py") if (root / rel).is_file()),
         *package_init_files(root, env.routes_package),

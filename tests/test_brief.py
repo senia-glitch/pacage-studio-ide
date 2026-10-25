@@ -461,7 +461,10 @@ class _Server:
             with urllib.request.urlopen(request, timeout=10) as response:
                 return response.status, json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            return exc.code, json.loads(exc.read().decode("utf-8"))
+            try:
+                return exc.code, json.loads(exc.read().decode("utf-8"))
+            finally:
+                exc.close()
 
 
 def test_api_brief_и_токен(demo: Path):
@@ -475,7 +478,10 @@ def test_api_brief_и_токен(demo: Path):
         try:
             urllib.request.urlopen(request, timeout=10)
         except urllib.error.HTTPError as exc:
-            assert exc.code == 403
+            try:
+                assert exc.code == 403
+            finally:
+                exc.close()
         else:
             raise AssertionError("ожидался 403")
         status, data = server.post("/api/brief", {"map": "none"})

@@ -127,15 +127,19 @@ async function openBriefDialog(options={}){
   S.briefPreview=preview;
   let currentMarkdown="";
   let currentPath=".studio/agent-brief.md";
+  let generateToken=0;
+  let saving=false;
   const collect=()=>{
     const chosen=[...overlay.querySelectorAll('#briefNodes input[data-bid]:checked')].map(input=>input.dataset.bid);
     const chosenPlans=[...overlay.querySelectorAll('#briefPlans input[data-plan]:checked')].map(input=>input.dataset.plan);
     return briefRequest({selected:chosen,plans:chosenPlans,map:mapSelect.value,includeEmpty:includeEmptyValue});
   };
   const generate=async()=>{
+    const token=++generateToken;
     statsBox.textContent="Собираю ТЗ…";
     try{
       const data=await api("/api/brief","POST",collect());
+      if(token!==generateToken)return;
       currentMarkdown=data.markdown||"";
       S.briefLast=data;
       preview.textContent=currentMarkdown;
@@ -151,6 +155,7 @@ async function openBriefDialog(options={}){
       }
       updateBriefBadge();
     }catch(e){
+      if(token!==generateToken)return;
       statsBox.textContent="Ошибка: "+e.message;
     }
   };
@@ -198,6 +203,10 @@ async function openBriefDialog(options={}){
     setTimeout(()=>URL.revokeObjectURL(link.href),1000);
   };
   overlay.querySelector("#briefSave").onclick=async()=>{
+    if(saving)return;
+    saving=true;
+    const button=overlay.querySelector("#briefSave");
+    if(button)button.disabled=true;
     try{
       const data=await api("/api/brief/save","POST",collect());
       currentPath=data.path||currentPath;
@@ -207,6 +216,10 @@ async function openBriefDialog(options={}){
         updateBriefBadge();
       }
     }catch(e){toast("Ошибка сохранения ТЗ: "+e.message)}
+    finally{
+      saving=false;
+      if(button)button.disabled=false;
+    }
   };
   overlay.querySelector("#briefClose").onclick=()=>{clearTimeout(overlay._timer);overlay.remove()};
   await generate();

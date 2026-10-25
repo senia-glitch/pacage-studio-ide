@@ -17,6 +17,7 @@ CODES: dict[str, str] = {
     "E_SYNTAX": "файл не разбирается как Python",
     "E_INTERNAL": "внутренний сбой фазы скана",
     "W_FILE_TOO_BIG": "файл больше лимита и пропущен",
+    "W_DIR_UNREADABLE": "каталог не читается и пропущен",
     "W_ENV_INVALID": "некорректная переменная .env.fastbase",
     "W_NO_ROUTES": "пакет роутов не найден",
     "W_NO_SCENARIOS": "пакет сценариев не найден",

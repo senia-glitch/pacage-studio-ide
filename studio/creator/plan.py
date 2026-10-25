@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -19,7 +18,9 @@ from studio.diagnostics import Sink, code_level
 from studio.env import ProjectEnv
 from studio.metadata import (
     MetadataError,
+    metadata_hash,
     metadata_path,
+    metadata_payload,
     read_metadata,
     write_metadata,
 )
@@ -388,8 +389,19 @@ def _missing_dirs(root: Path, paths: list[Path]) -> list[Path]:
     return missing
 
 
-def _restore_metadata(root: Path, backup: bytes | None) -> list[str]:
+def _restore_metadata(
+    root: Path, backup: bytes | None, expected: bytes | None = None
+) -> list[str]:
     path = metadata_path(root)
+    if expected is not None:
+        try:
+            current = path.read_bytes() if path.is_file() else None
+        except OSError as exc:
+            return [f"{path}: {exc}"]
+        if current != expected:
+            # Файл уже изменили (другая вкладка/IDE) — чужую правку не затираем.
+            slog.step(f"откат плана: metadata.json изменён, откат не выполнен ({path})")
+            return []
     if backup is None:
         try:
             if path.is_file():
@@ -414,6 +426,7 @@ def _rollback(
     written: list[Path],
     backup: bytes | None,
     created_dirs: list[Path],
+    expected_metadata: bytes | None = None,
 ) -> list[str]:
     failures: list[str] = []
     for target in reversed(written):
@@ -423,10 +436,12 @@ def _rollback(
             pass
         except OSError as exc:
             failures.append(f"{target}: {exc}")
-    failures.extend(_restore_metadata(root, backup))
+    failures.extend(_restore_metadata(root, backup, expected_metadata))
     for directory in sorted(created_dirs, key=lambda item: len(item.parts), reverse=True):
-        with contextlib.suppress(OSError):
+        try:
             directory.rmdir()
+        except OSError as exc:
+            slog.step(f"откат плана: каталог не удалён ({directory}): {exc}")
     if failures:
         slog.step("откат плана: " + "; ".join(failures))
     return failures
@@ -439,6 +454,7 @@ def create_plan(data, env: ProjectEnv) -> PlanResult:
         raise CreateError("нужно название сценария", "W_PLAN_INVALID")
     root = Path(env.project_root).resolve()
     graph = _scan(env)
+    stamp = metadata_hash(root)
     metadata, issues = _metadata_problems(root)
     issues.extend(_plan_conflicts(plan, env, metadata, graph))
     if issues:
@@ -454,6 +470,7 @@ def create_plan(data, env: ProjectEnv) -> PlanResult:
     created_dirs = _missing_dirs(root, [target for target, _ in targets] + [metadata_file])
 
     written: list[Path] = []
+    expected_metadata: bytes | None = None
     try:
         for target, content in targets:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -478,12 +495,19 @@ def create_plan(data, env: ProjectEnv) -> PlanResult:
                 metadata.edges.append(edge)
                 known.add(key)
         metadata.plans[plan.slug] = plan
+        expected_metadata = metadata_payload(metadata).encode("utf-8")
+        if metadata_hash(root) != stamp:
+            raise CreateError(
+                "metadata.json изменили из другой вкладки или IDE — "
+                "повторите создание плана",
+                "W_METADATA_INVALID",
+            )
         if not write_metadata(root, metadata):
             raise CreateError(
                 "не удалось записать .studio/metadata.json", "not_writable"
             )
     except (CreateError, OSError, MetadataError) as exc:
-        failures = _rollback(root, written, backup, created_dirs)
+        failures = _rollback(root, written, backup, created_dirs, expected_metadata)
         if not failures:
             if isinstance(exc, CreateError):
                 raise
@@ -534,6 +558,7 @@ def update_plan(data, env: ProjectEnv) -> Plan:
     """Изменить описание, критерии, домен, метод и путь; слои и файлы не трогать."""
     slug = _require_slug(data)
     root = Path(env.project_root).resolve()
+    stamp = metadata_hash(root)
     metadata, issues = _metadata_problems(root)
     if issues:
         raise CreateError(issues[0]["message"], issues[0]["code"])
@@ -561,6 +586,11 @@ def update_plan(data, env: ProjectEnv) -> Plan:
 
     metadata.plans[slug] = updated
     _sync_planned_nodes(metadata, updated)
+    if metadata_hash(root) != stamp:
+        raise CreateError(
+            "metadata.json изменили из другой вкладки или IDE — повторите правку",
+            "W_METADATA_INVALID",
+        )
     if not write_metadata(root, metadata):
         raise CreateError("не удалось записать .studio/metadata.json", "not_writable")
     return updated
@@ -575,6 +605,7 @@ def delete_plan(data, env: ProjectEnv) -> PlanDeleteResult:
     """Удалить план, его planned-узлы и рёбра; скелеты — только нетронутые."""
     slug = _require_slug(data)
     root = Path(env.project_root).resolve()
+    stamp = metadata_hash(root)
     metadata, issues = _metadata_problems(root)
     if issues:
         raise CreateError(issues[0]["message"], issues[0]["code"])
@@ -601,6 +632,11 @@ def delete_plan(data, env: ProjectEnv) -> PlanDeleteResult:
             kept_edges.append(edge)
     metadata.edges = kept_edges
     del metadata.plans[slug]
+    if metadata_hash(root) != stamp:
+        raise CreateError(
+            "metadata.json изменили из другой вкладки или IDE — повторите удаление",
+            "W_METADATA_INVALID",
+        )
     if not write_metadata(root, metadata):
         raise CreateError("не удалось записать .studio/metadata.json", "not_writable")
 

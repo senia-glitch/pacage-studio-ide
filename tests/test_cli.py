@@ -150,6 +150,44 @@ def test_несуществующий_проект_код_2(capsys):
     assert "не найден" in out.lower()
 
 
+def test_пустой_проект_понятная_диагностика(tmp_path: Path, capsys):
+    assert cli.main(["scan", "--project", str(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    assert "I_EMPTY_PROJECT" in out
+    assert "Traceback" not in out
+
+
+def test_занятый_порт_код_1_без_трейсбека(demo: Path, monkeypatch, capsys):
+    from studio.server import PortInUse
+
+    def busy(*_args, **_kwargs):
+        raise PortInUse("Порт занят. Укажите другой: studio dev --port 8800")
+
+    monkeypatch.setattr(cli, "serve", busy)
+    assert cli.main(["dev", "--project", str(demo)]) == 1
+    out = capsys.readouterr().out
+    assert "Порт занят" in out
+    assert "Traceback" not in out
+
+
+def test_ctrl_c_код_1_без_трейсбека(demo: Path, monkeypatch, capsys):
+    def interrupted(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "serve", interrupted)
+    assert cli.main(["dev", "--project", str(demo)]) == 1
+    out = capsys.readouterr().out
+    assert "Остановлено" in out
+    assert "Traceback" not in out
+
+
+def test_brief_json_только_json(demo: Path, capsys):
+    assert cli.main(["brief", "--project", str(demo), "--map", "none", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert "markdown" in data
+    assert "brief_id" in data
+
+
 def test_поиск_корня_вверх(demo: Path, monkeypatch):
     nested = demo / "app" / "scenarios"
     monkeypatch.chdir(nested)

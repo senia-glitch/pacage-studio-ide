@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import json
 import threading
 import urllib.error
@@ -9,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from studio._constants import MAX_HTTP_BODY
 from studio.server import Ctx, make_handler
 
 
@@ -43,7 +45,10 @@ class _Server:
             with urllib.request.urlopen(request, timeout=10) as response:
                 return response.status, json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            return exc.code, json.loads(exc.read().decode("utf-8"))
+            try:
+                return exc.code, json.loads(exc.read().decode("utf-8"))
+            finally:
+                exc.close()
 
     def __enter__(self):
         self.thread.start()
@@ -79,7 +84,10 @@ def test_api_граф_требует_токен(demo: Path):
         try:
             srv.get("/api/graph")
         except urllib.error.HTTPError as exc:
-            assert exc.code == 403
+            try:
+                assert exc.code == 403
+            finally:
+                exc.close()
         else:
             raise AssertionError("ожидался 403")
         with srv.get("/api/graph", {"X-Studio-Token": srv.token}) as response:
@@ -148,7 +156,10 @@ def test_безопасность_запросов(demo: Path):
         try:
             urllib.request.urlopen(request, timeout=10)
         except urllib.error.HTTPError as exc:
-            assert exc.code == 403
+            try:
+                assert exc.code == 403
+            finally:
+                exc.close()
         status, data = srv.post("/api/rescan", {}, headers={"Content-Type": "text/plain"})
         assert status == 415
         request = urllib.request.Request(
@@ -160,8 +171,11 @@ def test_безопасность_запросов(demo: Path):
         try:
             urllib.request.urlopen(request, timeout=10)
         except urllib.error.HTTPError as exc:
-            assert exc.code == 400
-            assert json.loads(exc.read().decode("utf-8"))["error"]["code"] == "bad_json"
+            try:
+                assert exc.code == 400
+                assert json.loads(exc.read().decode("utf-8"))["error"]["code"] == "bad_json"
+            finally:
+                exc.close()
         request = urllib.request.Request(
             srv.url + "/api/state",
             headers={"X-Studio-Token": srv.token, "Origin": "http://evil.example"},
@@ -169,7 +183,10 @@ def test_безопасность_запросов(demo: Path):
         try:
             urllib.request.urlopen(request, timeout=10)
         except urllib.error.HTTPError as exc:
-            assert exc.code == 403
+            try:
+                assert exc.code == 403
+            finally:
+                exc.close()
 
 
 def test_нет_обхода_статики(demo: Path):
@@ -202,7 +219,10 @@ def test_rescan_и_etag(demo: Path):
         try:
             urllib.request.urlopen(request, timeout=10)
         except urllib.error.HTTPError as exc:
-            assert exc.code == 304
+            try:
+                assert exc.code == 304
+            finally:
+                exc.close()
         else:
             raise AssertionError("ожидался 304")
 
@@ -216,8 +236,11 @@ def test_чужой_host_403(demo: Path):
         try:
             urllib.request.urlopen(request, timeout=10)
         except urllib.error.HTTPError as exc:
-            assert exc.code == 403
-            assert json.loads(exc.read().decode("utf-8"))["error"]["code"] == "bad_host"
+            try:
+                assert exc.code == 403
+                assert json.loads(exc.read().decode("utf-8"))["error"]["code"] == "bad_host"
+            finally:
+                exc.close()
         else:
             raise AssertionError("ожидался 403")
 
@@ -229,18 +252,17 @@ def test_выбор_свободного_порта(demo: Path):
 
     probe = socket.socket()
     try:
-        probe.bind(("127.0.0.1", 8777))
-    except OSError:
-        pytest.skip("порт 8777 уже занят другим процессом")
-    probe.listen(1)
-    try:
+        probe.bind(("127.0.0.1", 0))
+        busy_port = probe.getsockname()[1]
+        probe.listen(1)
         server = _bind("127.0.0.1", None, make_handler(Ctx(demo)))
         try:
-            assert server.server_address[1] >= 8778
+            assert isinstance(server.server_address[1], int)
+            assert server.server_address[1] != busy_port
         finally:
             server.server_close()
         with pytest.raises(PortInUse):
-            _bind("127.0.0.1", 8777, make_handler(Ctx(demo)))
+            _bind("127.0.0.1", busy_port, make_handler(Ctx(demo)))
     finally:
         probe.close()
 
@@ -251,6 +273,64 @@ def test_state_отдаёт_окружение(demo: Path):
     assert data["revision"] >= 1
     assert data["env"]["routes_package"] == "app.api.v1.routes"
     assert data["env"]["counts"]["endpoints"] == 3
+
+
+def _raw_post(srv: _Server, headers: dict, body: bytes = b"") -> tuple[int, bytes]:
+    host, port = srv.http.server_address[:2]
+    connection = http.client.HTTPConnection(host, port, timeout=10)
+    connection.putrequest("POST", "/api/rescan")
+    for key, value in {"X-Studio-Token": srv.token, **headers}.items():
+        connection.putheader(key, value)
+    connection.endheaders()
+    if body:
+        connection.send(body)
+    response = connection.getresponse()
+    try:
+        data = response.read()
+        return response.status, data
+    finally:
+        response.close()
+        connection.close()
+
+
+def test_тело_больше_лимита_413(demo: Path):
+    with _Server(demo) as srv:
+        status, raw = _raw_post(
+            srv,
+            {
+                "Content-Type": "application/json",
+                "Content-Length": str(MAX_HTTP_BODY + 1),
+            },
+        )
+    assert status == 413
+    assert json.loads(raw.decode("utf-8"))["error"]["code"] == "body_too_large"
+
+
+@pytest.mark.parametrize("length", ["nope", "-1"])
+def test_неверный_content_length_400(demo: Path, length: str):
+    with _Server(demo) as srv:
+        status, raw = _raw_post(
+            srv,
+            {"Content-Type": "application/json", "Content-Length": length},
+        )
+    assert status == 400
+    assert json.loads(raw.decode("utf-8"))["error"]["code"] == "bad_length"
+
+
+def test_неизвестный_маршрут_404_без_трейсбека(demo: Path):
+    with _Server(demo) as srv:
+        status, data = srv.post("/api/nope", {})
+    assert status == 404
+    assert data["error"]["code"] == "not_found"
+    assert "Traceback" not in json.dumps(data)
+
+
+def test_сравнение_токена_через_hmac():
+    from studio.server.security import token_ok
+
+    assert token_ok("abc", "abc")
+    assert not token_ok("abc", "abd")
+    assert not token_ok("", "x")
 
 
 def test_правка_файла_поднимает_ревизию(demo: Path):

@@ -25,6 +25,8 @@ from studio.metamodel import Node, normalize_domain
 METADATA_VERSION = 2
 STUDIO_DIR = ".studio"
 METADATA_NAME = "metadata.json"
+# Ключи, которые читаются из metadata.json. file_path остаётся для чтения
+# старых «жирных» записей; при сохранении узла запись становится компактной.
 ALLOWED_FIELDS = (
     "kind",
     "name",
@@ -54,9 +56,7 @@ class MetadataError(Exception):
 @dataclass
 class SaveResult:
     changed: bool
-    removed_orphans: list[dict] = field(default_factory=list)
     new_hash: str = ""
-    undo_id: str | None = None
 
 
 @dataclass
@@ -151,15 +151,16 @@ def read_metadata(project_root: Path, sink: Sink | None = None) -> Metadata:
                 file=f"{STUDIO_DIR}/{METADATA_NAME}",
                 hint="Исправьте JSON или удалите файл — он будет создан заново.",
             )
-        return Metadata()
+        return Metadata(version=METADATA_VERSION, write_blocked=True)
     if not isinstance(raw, dict):
         if sink is not None:
             sink.add(
                 "W_METADATA_INVALID",
                 "metadata.json: в корне должен быть объект JSON",
                 file=f"{STUDIO_DIR}/{METADATA_NAME}",
+                hint="Исправьте форму файла — запись остановлена, файл не изменяется.",
             )
-        return Metadata()
+        return Metadata(version=METADATA_VERSION, write_blocked=True)
     raw_version = raw.get("version")
     version = 1 if raw_version is None else raw_version
     if not isinstance(version, int) or version < 1:
@@ -258,30 +259,83 @@ def metadata_payload(metadata: Metadata) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False) + "\n"
 
 
-def write_metadata(project_root: Path, metadata: Metadata) -> bool:
-    """Атомарно записать metadata.json. False — запись не удалась или запрещена."""
+def metadata_hash(project_root: Path) -> str | None:
+    """Хэш текущего metadata.json (None — файла нет)."""
+    return _file_hash(metadata_path(project_root))
+
+
+def _file_hash(path: Path) -> str | None:
+    """Хэш байтов файла или None, если файла нет. OSError — MetadataError."""
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise MetadataError(
+            "not_writable", f"metadata.json не читается для сверки: {exc}"
+        ) from exc
+    return hashlib.sha1(raw).hexdigest()
+
+
+def write_metadata(
+    project_root: Path, metadata: Metadata, expected_hash: str | None = None
+) -> bool:
+    """Атомарно записать metadata.json. False — запись не удалась или запрещена.
+
+    `expected_hash` — хэш файла на момент чтения. Если файл уже изменили,
+    запись не выполняется: чужая правка не затирается.
+    """
     if metadata.write_blocked:
         return False
     path = metadata_path(project_root)
+    if expected_hash is not None and _file_hash(path) != expected_hash:
+        return False
     path.parent.mkdir(parents=True, exist_ok=True)
     return atomic_write(path, metadata_payload(metadata))
 
 
-def _record_for_node(node: Node) -> dict:
+def _node_name(node: Node) -> str:
     details = dict(node.details or {})
-    return {
+    return str(
+        details.get("function_name")
+        or details.get("class_name")
+        or details.get("test_name")
+        or details.get("name")
+        or details.get("method")
+        or node.label
+    )
+
+
+def _record_for_node(
+    node: Node,
+    description: str,
+    acceptance: list[str],
+    domain: str,
+    existing: dict | None = None,
+) -> dict:
+    """Компактная запись узла: только то, что не вычисляет сканер.
+
+    Существующий узел: kind, name, description, acceptance, domain.
+    У не-endpoint домен всегда пустой (наследуется сканером).
+    Планируемый: то же + planned, target_file и details — ввод пользователя
+    при создании, а не вычисленное сканером.
+    """
+    existing = existing or {}
+    record: dict = {
         "kind": node.kind,
-        "name": str(details.get("function_name") or details.get("class_name")
-                    or details.get("test_name") or details.get("name")
-                    or details.get("method") or node.label),
-        "file_path": node.file_path,
-        "target_file": node.file_path,
-        "details": details,
-        "description": node.description or "",
-        "acceptance": list(node.acceptance or []),
-        "domain": node.domain if node.kind == "endpoint" else "",
-        "planned": bool(node.planned),
+        "name": str(existing.get("name") or "") or _node_name(node),
+        "description": description.strip(),
+        "acceptance": [str(item).strip() for item in acceptance if str(item).strip()],
     }
+    record["domain"] = normalize_domain(domain) if node.kind == "endpoint" else ""
+    if node.planned:
+        record["planned"] = True
+        record["target_file"] = str(
+            existing.get("target_file") or existing.get("file_path") or node.file_path
+        )
+        details = existing.get("details")
+        record["details"] = dict(details) if isinstance(details, dict) else {}
+    return record
 
 
 def save_node_metadata(
@@ -291,33 +345,54 @@ def save_node_metadata(
     acceptance: list[str],
     domain: str,
 ) -> SaveResult:
-    """Сохранить описание/критерии/домен узла в metadata.json."""
+    """Сохранить описание/критерии/домен узла в metadata.json.
+
+    Запись компактная: без file_path и вычисляемых details. Старая «жирная»
+    запись этого же узла худеет при сохранении; остальные записи не меняются.
+
+    Между процессами — сверка хэша: если файл изменили, пока мы считали,
+    один раз перечитываем его и применяем правку заново.
+    """
+    path = metadata_path(project_root)
+    baseline = _file_hash(path)
     metadata = read_metadata(project_root)
-    record = dict(metadata.nodes.get(node.id) or _record_for_node(node))
-    record.update(
-        {
-            "kind": node.kind,
-            "file_path": node.file_path,
-            "description": description.strip(),
-            "acceptance": [str(item).strip() for item in acceptance if str(item).strip()],
-            "planned": bool(node.planned),
-        }
-    )
-    if not record.get("name"):
-        record["name"] = _record_for_node(node)["name"]
-    if not record.get("target_file"):
-        record["target_file"] = node.file_path
-    record["domain"] = normalize_domain(domain) if node.kind == "endpoint" else ""
-    record.setdefault("details", dict(node.details or {}))
-    if record["kind"] == "endpoint":
-        endpoint_details = dict(record.get("details") or {})
-        endpoint_details.setdefault("function_name", node.details.get("function_name", ""))
-        record["details"] = endpoint_details
+    if metadata.write_blocked:
+        raise MetadataError(
+            "W_METADATA_INVALID",
+            "metadata.json не читается — запись остановлена, файл не изменён. "
+            "Исправьте JSON или удалите файл вручную.",
+        )
+
+    def apply(target: Metadata) -> None:
+        existing = target.nodes.get(node.id) or {}
+        target.nodes[node.id] = _clean_node(
+            _record_for_node(node, description, acceptance, domain, existing)
+        )
+
     before = metadata_payload(metadata)
-    metadata.nodes[node.id] = _clean_node(record)
+    apply(metadata)
     after = metadata_payload(metadata)
+    expected = baseline
+    if _file_hash(path) != baseline:
+        metadata = read_metadata(project_root)
+        if metadata.write_blocked:
+            raise MetadataError(
+                "W_METADATA_INVALID",
+                "metadata.json изменился и перестал читаться — запись остановлена, "
+                "файл не изменён.",
+            )
+        expected = _file_hash(path)
+        before = metadata_payload(metadata)
+        apply(metadata)
+        after = metadata_payload(metadata)
     changed = before != after
-    if changed and not write_metadata(project_root, metadata):
+    if changed and not write_metadata(project_root, metadata, expected):
+        if _file_hash(path) != expected:
+            raise MetadataError(
+                "W_METADATA_INVALID",
+                "metadata.json изменили во время сохранения — повторите правку, "
+                "файл не изменён.",
+            )
         raise MetadataError("not_writable", "Не удалось записать .studio/metadata.json")
     return SaveResult(
         changed=changed,
@@ -331,6 +406,7 @@ __all__ = [
     "Metadata",
     "MetadataError",
     "SaveResult",
+    "metadata_hash",
     "metadata_path",
     "metadata_payload",
     "read_metadata",

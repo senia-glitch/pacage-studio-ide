@@ -54,7 +54,18 @@ EDGE_NAMES = {
     "depends": "зависит",
 }
 CODE_EDGE_KINDS = frozenset({"dispatch", "scenario_call", "port_call", "table", "tests"})
-SECRET_RE = re.compile(r"(?i)(secret|token|password|api[_-]?key)\s*[:=]")
+SECRET_RE = re.compile(
+    r"(?ix)"
+    r"(?:"
+    r"(?:^|[^A-Za-z0-9_])"
+    r"(?:[A-Z0-9_]*KEY|secret|token|password|passwd|api[_-]?key|"
+    r"access[_-]?key|private[_-]?key|auth[_-]?token)"
+    r"\s*[:=]"
+    r"|\{[^{}\n]*\b(?:secret|token|password|passwd|api[_-]?key|"
+    r"access[_-]?key|private[_-]?key)\b[^{}\n]*\}"
+    r"|[\"'][^\"'\n]*(?:secret|token|password|passwd)[^\"'\n]*[\"']"
+    r")"
+)
 
 
 class BriefError(Exception):
@@ -1349,12 +1360,21 @@ def _truncate_markdown(body: str, marker: str, warnings: list[str]) -> str:
     room = MAX_BRIEF_CHARS - len(marker) - len(suffix)
     if room < 0:
         room = 0
+    cut = body[:room]
+    # Не обрезаем посреди блока кода: отступаем к его началу.
+    for fence in ("```", "~~~"):
+        if cut.count(fence) % 2 == 1:
+            start = cut.rfind("\n" + fence)
+            cut = cut[:start] if start >= 0 else ""
+    newline = cut.rfind("\n")
+    if newline > 0:
+        cut = cut[:newline]
     _warn(
         warnings,
         "ТЗ большое: сузьте область (--only/--plan/--scenario) или выберите "
         "более краткий режим карты.",
     )
-    return body[:room].rstrip() + suffix
+    return cut.rstrip() + suffix
 
 
 def build_brief(
@@ -1555,13 +1575,26 @@ def save_brief_sidecars(project_root: Path, brief: Brief) -> None:
 
 
 def save_brief(project_root: Path, brief: Brief, target: Path | None = None) -> Path:
-    """Записать ТЗ и служебные копии; вернуть путь к markdown."""
-    root = Path(project_root)
+    """Записать ТЗ и служебные копии; вернуть путь к markdown.
+
+    Целевой файл обязан оставаться внутри проекта: `..`, абсолютный путь
+    снаружи и симлинк за пределы корня отклоняются до записи.
+    """
+    root = Path(project_root).resolve()
     sd = _studio_dir(root)
-    save_brief_sidecars(root, brief)
     output = Path(target) if target is not None else sd / BRIEF_FILENAME
     if not output.is_absolute():
-        output = Path.cwd() / output
+        output = root / output
+    try:
+        resolved = output.resolve()
+        resolved.relative_to(root)
+    except (OSError, ValueError) as exc:
+        raise BriefError(
+            "invalid_input",
+            f"Путь ТЗ должен быть внутри проекта: {target}. Укажите путь внутри {root}.",
+        ) from exc
+    output = resolved
+    save_brief_sidecars(root, brief)
     output.parent.mkdir(parents=True, exist_ok=True)
     if not atomic_write(output, brief.markdown):
         raise BriefError("not_writable", f"Не удалось записать {output}")

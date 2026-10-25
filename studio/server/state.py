@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 import threading
 import time
@@ -24,7 +25,7 @@ from studio.agent import (
 from studio.creator import CreateError
 from studio.creator.plan import create_plan, delete_plan, preview_plan, update_plan
 from studio.env import read_env
-from studio.metadata import MetadataError, save_node_metadata
+from studio.metadata import MetadataError, metadata_path, save_node_metadata
 from studio.metamodel import Graph, Node
 from studio.scanner import scan
 from studio.scanner.anchors import AnchorResolver
@@ -32,6 +33,16 @@ from studio.source import load_sources, stat_fingerprint
 
 DEFAULT_POLL = 1.0
 DEBOUNCE = 0.3
+
+
+def _metadata_stamp(root: Path) -> str:
+    """Содержимое metadata.json для подписи ревизии: правка из IDE видна сразу."""
+    try:
+        return hashlib.sha1(metadata_path(root).read_bytes()).hexdigest()
+    except FileNotFoundError:
+        return ""
+    except OSError:
+        return "unreadable"
 
 
 class NodeNotFound(Exception):
@@ -78,6 +89,7 @@ class ProjectState:
                     env.api_prefix,
                     env.models_spec,
                     tuple(path.name for path in env.models_paths),
+                    _metadata_stamp(self.root),
                     tuple(sorted((d.code, d.file, d.line) for d in graph.diagnostics)),
                 )
                 changed = self.graph is None or signature != self._signature

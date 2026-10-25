@@ -209,12 +209,12 @@ function nestedLayoutKey(scope,nid){return `${scope}|${nid}`}
 async function onCardClick(id){
   if(Date.now()-S.justDraggedAt<250)return;
   const n=S.byId[id];if(!n)return;
-  await flushPending();
+  if(!(await flushPending()))return;
   if(S.tab==="map"&&n.kind==="endpoint"){openEndpointScenario(id);return}
   S.selectedNode=id;hooks.renderScenario();hooks.renderInspector();schedulePersist();
 }
 async function openEndpointScenario(endpointId){
-  await flushPending();
+  if(!(await flushPending()))return;
   const edge=(S.G.edges||[]).find(e=>e.kind==="dispatch"&&e.from_node===endpointId);
   if(!edge){toast("У эндпоинта нет сценария (dispatch не найден)");return}
   S.selectedScenario=edge.to_node;S.selectedNode=endpointId;setTab("scenario");
@@ -222,7 +222,7 @@ async function openEndpointScenario(endpointId){
 
 /* ---------- вкладки ---------- */
 async function setTab(name){
-  await flushPending();
+  if(!(await flushPending()))return;
   S.tab=name;
   document.querySelectorAll(".tabbtn").forEach(b=>b.classList.toggle("on",b.dataset.tab===name));
   document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="tab-"+name));
@@ -392,6 +392,8 @@ function setLive(online){
   dot.classList.toggle("off",!online);
   dot.title=online?"live · обновлено "+new Date().toLocaleTimeString(): "нет связи со студией — перезапустите studio";
   dot.textContent=online?"● live":"● нет связи";
+  const banner=$("offlineBanner");
+  if(banner)banner.hidden=online;
 }
 function rerenderActive(){
   if(S.tab==="map")hooks.renderMap();
@@ -479,8 +481,8 @@ function toastAction(message,label,action){
   t._h=setTimeout(()=>{t.style.display="none"},8000);
 }
 async function flushPending(){
-  if(!S.formDirty||!S.selectedNode)return;
-  await hooks.saveMetadata();
+  if(!S.formDirty||!S.selectedNode)return true;
+  return (await hooks.saveMetadata()) !== false;
 }
 function initSearch(){
   const box=$("searchBox");if(!box)return;

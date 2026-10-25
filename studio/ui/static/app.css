@@ -139,6 +139,7 @@ svg.edges{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index
 .search-wrap input{background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--txt);padding:4px 8px;font:12px "Segoe UI",Arial,sans-serif;width:240px}
 .search-wrap input:focus{border-color:var(--acc);outline:none}
 #editorChoice{background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--txt);padding:4px 6px;font:12px inherit;max-width:150px}
+.offline-banner{margin:0;padding:8px 14px;background:#3a1d1d;border-bottom:1px solid #ff5d5d;color:#ffd7d7;font-size:13px;text-align:center}
 .live{font-size:11px;white-space:nowrap}
 .live.on{color:var(--green)}
 .live.off{color:var(--dim)}

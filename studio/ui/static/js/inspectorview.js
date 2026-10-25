@@ -1,4 +1,4 @@
-﻿import {api} from "./api.js";
+import {api} from "./api.js";
 import {
   $, S, anchorText, applyGraph, copyNodeLocation, esc, hooks, schedulePersist,
   nestedOf, notesOf, openEditorForNode, setSaveState, todoBadgeHtml,
@@ -6,6 +6,8 @@ import {
 } from "./core.js";
 import {saveLabel} from "./savestate.js";
 import {isTodo} from "./todo.js";
+
+let saveInFlight=null;
 
 function renderInspector(){
   const chips=$("inspChips"),body=$("inspBody"),foot=$("inspFoot");
@@ -63,32 +65,40 @@ function renderInspector(){
   foot.textContent=saveLabel(S.saveState)||"Автосейв в .studio/metadata.json при потере фокуса.";
 }
 async function saveMetadata(force=false){
+  if(saveInFlight)return saveInFlight;
   const nodeId=S.selectedNode;
-  const n=S.byId[nodeId];if(!n)return;
+  const n=S.byId[nodeId];if(!n)return true;
   const desc=$("fDesc")?$("fDesc").value:n.description;
   const acc=$("fAcc")?$("fAcc").value.split("\n").map(s=>s.trim()).filter(Boolean):n.acceptance;
   const dom=$("fDomain")?$("fDomain").value:(n.kind==="endpoint"?n.domain:"");
   const same=desc===n.description&&JSON.stringify(acc)===JSON.stringify(n.acceptance)&&(n.kind!=="endpoint"||dom===n.domain);
-  if(same&&!force){S.formDirty=false;setSaveState("saved");return}
+  if(same&&!force){S.formDirty=false;setSaveState("saved");return true}
   setSaveState("save");
-  try{
-    const data=await api("/api/metadata/node","POST",{
-      node_id:nodeId,description:desc,acceptance:acc,domain:dom,
-    });
-    applyGraph(data.graph);
-    if(!S.byId[nodeId]){
-      S.selectedNode=null;S.formDirty=false;setSaveState("reset");
-      toast("Узел пропал из кода — выбор снят");
-      hooks.renderScenario();schedulePersist();return;
+  saveInFlight=(async()=>{
+    try{
+      const data=await api("/api/metadata/node","POST",{
+        node_id:nodeId,description:desc,acceptance:acc,domain:dom,
+      });
+      applyGraph(data.graph);
+      if(!S.byId[nodeId]){
+        S.selectedNode=null;S.formDirty=false;setSaveState("reset");
+        toast("Узел пропал из кода — выбор снят");
+        hooks.renderScenario();schedulePersist();return true;
+      }
+      S.selectedNode=nodeId;
+      S.formDirty=false;setSaveState("saved");
+      toast("метаданные сохранены");
+      if(S.tab==="scenario"){hooks.renderScenario();renderInspector()}else hooks.renderMap();
+      schedulePersist();
+      return true;
+    }catch(e){
+      setSaveState("fail");toast("ошибка сохранения: "+e.message+" — текст остался в форме");
+      return false;
+    }finally{
+      saveInFlight=null;
     }
-    S.selectedNode=nodeId;
-    S.formDirty=false;setSaveState("saved");
-    toast("метаданные сохранены");
-    if(S.tab==="scenario"){hooks.renderScenario();renderInspector()}else hooks.renderMap();
-    schedulePersist();
-  }catch(e){
-    setSaveState("fail");toast("ошибка сохранения: "+e.message);
-  }
+  })();
+  return saveInFlight;
 }
 
 export {renderInspector, saveMetadata};

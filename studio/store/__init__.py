@@ -17,6 +17,17 @@ GRAPH_NAME = "graph.json"
 
 GRAPH_VERSION = 7
 
+# Артефакты скана и логов: их можно игнорировать в git. metadata.json —
+# единственное хранилище описаний, он коммитится вместе с проектом.
+GITIGNORE_ARTIFACTS = (
+    "graph.json",
+    "studio.log",
+    "agent-brief.md",
+    "briefs/",
+    "last-brief.json",
+)
+METADATA_IGNORE = "metadata.json"
+
 
 def studio_dir(project_root: Path) -> Path:
     return Path(project_root) / STUDIO_DIR
@@ -27,25 +38,24 @@ def graph_path(project_root: Path) -> Path:
 
 
 def ensure_layout(project_root: Path) -> Path:
-    """Создать .studio/ с .gitignore внутри."""
+    """Создать .studio/ с .gitignore артефактов внутри.
+
+    metadata.json не игнорируется. Если старая версия его записала —
+    строка удаляется, пользовательские строки сохраняются.
+    """
     sd = studio_dir(project_root)
     sd.mkdir(parents=True, exist_ok=True)
     gitignore = sd / ".gitignore"
-    lines = [
-        "graph.json",
-        "metadata.json",
-        "studio.log",
-        "agent-brief.md",
-        "briefs/",
-        "last-brief.json",
-    ]
     try:
-        existing = [ln for ln in gitignore.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        existing = [
+            ln for ln in gitignore.read_text(encoding="utf-8").splitlines() if ln.strip()
+        ]
     except OSError:
         existing = []
-    missing = [ln for ln in lines if ln not in existing]
-    if missing:
-        atomic_write(gitignore, "\n".join(existing + missing) + "\n")
+    lines = [ln for ln in existing if ln.strip() != METADATA_IGNORE]
+    missing = [ln for ln in GITIGNORE_ARTIFACTS if ln not in lines]
+    if missing or len(lines) != len(existing):
+        atomic_write(gitignore, "\n".join([*lines, *missing]) + "\n")
     return sd
 
 

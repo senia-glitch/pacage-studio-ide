@@ -115,6 +115,12 @@ def _name_test(graph: Graph, node: Node, anchor: str) -> Node | None:
         name = _test_tokens((test.details or {}).get("test_name") or test.label)
         if not name:
             continue
+        # Короткое имя вроде «get» не должно совпадать с test_get_user:
+        # однотокенный якорь ищем только точным совпадением имён.
+        if len(target) == 1 or len(name) == 1:
+            if name == target:
+                return test
+            continue
         if name[: len(target)] == target or target[: len(name)] == name:
             return test
     return None

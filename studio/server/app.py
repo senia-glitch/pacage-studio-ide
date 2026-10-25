@@ -149,10 +149,18 @@ def make_handler(ctx):
                     length = int(raw_length)
                 except ValueError as exc:
                     raise _HTTPProblem(
-                        411, "length_required", "Некорректный Content-Length"
+                        400, "bad_length", "Некорректный Content-Length"
                     ) from exc
+                if length < 0:
+                    raise _HTTPProblem(
+                        400, "bad_length", "Content-Length не может быть отрицательным"
+                    )
                 if length > MAX_HTTP_BODY:
-                    raise _HTTPProblem(413, "body_too_large", "Тело запроса больше 16 МБ")
+                    raise _HTTPProblem(
+                        413,
+                        "body_too_large",
+                        f"Тело запроса больше {MAX_HTTP_BODY // (1024 * 1024)} МБ",
+                    )
                 if ctype != "application/json":
                     self._discard_body()
                     raise _HTTPProblem(
@@ -312,23 +320,32 @@ def make_handler(ctx):
     return Handler
 
 
+def _try_bind(host: str, port: int, handler) -> ThreadingHTTPServer | None:
+    """Создать сервер; занятый порт не оставляет полуоткрытый сокет."""
+    server = ThreadingHTTPServer((host, port), handler, bind_and_activate=False)
+    try:
+        server.server_bind()
+        server.server_activate()
+    except OSError:
+        server.server_close()
+        return None
+    return server
+
+
 def _bind(host: str, port: int | None, handler) -> ThreadingHTTPServer:
     if port is None:
         for candidate in range(DEFAULT_PORT_START, DEFAULT_PORT_END + 1):
-            try:
-                return ThreadingHTTPServer((host, candidate), handler)
-            except OSError:
-                continue
+            server = _try_bind(host, candidate, handler)
+            if server is not None:
+                return server
         raise PortInUse(
             f"Порты {DEFAULT_PORT_START}–{DEFAULT_PORT_END} заняты. "
             "Укажите другой: studio dev --port 8800"
         )
-    try:
-        return ThreadingHTTPServer((host, port), handler)
-    except OSError as exc:
-        raise PortInUse(
-            f"Порт {port} занят. Укажите другой: studio dev --port 8800"
-        ) from exc
+    server = _try_bind(host, port, handler)
+    if server is None:
+        raise PortInUse(f"Порт {port} занят. Укажите другой: studio dev --port 8800")
+    return server
 
 
 def _print_summary(state: ProjectState, url: str) -> None:

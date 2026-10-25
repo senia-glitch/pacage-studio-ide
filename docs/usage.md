@@ -72,3 +72,6 @@ markdown-список. Коды — в [troubleshooting.md](troubleshooting.md).
 `.studio/studio.log` — журнал сканов, ошибок и записи. HTTP-запросы по
 умолчанию не пишутся; `studio dev --verbose` добавляет их. Удаление `.studio/`
 стирает `metadata.json` безвозвратно: граф пересоберётся, описания — нет.
+Поэтому `.studio/metadata.json` по умолчанию не игнорируется в git и
+коммитится вместе с проектом; игнорируются только `graph.json`, `studio.log`,
+`agent-brief.md`, `briefs/` и `last-brief.json`.

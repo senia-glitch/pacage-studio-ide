@@ -1,9 +1,13 @@
-﻿export const EDITORS = [
+export const EDITORS = [
   {id: "vscode", title: "VS Code", template: "vscode://file/{path}:{line}"},
 ];
 
 function encodeEditorPath(value) {
-  return encodeURI(String(value || "").replace(/\\/g, "/"));
+  const text = String(value || "").replace(/\\/g, "/");
+  const drive = /^([A-Za-z]):\//.exec(text);
+  const prefix = drive ? drive[1] + ":/" : "";
+  const rest = drive ? text.slice(prefix.length) : text;
+  return prefix + rest.split("/").map((part) => encodeURIComponent(part)).join("/");
 }
 
 export function buildEditorUrl(editorId, absPath, relPath, line) {
