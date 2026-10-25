@@ -47,7 +47,6 @@ def atomic_write_bytes(path: Path, data: bytes) -> bool:
                     time.sleep(REPLACE_DELAY)
         if last_error is not None:
             raise last_error
-        return False
     except OSError:
         with contextlib.suppress(OSError):
             tmp_path.unlink()

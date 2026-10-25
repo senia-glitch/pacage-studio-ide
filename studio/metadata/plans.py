@@ -368,9 +368,6 @@ def _plan_items(item) -> list:
     return list(getattr(item, "layers", []) or [])
 
 
-def _layer_of(item) -> str:
-    return str(getattr(item, "layer", "") or "")
-
 
 def _inside_project(target: str) -> bool:
     posix = PurePosixPath(target)
@@ -413,10 +410,6 @@ def validate_plan(plan: Plan, graph_index: GraphIndex | None) -> list[Diagnostic
     nodes = list(graph_index.by_id.values()) if graph_index is not None else []
     other_plans = list(getattr(graph_index, "plans", []) or []) if graph_index is not None else []
     other_plans = [item for item in other_plans if _plan_slug(item) != plan.slug]
-
-    occupied_slugs = {_plan_slug(item) for item in other_plans if _plan_slug(item)}
-    if plan.slug in occupied_slugs:
-        add("W_PLAN_CONFLICT", f"slug {plan.slug!r} уже занят другим планом")
 
     occupied_names: dict[str, str] = {}
     occupied_files: dict[str, str] = {}

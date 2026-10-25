@@ -1,4 +1,4 @@
-# pacage-studio 5.0 — карта пути HTTP-запроса
+# pacage-studio 5.1 — карта пути HTTP-запроса
 
 Офлайн-инструмент для проектов на `fastbase` / `core-package` / `event-infra`.
 Читает код по AST (без запуска) и рисует в браузере путь:
