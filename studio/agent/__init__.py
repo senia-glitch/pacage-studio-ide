@@ -9,6 +9,7 @@ from studio.agent.brief import (
     save_brief,
     save_brief_sidecars,
 )
+from studio.agent.decompose import build_decompose_prompt
 from studio.agent.verify import render_report, verify_brief
 
 __all__ = [
@@ -16,6 +17,7 @@ __all__ = [
     "BriefNotFound",
     "BriefOptions",
     "build_brief",
+    "build_decompose_prompt",
     "load_brief",
     "render_report",
     "save_brief",

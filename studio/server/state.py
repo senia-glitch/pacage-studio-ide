@@ -13,6 +13,7 @@ from studio import store
 from studio.agent import (
     BriefOptions,
     build_brief,
+    build_decompose_prompt,
     load_brief,
     save_brief_sidecars,
 )
@@ -224,6 +225,52 @@ class ProjectState:
                 "removed_edges": result.removed_edges,
                 "graph": graph.model_dump(),
             }
+
+    # ------------------------------------------------------------ decompose
+
+    def decompose_prompt(self, data: dict) -> dict:
+        with self.lock:
+            raw = data.get("task")
+            task = raw.strip() if isinstance(raw, str) else ""
+            if not task:
+                raise MetadataError("invalid_input", "Нужен текст задачи")
+            env = read_env(self.root)
+            self.ensure_graph()
+            return {"prompt": build_decompose_prompt(self.graph, env, task)}
+
+    def decompose_apply(self, data: dict) -> dict:
+        with self.lock:
+            scenarios = data.get("scenarios")
+            if not isinstance(scenarios, list):
+                raise MetadataError("invalid_input", "Нужен массив scenarios")
+            if not scenarios:
+                raise MetadataError("invalid_input", "Пустой список сценариев")
+            env = read_env(self.root)
+            created = []
+            plan_slugs = []
+            for index, item in enumerate(scenarios):
+                if not isinstance(item, dict):
+                    raise CreateError(
+                        f"scenarios[{index}] должен быть объектом", "W_PLAN_INVALID"
+                    )
+                try:
+                    result = create_plan(item, env)
+                except CreateError as exc:
+                    self.rescan("decompose")
+                    suffix = ""
+                    if plan_slugs:
+                        created_count = len(plan_slugs)
+                        total = len(scenarios)
+                        slugs = ", ".join(plan_slugs)
+                        suffix = f"; создано {created_count} из {total} ({slugs})"
+                    raise CreateError(str(exc) + suffix, exc.code) from exc
+                created.extend(
+                    {"path": entry.path, "kind": entry.kind, "name": entry.name}
+                    for entry in result.created
+                )
+                plan_slugs.append(result.plan.slug)
+            graph = self.rescan("decompose")
+            return {"created": created, "plans": plan_slugs, "graph": graph.model_dump()}
 
     # -------------------------------------------------------------- agent
 

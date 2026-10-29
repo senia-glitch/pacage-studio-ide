@@ -6,6 +6,7 @@ import {
 } from "./core.js";
 import {refreshBriefStatus, scheduleBriefStatus, updateBriefBadge, initTodoChip} from "./briefview.js";
 import {renderCreate} from "./createview.js";
+import {initDecompose} from "./decomposeview.js";
 import {openDiagnostics, updateDiagBadge} from "./diagnosticsview.js";
 import {renderInspector, saveMetadata} from "./inspectorview.js";
 import {renderMap} from "./mapview.js";
@@ -75,6 +76,7 @@ async function boot(){
   };
   $("diagBtn").onclick=openDiagnostics;
   initTodoChip();
+  initDecompose();
   if($("logoBtn"))$("logoBtn").onclick=showAbout;
   initSearch();
   updateDiagBadge();

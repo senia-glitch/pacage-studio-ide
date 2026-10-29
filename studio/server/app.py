@@ -315,6 +315,10 @@ def make_handler(ctx):
                 return self._json(state.brief(data))
             if url.path == "/api/brief/save":
                 return self._json(state.save_brief(data))
+            if url.path == "/api/decompose/prompt":
+                return self._json(state.decompose_prompt(data))
+            if url.path == "/api/decompose":
+                return self._json(state.decompose_apply(data))
             return self._error(404, "not_found", "Не найдено")
 
     return Handler
