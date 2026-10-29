@@ -44,6 +44,16 @@ export function clearStage(stage, svg) {
   svg.innerHTML = "";
 }
 
+function borderPoint(rect, tx, ty) {
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
+  const dx = tx - cx;
+  const dy = ty - cy;
+  if (dx === 0 && dy === 0) return {x: cx, y: cy};
+  const scale = Math.min((rect.w / 2) / Math.abs(dx), (rect.h / 2) / Math.abs(dy));
+  return {x: cx + dx * scale, y: cy + dy * scale};
+}
+
 export function drawEdges(svg, boxes, edges, colors, names, escapeHtml) {
   let defs = "<defs>";
   for (const [kind, color] of Object.entries(colors)) {
@@ -58,13 +68,49 @@ export function drawEdges(svg, boxes, edges, colors, names, escapeHtml) {
       const from = boxes[edge.from_node];
       const to = boxes[edge.to_node];
       if (!from || !to) return "";
-      const x1 = from.x + from.w;
-      const y1 = from.y + from.h / 2;
-      const x2 = to.x - 6;
-      const y2 = to.y + to.h / 2;
-      const path = `M${x1},${y1} C${(x1 + x2) / 2},${y1} ${(x1 + x2) / 2},${y2} ${x2},${y2}`;
-      const mx = (x1 + x2) / 2;
-      const my = (y1 + y2) / 2 - 5;
+      const fcx = from.x + from.w / 2;
+      const fcy = from.y + from.h / 2;
+      const tcx = to.x + to.w / 2;
+      const tcy = to.y + to.h / 2;
+      const dx = tcx - fcx;
+      const dy = tcy - fcy;
+      const dist = Math.hypot(dx, dy);
+      let x1, y1, x2, y2;
+      if (dist === 0) {
+        x1 = from.x + from.w;
+        y1 = fcy;
+        x2 = to.x;
+        y2 = tcy;
+      } else {
+        const p1 = borderPoint(from, tcx, tcy);
+        const p2 = borderPoint(to, fcx, fcy);
+        x1 = p1.x;
+        y1 = p1.y;
+        x2 = p2.x;
+        y2 = p2.y;
+      }
+      let path;
+      let mx;
+      let my;
+      if (dist === 0) {
+        path = `M${x1},${y1} L${x2},${y2}`;
+        mx = (x1 + x2) / 2;
+        my = (y1 + y2) / 2 - 5;
+      } else {
+        const ux = dx / dist;
+        const uy = dy / dist;
+        const nx = -uy;
+        const ny = ux;
+        const k = Math.min(dist * 0.35, 70);
+        const bow = Math.min(dist * 0.09, 14);
+        const c1x = x1 + ux * k + nx * bow;
+        const c1y = y1 + uy * k + ny * bow;
+        const c2x = x2 - ux * k + nx * bow;
+        const c2y = y2 - uy * k + ny * bow;
+        path = `M${x1},${y1} C${c1x},${c1y} ${c2x},${c2y} ${x2},${y2}`;
+        mx = (x1 + x2) / 2 + nx * bow * 0.75;
+        my = (y1 + y2) / 2 + ny * bow * 0.75 - 5;
+      }
       const dash = edge.yellow || edge.todo || edge.kind === "uses" || edge.kind === "depends" ? ' stroke-dasharray="6,4"' : "";
       const color = edge.yellow ? "#e8c33a" : (colors[edge.kind] || "#9a9aa2");
       return (

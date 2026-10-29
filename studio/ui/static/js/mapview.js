@@ -31,6 +31,17 @@ function recomputeMapSizes(){
   fast.style.width=fw+"px";fast.style.height=fh+"px";
   sizeStage(stage,svg);
 }
+function redrawMapEdges(){
+  const stage=$("mapStage"),svg=$("mapEdges");
+  if(!stage||!svg)return;
+  S.mapBoxes=measure(stage);
+  const edges=(S.G.edges||[]).filter(e=>S.mapBoxes[e.from_node]&&S.mapBoxes[e.to_node]).map(e=>({
+    ...e,
+    todo:!!(S.byId[e.from_node]?.planned||S.byId[e.to_node]?.planned),
+    yellow:!!(e.notes&&e.notes.length),
+  }));
+  drawEdges(svg,S.mapBoxes,edges);
+}
 function offpathCard(zone,n,x,y){
   const card=document.createElement("div");
   card.className=`card k-${n.kind}${nodeTodoClass(n)}${notesOf(n).length?" node--yellow":""}`;card.dataset.id=n.id;
@@ -55,11 +66,11 @@ function offpathCard(zone,n,x,y){
       if(proposedOverlap(zone,[card],[{el:card,x:cx,y:cy}]))return;
       card.style.left=cx+"px";card.style.top=cy+"px";
       S.mapPos.set(n.id,{x:cx,y:cy});recomputeMapSizes();
-      sizeStage($("mapStage"),$("mapEdges"));
+      sizeStage($("mapStage"),$("mapEdges"));redrawMapEdges();
     },
     ()=>{
       S.mapPos.set(n.id,{x:parseFloat(card.style.left)||0,y:parseFloat(card.style.top)||0});
-      recomputeMapSizes();sizeStage($("mapStage"),$("mapEdges"));
+      recomputeMapSizes();sizeStage($("mapStage"),$("mapEdges"));redrawMapEdges();
     });
   return card;
 }
@@ -98,16 +109,10 @@ function renderOffPathMap(stage,svg){
       const rect={x:cx,y:cy,w:zone.offsetWidth,h:zone.offsetHeight};
       if(zoneOverlaps(zone,rect,mapZones()))return;
       zone.style.left=cx+"px";zone.style.top=cy+"px";
-      S.mapOffpath.x=cx;S.mapOffpath.y=cy;sizeStage(stage,svg);
+      S.mapOffpath.x=cx;S.mapOffpath.y=cy;sizeStage(stage,svg);redrawMapEdges();
     },
-    ()=>{S.mapOffpath.x=parseFloat(zone.style.left)||40;S.mapOffpath.y=parseFloat(zone.style.top)||420;sizeStage(stage,svg)});
-  S.mapBoxes=measure(stage);
-  const edges=(S.G.edges||[]).filter(e=>S.mapBoxes[e.from_node]&&S.mapBoxes[e.to_node]).map(e=>({
-    ...e,
-    todo:!!(S.byId[e.from_node]?.planned||S.byId[e.to_node]?.planned),
-    yellow:!!(e.notes&&e.notes.length),
-  }));
-  drawEdges(svg,S.mapBoxes,edges);
+    ()=>{S.mapOffpath.x=parseFloat(zone.style.left)||40;S.mapOffpath.y=parseFloat(zone.style.top)||420;sizeStage(stage,svg);redrawMapEdges()});
+  redrawMapEdges();
   sizeStage(stage,svg);
 }
 function renderMap(){
@@ -194,11 +199,11 @@ function renderMap(){
           const size=areaSize(zone,new Map([[card,{x:cx,y:cy}]]));
           if(zoneOverlaps(zone,proposedZoneRect(zone,size),mapZones()))return;
           card.style.left=cx+"px";card.style.top=cy+"px";
-          S.mapPos.set(n.id,{x:cx,y:cy});recomputeMapSizes();
+          S.mapPos.set(n.id,{x:cx,y:cy});recomputeMapSizes();redrawMapEdges();
         },
         ()=>{
           S.mapPos.set(n.id,{x:parseFloat(card.style.left)||0,y:parseFloat(card.style.top)||0});
-          recomputeMapSizes();
+          recomputeMapSizes();redrawMapEdges();
         });
     });
   });
@@ -219,20 +224,20 @@ function renderMap(){
         const rect={x:cx,y:cy,w:zone.offsetWidth,h:zone.offsetHeight};
         if(zoneOverlaps(zone,rect,mapZones()))return;
         zone.style.left=cx+"px";zone.style.top=cy+"px";
-        S.mapMethods.set(method,{x:cx,y:cy});recomputeMapSizes();
+        S.mapMethods.set(method,{x:cx,y:cy});recomputeMapSizes();redrawMapEdges();
       },
       ()=>{
         S.mapMethods.set(method,{x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0});
-        recomputeMapSizes();
+        recomputeMapSizes();redrawMapEdges();
       });
   });
   enableZoneDrag(fast,S.mapView,
     (nx,ny)=>{
       const cx=Math.max(20,nx),cy=Math.max(20,ny);
       fast.style.left=cx+"px";fast.style.top=cy+"px";
-      S.mapFastbase.x=cx;S.mapFastbase.y=cy;
+      S.mapFastbase.x=cx;S.mapFastbase.y=cy;redrawMapEdges();
     },
-    ()=>{S.mapFastbase.x=parseFloat(fast.style.left)||40;S.mapFastbase.y=parseFloat(fast.style.top)||40;sizeStage(stage,svg)});
+    ()=>{S.mapFastbase.x=parseFloat(fast.style.left)||40;S.mapFastbase.y=parseFloat(fast.style.top)||40;sizeStage(stage,svg);redrawMapEdges()});
   renderOffPathMap(stage,svg);
   sizeStage(stage,svg);
   applyTransform("mapView",S.mapView);
