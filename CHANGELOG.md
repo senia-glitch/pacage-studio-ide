@@ -3,6 +3,13 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версии — [Semantic Versioning](https://semver.org/lang/ru/).
 
+## [5.1.1] — 2026-10-30
+
+### Исправлено
+
+- Ссылки `Homepage` и `Repository` в `pyproject.toml` указывают на актуальный
+  репозиторий `senia-glitch/pacage-studio-ide`.
+
 ## [5.1.0] — 2026-10-25
 
 ### Добавлено

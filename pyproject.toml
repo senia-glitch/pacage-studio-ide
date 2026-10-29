@@ -30,8 +30,8 @@ full = ["fastbase[full] @ git+https://github.com/senia-glitch/fastapi-transport.
 dev = ["pytest>=8", "ruff>=0.6", "pytest-cov>=5"]
 
 [project.urls]
-Homepage = "https://github.com/senia-glitch/pacage-studio"
-Repository = "https://github.com/senia-glitch/pacage-studio"
+Homepage = "https://github.com/senia-glitch/pacage-studio-ide"
+Repository = "https://github.com/senia-glitch/pacage-studio-ide"
 
 [project.scripts]
 studio = "studio.cli:main"
