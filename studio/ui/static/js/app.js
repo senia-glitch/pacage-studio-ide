@@ -6,16 +6,17 @@ import {
 } from "./core.js";
 import {refreshBriefStatus, scheduleBriefStatus, updateBriefBadge, initTodoChip} from "./briefview.js";
 import {renderCreate} from "./createview.js";
-import {initDecompose} from "./decomposeview.js";
 import {openDiagnostics, updateDiagBadge} from "./diagnosticsview.js";
 import {renderInspector, saveMetadata} from "./inspectorview.js";
 import {renderMap} from "./mapview.js";
 import {renderScenario} from "./scenarioview.js";
+import {initIdeas, renderIdeas} from "./ideaview.js";
 import {bindViewport, fitView} from "./viewport.js";
 
 hooks.renderMap = renderMap;
 hooks.renderScenario = renderScenario;
 hooks.renderCreate = renderCreate;
+hooks.renderIdeas = renderIdeas;
 hooks.renderInspector = renderInspector;
 hooks.updateBriefBadge = updateBriefBadge;
 hooks.scheduleBriefStatus = scheduleBriefStatus;
@@ -36,8 +37,16 @@ async function boot(){
     document.title="studio · "+String(S.studioInfo.project_root||"").replace(/[\\/]+$/,"").split(/[\\/]/).pop();
   }catch(_){ }
   initUiStorage();
+  initIdeas();
   initEditorChoice();
   document.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+  const showWorkspace=(name)=>{
+    document.querySelectorAll(".workspace-btn").forEach(button=>button.classList.toggle("on",button.dataset.workspace===name));
+    document.querySelectorAll("[data-constructor-view]").forEach(view=>view.classList.toggle("on",view.dataset.constructorView===name));
+    if(name==="plans")renderCreate();
+  };
+  document.querySelectorAll(".workspace-btn").forEach(button=>button.onclick=()=>showWorkspace(button.dataset.workspace));
+  const newPlanShortcut=$("newPlanShortcut");if(newPlanShortcut)newPlanShortcut.onclick=()=>{showWorkspace("plans");$("planTitle")?.focus()};
   bindViewport("mapCanvas",S.mapView,()=>applyTransform("mapView",S.mapView));
   bindViewport("scenCanvas",S.scenView,()=>applyTransform("scenView",S.scenView));
   $("scenCanvas").addEventListener("click",ev=>{
@@ -70,13 +79,12 @@ async function boot(){
     await flushPending();
     try{
       applyGraph(await api("/api/rescan","POST",{}));
-      if(S.tab==="map")renderMap();else if(S.tab==="scenario")renderScenario();else renderCreate();
+      if(S.tab==="map")renderMap();else if(S.tab==="scenario")renderScenario();else renderIdeas();
       updateDiagBadge();toast("карта обновлена");schedulePersist();
     }catch(e){toast("ошибка скана: "+e.message)}
   };
   $("diagBtn").onclick=openDiagnostics;
   initTodoChip();
-  initDecompose();
   if($("logoBtn"))$("logoBtn").onclick=showAbout;
   initSearch();
   updateDiagBadge();
@@ -100,7 +108,7 @@ async function boot(){
   document.addEventListener("click",schedulePersist);
   document.addEventListener("change",schedulePersist);
   const initial=location.hash.replace(/^#/,"");
-  setTab(["map","scenario","create"].includes(initial)?initial:S.tab);
+  setTab(["map","scenario","ideas","create"].includes(initial)?initial:S.tab);
 }
 boot();
 

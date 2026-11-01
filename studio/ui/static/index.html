@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>studio — карта пути запроса</title>
+<title>studio — проектирование сценариев</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23232428'/%3E%3Cpath d='M16 5l9 5v12l-9 5-9-5V10z' fill='%23e8833a'/%3E%3C/svg%3E">
 
 <meta name="studio-token" content="">
@@ -11,14 +11,14 @@
 </head>
 <body>
 <header>
-  <span class="logo" id="logoBtn" title="О проекте">⬢ studio</span>
+  <span class="logo" id="logoBtn" title="О проекте"><span class="logo-mark">⬢</span> studio</span>
   <span class="tabs">
-    <button class="tabbtn on" data-tab="map" title="только эндпоинты fastbase, сгруппированные по домену и HTTP-методу">Карта</button>
-    <button class="tabbtn" data-tab="scenario" title="подробный путь одного сценария от эндпоинта до модели">Сценарий</button>
-    <button class="tabbtn" data-tab="create" title="конструктор нового сценария: только метаданные, без кода">Создание</button>
+    <button class="tabbtn on" data-tab="map"><span class="tab-index">01</span> Карта проекта</button>
+    <button class="tabbtn" data-tab="scenario"><span class="tab-index">02</span> Конструктор сценариев</button>
+    <button class="tabbtn" data-tab="ideas"><span class="tab-index">03</span> Генератор идей</button>
   </span>
   <span class="search-wrap"><input id="searchBox" type="search" placeholder="Поиск (/) — метод, URL, имя, домен" aria-label="Поиск"><span class="hint" id="searchCount"></span></span>
-  <select id="editorChoice" title="Открывать в VS Code" aria-label="Редактор"></select>
+  <select id="editorChoice" title="Открывать в редакторе" aria-label="Редактор"></select>
   <span id="liveDot" class="live off" title="нет связи со студией">●</span>
   <span class="todo-chip-wrap">
     <button id="briefBtn" type="button" title="Планируемые узлы и статус ТЗ">К реализации: 0</button>
@@ -29,7 +29,6 @@
     </span>
   </span>
   <button id="diagBtn" type="button" title="Диагностика и жёлтые пометки">⚠ 0</button>
-  <button id="decompBtn" type="button" title="Декомпозиция задачи на сценарии">Декомпозиция</button>
   <span class="spacer"></span>
   <label class="hint" title="визуально скрыть описания, критерии и домены на узлах"><input type="checkbox" id="hideMeta"> скрыть метаданные</label>
   <label class="hint" title="скрыть nested-узлы на карте; в инспекторе и ТЗ они остаются"><input type="checkbox" id="hideNested"> скрыть вложенные</label>
@@ -49,13 +48,20 @@
     </div>
   </section>
   <section class="tab" id="tab-scenario">
-    <div id="scenWrap">
+    <div class="workspace-switch" role="tablist" aria-label="Разделы конструктора">
+      <button class="workspace-btn on" type="button" data-workspace="graph">Граф сценариев</button>
+      <button class="workspace-btn" type="button" data-workspace="plans">Планы и создание</button>
+      <span class="workspace-description">Выберите сценарий, изучите его путь и редактируйте метаданные</span>
+    </div>
+    <div id="scenarioWorkbench">
+    <div id="scenWrap" class="constructor-view on" data-constructor-view="graph">
       <aside id="scenList"></aside>
       <div id="scenMain">
         <div id="scenBar">
           <span class="hint">Сценарий:</span>
           <select id="scenSelect" style="min-width:260px"></select>
           <span class="hint" id="scenHint">путь: endpoint → scenario → io → model; вложенные узлы — рядом с родителем</span>
+          <span class="spacer"></span><button id="newPlanShortcut" type="button" class="primary">＋ Новый сценарий</button>
         </div>
         <div class="canvas" id="scenCanvas"><div class="view" id="scenView"><div class="stage" id="scenStage"><svg class="edges" id="scenEdges"></svg></div></div></div>
       </div>
@@ -65,62 +71,48 @@
         <div id="inspFoot">Правки сохраняются при потере фокуса.</div>
       </aside>
     </div>
-  </section>
-  <section class="tab" id="tab-create">
-    <div id="createPane">
+    <div id="createPane" class="constructor-view" data-constructor-view="plans">
+      <div class="constructor-heading"><div><div class="eyebrow">КОНСТРУКТОР</div><h2>Планы сценариев</h2><p>Создавайте заготовки, редактируйте описание и готовьте задачи для реализации.</p></div><div class="constructor-count" id="constructorCount">— планов</div></div>
       <div class="plan-scroll">
         <form id="planForm" class="plan-form" autocomplete="off">
-          <h3>Новый сценарий</h3>
+          <div class="eyebrow">НОВЫЙ ПЛАН</div><h3>Опишите сценарий</h3>
           <label class="field">Название
             <input id="planTitle" name="title" type="text" placeholder="Например: Отмена заказа">
           </label>
           <label class="field">Описание сценария
-            <textarea id="planDescription" name="description" rows="7" placeholder="Опишите сценарий целиком, как ТЗ для человека: что происходит, какие данные приходят и возвращаются, что делать при ошибках. Названия функций и классов указывать не нужно."></textarea>
+            <textarea id="planDescription" name="description" rows="7" placeholder="Опишите путь пользователя, входные данные, результат и поведение при ошибках."></textarea>
           </label>
-          <label class="field">Критерии приёмки <span class="hint">— по одной на строку, необязательно</span>
-            <textarea id="planAcceptance" name="acceptance" rows="3" placeholder="Например: заказ помечен как отменённый"></textarea>
+          <label class="field">Критерии приёмки <span class="hint">— по одному на строку</span>
+            <textarea id="planAcceptance" name="acceptance" rows="3" placeholder="Заказ помечен как отменённый"></textarea>
           </label>
-          <label class="field">Домен <span class="hint">— необязательно</span>
+          <label class="field">Домен
             <input id="planDomain" name="domain" type="text" list="planDomains" placeholder="например orders">
             <datalist id="planDomains"></datalist>
           </label>
           <details id="planMore">
-            <summary>Дополнительно: HTTP-метод, путь, slug и флажки</summary>
+            <summary>Параметры API и реализации</summary>
             <div class="plan-more-grid">
-              <label class="field">HTTP-метод
-                <select id="planMethod" name="http_method">
-                  <option value="">не указан</option>
-                  <option value="get">GET</option>
-                  <option value="post">POST</option>
-                  <option value="put">PUT</option>
-                  <option value="patch">PATCH</option>
-                  <option value="delete">DELETE</option>
-                </select>
-              </label>
-              <label class="field">Путь
-                <input id="planPath" name="path" type="text" placeholder="/orders/{id}/cancel">
-              </label>
-              <label class="field">Slug
-                <input id="planSlug" name="slug" type="text" placeholder="выберется из названия">
-              </label>
+              <label class="field">HTTP-метод<select id="planMethod" name="http_method"><option value="">не указан</option><option value="get">GET</option><option value="post">POST</option><option value="put">PUT</option><option value="patch">PATCH</option><option value="delete">DELETE</option></select></label>
+              <label class="field">Путь<input id="planPath" name="path" type="text" placeholder="/orders/{id}/cancel"></label>
+              <label class="field">Slug<input id="planSlug" name="slug" type="text" placeholder="из названия"></label>
             </div>
-            <label class="hint plan-check"><input id="planUsesDb" type="checkbox" checked> Работает с БД — слои io и model</label>
+            <label class="hint plan-check"><input id="planUsesDb" type="checkbox" checked> Сценарий работает с БД</label>
             <label class="hint plan-check"><input id="planWithTest" type="checkbox" checked> Нужен тест</label>
           </details>
-          <div class="plan-actions">
-            <button id="planBuild" type="button">Построить цепочку</button>
-            <button id="planCreate" class="primary" type="button" disabled>Создать сценарий</button>
-          </div>
+          <div class="plan-actions"><button id="planBuild" type="button">Предпросмотр цепочки</button><button id="planCreate" class="primary" type="button" disabled>Создать сценарий</button></div>
         </form>
-        <div class="plan-chain-wrap">
-          <h3>Цепочка слоёв</h3>
-          <div id="planChain" class="plan-chain"><p class="hint">Нажмите «Построить цепочку» — слои появятся даже при пустой форме.</p></div>
-          <div id="createResult" class="create-result"></div>
-        </div>
+        <div class="plan-chain-wrap"><h3>Будущая структура</h3><div id="planChain" class="plan-chain"><p class="hint">Заполните название, чтобы увидеть цепочку слоёв.</p></div><div id="createResult" class="create-result"></div></div>
       </div>
-      <div class="plans-wrap">
-        <h3>Планы сценариев</h3>
-        <div id="planList" class="plan-list"><p class="hint">Планов пока нет.</p></div>
+      <div class="plans-wrap"><div class="plans-heading"><h3>Существующие сценарии</h3><span class="hint">Выберите «Редактировать», чтобы обновить описание и параметры</span></div><div id="planList" class="plan-list"><p class="hint">Загрузка сценариев…</p></div></div>
+    </div>
+    </div>
+  </section>
+  <section class="tab" id="tab-ideas">
+    <div id="ideasPane">
+      <div class="ideas-toolbar"><div><div class="eyebrow">ПРОЕКТИРОВАНИЕ</div><h2>Генератор идей сценариев</h2><p>Каждая идея становится корнем ветки. Добавьте ответ LLM — сценарии появятся связанными карточками.</p></div><div class="ideas-actions"><span class="save-indicator" id="ideasSaveState">Все изменения сохранены</span><button type="button" id="addIdeaBtn" class="primary">＋ Новая идея</button></div></div>
+      <div class="ideas-workspace">
+        <aside class="ideas-rail"><div class="rail-title">ИДЕИ ПРОЕКТА</div><div id="ideaList"></div><div class="rail-note"><b>Рабочий процесс</b><span>Идея → промпт → ответ LLM → сценарии</span></div></aside>
+        <div class="ideas-scroll"><div class="ideas-canvas" id="ideasCanvas"><div id="ideasBoard"></div></div></div>
       </div>
     </div>
   </section>

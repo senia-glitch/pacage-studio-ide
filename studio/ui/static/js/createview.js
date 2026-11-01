@@ -107,6 +107,8 @@ function renderPlans() {
   const box = $("planList");
   if (!box) return;
   const plans = ((S.G && S.G.plans) || []).slice().sort((a, b) => String(a.slug).localeCompare(String(b.slug)));
+  const count = $("constructorCount");
+  if (count) count.textContent = `${plans.length} ${plans.length === 1 ? "план" : plans.length < 5 ? "плана" : "планов"}`;
   if (!plans.length) {
     box.innerHTML = '<p class="hint">Планов пока нет.</p>';
     return;
@@ -126,7 +128,7 @@ function renderPlans() {
       <div class="plan-card-chips">${chips}</div>
       <div class="plan-card-actions">
         ${done ? '<span class="chip ok">Готово</span>' : `<button type="button" data-brief-plan="${esc(plan.slug)}">ТЗ для агента</button>`}
-        <button type="button" data-edit-plan="${esc(plan.slug)}">Править описание</button>
+        <button type="button" data-edit-plan="${esc(plan.slug)}">Редактировать</button>
         <button type="button" data-delete-plan="${esc(plan.slug)}">Удалить план</button>
       </div>
     </div>`;
@@ -148,11 +150,14 @@ function editPlan(plan) {
     description: plan.description || "",
     acceptance: (plan.acceptance || []).join("\n"),
     domain: plan.domain || "",
+    http_method: plan.http_method || "",
+    path: plan.path || "",
   };
   const body = `<div class="plan-edit">
+    <div class="plan-edit-identity"><span class="chip">${esc(plan.slug)}</span><b>${esc(plan.title || plan.slug)}</b><span class="hint">Структура слоёв и файлы останутся прежними.</span></div>
     <div class="field"><label>Описание сценария</label><textarea id="planEditDescription" rows="7">${esc(edited.description)}</textarea></div>
     <div class="field"><label>Критерии приёмки — по одной на строку</label><textarea id="planEditAcceptance" rows="3">${esc(edited.acceptance)}</textarea></div>
-    <div class="field"><label>Домен</label><input id="planEditDomain" value="${esc(edited.domain)}"></div>
+    <div class="plan-more-grid"><div class="field"><label>Домен</label><input id="planEditDomain" value="${esc(edited.domain)}"></div><div class="field"><label>HTTP-метод</label><select id="planEditMethod"><option value="">не указан</option>${["get","post","put","patch","delete"].map(method=>`<option value="${method}" ${edited.http_method===method?"selected":""}>${method.toUpperCase()}</option>`).join("")}</select></div><div class="field"><label>Путь</label><input id="planEditPath" value="${esc(edited.path)}" placeholder="/orders/{id}"></div></div>
   </div>`;
   modal("Править описание плана", body, [
     {label: "Сохранить", cls: "primary", action: async () => {
@@ -162,6 +167,8 @@ function editPlan(plan) {
           description: edited.description,
           acceptance: edited.acceptance.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
           domain: edited.domain,
+          http_method: edited.http_method,
+          path: edited.path,
         });
         applyGraph(data.graph);
         renderPlans();
@@ -175,9 +182,13 @@ function editPlan(plan) {
   const description = $("planEditDescription");
   const acceptance = $("planEditAcceptance");
   const domain = $("planEditDomain");
+  const method = $("planEditMethod");
+  const path = $("planEditPath");
   if (description) description.oninput = () => { edited.description = description.value; };
   if (acceptance) acceptance.oninput = () => { edited.acceptance = acceptance.value; };
   if (domain) domain.oninput = () => { edited.domain = domain.value; };
+  if (method) method.onchange = () => { edited.http_method = method.value; };
+  if (path) path.oninput = () => { edited.path = path.value; };
 }
 
 async function deletePlan(slug) {

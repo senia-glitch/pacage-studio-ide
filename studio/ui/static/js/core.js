@@ -61,6 +61,7 @@ export const hooks = {
   renderMap() {},
   renderScenario() {},
   renderCreate() {},
+  renderIdeas() {},
   renderInspector() {},
   updateBriefBadge() {},
   scheduleBriefStatus() {},
@@ -222,13 +223,14 @@ async function openEndpointScenario(endpointId){
 
 /* ---------- вкладки ---------- */
 async function setTab(name){
+  if(name==="create")name="ideas";
   if(!(await flushPending()))return;
   S.tab=name;
   document.querySelectorAll(".tabbtn").forEach(b=>b.classList.toggle("on",b.dataset.tab===name));
-  document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="tab-"+name));
+  document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="tab-"+(name==="ideas"?"ideas":name)));
   if(name==="map")hooks.renderMap();
   else if(name==="scenario")hooks.renderScenario();
-  else hooks.renderCreate();
+  else hooks.renderIdeas();
   schedulePersist();
 }
 
@@ -337,7 +339,7 @@ function schedulePersist(){
 }
 function restoreUiState(saved){
   if(!saved)return;
-  if(["map","scenario","create"].includes(saved.tab))S.tab=saved.tab;
+  if(["map","scenario","ideas"].includes(saved.tab))S.tab=saved.tab;else if(saved.tab==="create")S.tab="ideas";
   if(S.byId[saved.selectedNode])S.selectedNode=saved.selectedNode;
   if((S.G.scenario_paths||{})[saved.selectedScenario])S.selectedScenario=saved.selectedScenario;
   S.hideMeta=!!saved.hideMeta;
@@ -398,7 +400,7 @@ function setLive(online){
 function rerenderActive(){
   if(S.tab==="map")hooks.renderMap();
   else if(S.tab==="scenario")hooks.renderScenario();
-  else hooks.renderCreate();
+  else hooks.renderIdeas();
   hooks.updateDiagBadge();
 }
 async function refreshLiveGraph(){
@@ -491,7 +493,7 @@ function initSearch(){
     const all=(S.G.nodes||[]).filter(n=>n.kind==="endpoint");
     const found=all.filter(n=>!S.lastSearchQuery||matchesAll(S.lastSearchQuery,[n.label,methodOfEndpoint(n),urlOfEndpoint(n),n.domain,n.description,n.details&&n.details.function_name]));
     const count=$("searchCount");if(count)count.textContent=S.lastSearchQuery?`найдено ${found.length} из ${all.length}`:"";
-    if(S.tab==="map")hooks.renderMap();else if(S.tab==="scenario")hooks.renderScenario();
+  if(S.tab==="map")hooks.renderMap();else if(S.tab==="scenario")hooks.renderScenario();else hooks.renderIdeas();
   };
   box.addEventListener("input",update);
   box.addEventListener("keydown",ev=>{

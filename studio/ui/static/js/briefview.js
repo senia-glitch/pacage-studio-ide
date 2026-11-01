@@ -99,7 +99,7 @@ async function openBriefDialog(options={}){
           <label class="hint"><input type="checkbox" id="briefEmpty"> включать без описания</label>
           <div class="hint">Планы: ${plans.length} · старые планируемые узлы: ${nodes.length} · отмечены готовые.</div>
         </div>
-        <div id="briefPlans">${plans.length?plans.map(plan=>briefPlanChoice(plan,selectedPlans)).join(""):'<p class="hint">Планов нет. Создайте сценарий во вкладке «Создание».</p>'}</div>
+        <div id="briefPlans">${plans.length?plans.map(plan=>briefPlanChoice(plan,selectedPlans)).join(""):'<p class="hint">Планов нет. Создайте сценарий в конструкторе.</p>'}</div>
         <div id="briefNodes">${nodes.length?nodes.map(node=>briefNodeChoice(node,selected)).join(""):'<p class="hint">Старых планируемых узлов нет.</p>'}</div>
       </div>
       <div class="brief-preview">
