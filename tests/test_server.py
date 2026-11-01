@@ -99,6 +99,59 @@ def test_api_граф_требует_токен(demo: Path):
     assert "diagnostics" in data
 
 
+def test_graph_editor_adds_sibling_layers_and_deletes_only_one_branch(demo: Path):
+    scenario_id = "scenario:app/scenarios/orders.py:CreateOrderScenario"
+    with _Server(demo) as srv:
+        status, first = srv.post(
+            "/api/metadata/graph-node",
+            {"kind": "io", "name": "LoadOrderIO", "parent_id": scenario_id, "edge_kind": "port_call"},
+        )
+        assert status == 200
+        status, sibling = srv.post(
+            "/api/metadata/graph-node",
+            {"kind": "io", "name": "AuditOrderIO", "parent_id": scenario_id, "edge_kind": "port_call"},
+        )
+        assert status == 200
+        status, model = srv.post(
+            "/api/metadata/graph-node",
+            {"kind": "model", "name": "OrderSnapshot", "parent_id": first["node_id"], "edge_kind": "table"},
+        )
+        assert status == 200
+        status, test = srv.post(
+            "/api/metadata/graph-node",
+            {"kind": "test", "name": "test_order_flow", "parent_id": scenario_id, "edge_kind": "tests"},
+        )
+        assert status == 200
+        status, nested = srv.post(
+            "/api/metadata/graph-node",
+            {"kind": "nested", "name": "assert_order", "parent_id": test["node_id"], "edge_kind": "uses"},
+        )
+        assert status == 200
+        graph = nested["graph"]
+        edges = graph["edges"]
+        assert any(edge["from_node"] == test["node_id"] and edge["to_node"] == scenario_id for edge in edges)
+        assert {first["node_id"], sibling["node_id"], model["node_id"], test["node_id"], nested["node_id"]} <= {
+            node["id"] for node in graph["nodes"]
+        }
+
+        status, deleted = srv.post(
+            "/api/metadata/graph-node/delete", {"node_id": first["node_id"]}
+        )
+        assert status == 200
+        remaining = {node["id"] for node in deleted["graph"]["nodes"]}
+        assert first["node_id"] not in remaining
+        assert model["node_id"] not in remaining
+        assert sibling["node_id"] in remaining
+        assert test["node_id"] in remaining
+
+        status, deleted = srv.post(
+            "/api/metadata/graph-node/delete", {"node_id": test["node_id"]}
+        )
+        assert status == 200
+        remaining = {node["id"] for node in deleted["graph"]["nodes"]}
+        assert test["node_id"] not in remaining and nested["node_id"] not in remaining
+
+
 def test_сохранение_метаданных_узла(demo: Path):
     target = demo / "app/api/v1/routes/orders.py"
     before = target.read_bytes()

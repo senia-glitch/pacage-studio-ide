@@ -53,7 +53,7 @@
     <div class="workspace-switch" role="tablist" aria-label="Разделы конструктора">
       <button class="workspace-btn on" id="workspace-graph-button" type="button" role="tab" aria-selected="true" aria-controls="scenWrap" data-workspace="graph">Граф сценариев</button>
       <button class="workspace-btn" id="workspace-plans-button" type="button" role="tab" aria-selected="false" aria-controls="createPane" data-workspace="plans">Планы и создание</button>
-      <span class="workspace-description">Выберите сценарий, изучите его путь и редактируйте метаданные</span>
+      <span class="workspace-description">Откройте узел, чтобы изменить его или добавить дочернюю ветку</span>
     </div>
     <div id="scenarioWorkbench">
     <div id="scenWrap" class="constructor-view on" role="tabpanel" aria-labelledby="workspace-graph-button" data-constructor-view="graph">
@@ -62,13 +62,13 @@
         <div id="scenBar">
           <span class="hint">Сценарий:</span>
           <select id="scenSelect" style="min-width:260px"></select>
-          <span class="hint" id="scenHint">путь: endpoint → scenario → io → model; вложенные узлы — рядом с родителем</span>
+          <span class="hint" id="scenHint">Узлы раскрываются по связям; в каждой ветке может быть несколько узлов одного типа</span>
           <span class="spacer"></span><button id="newPlanShortcut" type="button" class="primary">＋ Новый сценарий</button>
         </div>
         <div class="canvas" id="scenCanvas"><div class="view" id="scenView"><div class="stage" id="scenStage"><svg class="edges" id="scenEdges"></svg></div></div></div>
       </div>
       <aside id="inspector">
-        <div id="inspHead"><h3 style="margin:0;font-size:12px;color:var(--acc)">Метаданные узла</h3><div id="inspChips" class="chips" style="margin-top:5px"></div></div>
+        <div id="inspHead"><h3 style="margin:0;font-size:12px;color:var(--acc)">Инспектор узла</h3><div id="inspChips" class="chips" style="margin-top:5px"></div></div>
         <div id="inspBody"><p class="hint">Выберите узел на карте сценария.</p></div>
         <div id="inspFoot">Правки сохраняются при потере фокуса.</div>
       </aside>
@@ -111,7 +111,7 @@
   </section>
   <section class="tab" id="tab-ideas" role="tabpanel" aria-labelledby="tab-ideas-button">
     <div id="ideasPane">
-      <div class="ideas-toolbar"><div><div class="eyebrow">ПРОЕКТИРОВАНИЕ</div><h2>Генератор идей сценариев</h2><p>Каждая идея становится корнем ветки. Добавьте ответ LLM — сценарии появятся связанными карточками.</p></div><div class="ideas-actions"><span class="save-indicator" id="ideasSaveState" role="status" aria-live="polite">Все изменения сохранены</span><button type="button" id="ideasExportBtn" title="Скачать доску идей в JSON">Экспорт</button><button type="button" id="ideasImportBtn" title="Загрузить доску идей из JSON">Импорт</button><input type="file" id="ideasImportFile" accept="application/json,.json" hidden><button type="button" id="addIdeaBtn" class="primary">＋ Новая идея</button></div></div>
+      <div class="ideas-toolbar"><div><div class="eyebrow">ПРОЕКТИРОВАНИЕ</div><h2>Генератор идей сценариев</h2><p>Выберите идею слева: её узел и связанные сценарии займут весь канвас.</p></div><div class="ideas-actions"><span class="save-indicator" id="ideasSaveState" role="status" aria-live="polite">Все изменения сохранены</span><button type="button" id="ideasExportBtn" title="Скачать доску идей в JSON">Экспорт</button><button type="button" id="ideasImportBtn" title="Загрузить доску идей из JSON">Импорт</button><input type="file" id="ideasImportFile" accept="application/json,.json" hidden><button type="button" id="addIdeaBtn" class="primary">＋ Новая идея</button></div></div>
       <div class="ideas-workspace">
         <aside class="ideas-rail"><div class="rail-title">ИДЕИ ПРОЕКТА</div><div id="ideaList"></div><div class="rail-note"><b>Рабочий процесс</b><span>Идея → промпт → ответ LLM → сценарии</span></div></aside>
         <div class="ideas-scroll"><div class="ideas-canvas" id="ideasCanvas"><div id="ideasBoard"></div></div></div>

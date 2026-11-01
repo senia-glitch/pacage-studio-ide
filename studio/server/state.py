@@ -6,6 +6,7 @@ import hashlib
 import secrets
 import threading
 import time
+import uuid
 from pathlib import Path
 
 from studio import log as slog
@@ -26,8 +27,15 @@ from studio.agent import (
 from studio.creator import CreateError
 from studio.creator.plan import create_plan, delete_plan, preview_plan, update_plan
 from studio.env import read_env
-from studio.metadata import MetadataError, metadata_path, save_node_metadata
-from studio.metamodel import Graph, Node
+from studio.metadata import (
+    MetadataError,
+    delete_graph_node,
+    metadata_path,
+    read_metadata,
+    save_graph_node,
+    save_node_metadata,
+)
+from studio.metamodel import EDGE_KINDS, NODE_KINDS, Graph, Node
 from studio.scanner import scan
 from studio.scanner.anchors import AnchorResolver
 from studio.source import load_sources, stat_fingerprint
@@ -171,6 +179,158 @@ class ProjectState:
             return {
                 "graph": graph.model_dump(),
                 "changed": result.changed,
+            }
+
+    def save_graph_node(self, data: dict) -> dict:
+        """Persist a visual TODO node and its optional parent relationship."""
+        with self.lock:
+            graph = self.ensure_graph()
+            node_id = str(data.get("node_id") or f"studio:{uuid.uuid4().hex}")
+            kind = str(data.get("kind") or "")
+            name = str(data.get("name") or "").strip()
+            if kind not in NODE_KINDS:
+                raise MetadataError("invalid_input", "Выберите допустимый тип узла")
+            if not name:
+                raise MetadataError("invalid_input", "Укажите название узла")
+            if len(name) > 180:
+                raise MetadataError("invalid_input", "Название узла слишком длинное")
+            description = data.get("description") or ""
+            acceptance = data.get("acceptance") or []
+            domain = data.get("domain") or ""
+            if not isinstance(description, str) or not isinstance(domain, str):
+                raise MetadataError("invalid_input", "Описание и домен должны быть строками")
+            if isinstance(acceptance, str):
+                acceptance = [line.strip() for line in acceptance.splitlines() if line.strip()]
+            if not isinstance(acceptance, list):
+                raise MetadataError("invalid_input", "Критерии должны быть списком строк")
+            parent_id = str(data.get("parent_id") or "")
+            edge_kind = str(data.get("edge_kind") or "")
+            existing = graph.by_id().get(node_id)
+            if existing is not None:
+                record = read_metadata(self.root).nodes.get(node_id)
+                if not existing.planned or not record or not record.get("studio_owned"):
+                    raise MetadataError(
+                        "invalid_input",
+                        "Редактировать можно только узлы, созданные в графе",
+                    )
+            if existing is not None and not parent_id:
+                incoming = next((edge for edge in graph.edges if edge.to_node == node_id), None)
+                if incoming is not None:
+                    parent_id, edge_kind = incoming.from_node, incoming.kind
+                elif kind == "test":
+                    test_edge = next(
+                        (
+                            edge for edge in graph.edges
+                            if edge.from_node == node_id and edge.kind == "tests"
+                        ),
+                        None,
+                    )
+                    if test_edge is not None:
+                        parent_id, edge_kind = test_edge.to_node, test_edge.kind
+            if parent_id == node_id:
+                raise MetadataError("invalid_input", "Узел нельзя связать с самим собой")
+            parent = graph.by_id().get(parent_id) if parent_id else None
+            if parent_id and parent is None:
+                raise MetadataError(
+                    "node_not_found",
+                    "Родительский узел не найден — обновите карту",
+                )
+            if parent_id and edge_kind not in EDGE_KINDS:
+                raise MetadataError("invalid_input", "Выберите допустимый тип связи")
+            details = dict((existing.details or {}) if existing is not None else {"name": name})
+            if kind == "endpoint":
+                details.update(
+                    {
+                        "function_name": name,
+                        "http_method": str(
+                            data.get("http_method", details.get("http_method") or "") or ""
+                        ),
+                        "path": str(data.get("path", details.get("path") or "") or ""),
+                    }
+                )
+            elif kind == "scenario":
+                details.update({"name": name, "class_name": name})
+            elif kind == "io":
+                details["method"] = name
+                if parent and parent.kind == "scenario":
+                    details.update(
+                        {
+                            "scenario_class": (parent.details or {}).get("class_name", ""),
+                            "scenario_id": parent_id,
+                        }
+                    )
+            elif kind == "model":
+                details.update({"class_name": name, "tablename": name, "table": name})
+            elif kind == "test":
+                details["test_name"] = name
+            elif kind == "nested":
+                details.update(
+                    {
+                        "name": name,
+                        "role": str(data.get("role") or details.get("role") or "module"),
+                        "parent_id": parent_id or details.get("parent_id", ""),
+                    }
+                )
+            target_file = str(
+                data.get("target_file")
+                or (parent.file_path if parent else (existing.file_path if existing else ""))
+            )
+            result = save_graph_node(
+                self.root, node_id, kind, name, description,
+                [str(item) for item in acceptance], domain, target_file,
+                details, parent_id, edge_kind,
+            )
+            graph = self.rescan("graph_node")
+            return {"graph": graph.model_dump(), "changed": result.changed, "node_id": node_id}
+
+    def delete_graph_node(self, data: dict) -> dict:
+        with self.lock:
+            graph = self.ensure_graph()
+            metadata = read_metadata(self.root)
+            node_id = str(data.get("node_id") or "")
+            if not node_id:
+                raise MetadataError("invalid_input", "Нужен node_id")
+            if not graph.by_id().get(node_id):
+                raise NodeNotFound(node_id)
+            # Remove child TODO nodes as one visual branch, while preserving real code nodes.
+            removable = {node_id}
+            changed = True
+            while changed:
+                changed = False
+                for edge in graph.edges:
+                    # Test edges point from a test toward the scenario it verifies;
+                    # for deletion, treat that relation as a visual child of the scenario.
+                    if edge.kind == "tests":
+                        parent_id, child_id = edge.to_node, edge.from_node
+                    else:
+                        parent_id, child_id = edge.from_node, edge.to_node
+                    if parent_id not in removable or child_id in removable:
+                        continue
+                    child = graph.by_id().get(child_id)
+                    record = metadata.nodes.get(child_id) if child is not None else None
+                    parents = [
+                        item for item in graph.edges
+                        if (item.from_node if item.kind == "tests" else item.to_node) == child_id
+                    ]
+                    only_this_branch = all(
+                        (item.to_node if item.kind == "tests" else item.from_node) in removable
+                        for item in parents
+                    )
+                    if (
+                        child is not None
+                        and child.planned
+                        and record
+                        and record.get("studio_owned")
+                        and only_this_branch
+                    ):
+                        removable.add(child.id)
+                        changed = True
+            result = delete_graph_node(self.root, node_id, removable)
+            graph = self.rescan("graph_node_delete")
+            return {
+                "graph": graph.model_dump(),
+                "changed": result.changed,
+                "removed": sorted(removable),
             }
 
     # ----------------------------------------------------------------- plans

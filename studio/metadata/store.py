@@ -39,6 +39,7 @@ ALLOWED_FIELDS = (
     "planned",
     "plan",
     "layer",
+    "studio_owned",
 )
 _TOP_LEVEL_FIELDS = frozenset({"version", "nodes", "edges", "plans"})
 
@@ -117,7 +118,7 @@ def _clean_node(raw) -> dict:
                 out[key] = []
         elif key == "details":
             out[key] = dict(value) if isinstance(value, dict) else {}
-        elif key == "planned":
+        elif key == "planned" or key == "studio_owned":
             out[key] = bool(value)
     for key, value in raw.items():
         if key not in ALLOWED_FIELDS:
@@ -330,6 +331,8 @@ def _record_for_node(
     record["domain"] = normalize_domain(domain) if node.kind == "endpoint" else ""
     if node.planned:
         record["planned"] = True
+        if existing.get("studio_owned"):
+            record["studio_owned"] = True
         record["target_file"] = str(
             existing.get("target_file") or existing.get("file_path") or node.file_path
         )
@@ -400,6 +403,111 @@ def save_node_metadata(
     )
 
 
+def _mutate_metadata(project_root: Path, mutate) -> SaveResult:
+    """Apply one focused edit with the same optimistic write protection as node edits."""
+    path = metadata_path(project_root)
+    for attempt in range(2):
+        baseline = _file_hash(path)
+        metadata = read_metadata(project_root)
+        if metadata.write_blocked:
+            raise MetadataError(
+                "W_METADATA_INVALID",
+                "metadata.json не читается — запись остановлена, файл не изменён. "
+                "Исправьте JSON или удалите файл вручную.",
+            )
+        before = metadata_payload(metadata)
+        mutate(metadata)
+        after = metadata_payload(metadata)
+        if before == after:
+            return SaveResult(False, hashlib.sha1(after.encode("utf-8")).hexdigest())
+        if write_metadata(project_root, metadata, baseline):
+            return SaveResult(True, hashlib.sha1(after.encode("utf-8")).hexdigest())
+        if attempt == 0 and _file_hash(path) != baseline:
+            continue
+        raise MetadataError(
+            "not_writable",
+            "metadata.json изменили во время сохранения или он недоступен — "
+            "обновите карту и повторите правку.",
+        )
+    raise MetadataError("not_writable", "Не удалось записать .studio/metadata.json")
+
+
+def save_graph_node(
+    project_root: Path,
+    node_id: str,
+    kind: str,
+    name: str,
+    description: str,
+    acceptance: list[str],
+    domain: str,
+    target_file: str,
+    details: dict,
+    parent_id: str = "",
+    edge_kind: str = "",
+) -> SaveResult:
+    """Create/update a visual TODO node and optionally connect it to a parent."""
+    record = _clean_node({
+        "kind": kind,
+        "name": name.strip(),
+        "description": description.strip(),
+        "acceptance": acceptance,
+        "domain": normalize_domain(domain) if kind == "endpoint" else "",
+        "planned": True,
+        "studio_owned": True,
+        "target_file": target_file.strip(),
+        "details": details,
+    })
+
+    def apply(metadata: Metadata) -> None:
+        existing = metadata.nodes.get(node_id)
+        if existing and not existing.get("studio_owned"):
+            raise MetadataError(
+                "invalid_input",
+                "Можно редактировать только узлы, созданные в графе",
+            )
+        metadata.nodes[node_id] = record
+        if parent_id and edge_kind:
+            source_id, target_id = parent_id, node_id
+            if kind == "test" and edge_kind == "tests":
+                source_id, target_id = node_id, parent_id
+            edge = {"from": source_id, "to": target_id, "kind": edge_kind, "label": ""}
+            metadata.edges = [
+                item for item in metadata.edges
+                if not (
+                    item.get("from") == source_id
+                    and item.get("to") == target_id
+                    and item.get("kind") == edge_kind
+                )
+            ]
+            metadata.edges.append(edge)
+
+    return _mutate_metadata(project_root, apply)
+
+
+def delete_graph_node(
+    project_root: Path,
+    node_id: str,
+    node_ids: set[str] | None = None,
+) -> SaveResult:
+    """Delete only graph-owned TODO nodes and the metadata links that touch them."""
+    removable = set(node_ids or {node_id})
+
+    def apply(metadata: Metadata) -> None:
+        target = metadata.nodes.get(node_id)
+        if not target or not target.get("studio_owned"):
+            raise MetadataError("invalid_input", "Удалять можно только узел, созданный в графе")
+        for item in removable:
+            record = metadata.nodes.get(item)
+            if record and record.get("studio_owned"):
+                metadata.nodes.pop(item, None)
+        metadata.edges = [
+            item for item in metadata.edges
+            if item.get("from") not in removable and item.get("to") not in removable
+        ]
+
+    return _mutate_metadata(project_root, apply)
+
+
 __all__ = [
     "METADATA_NAME",
     "METADATA_VERSION",
@@ -411,6 +519,8 @@ __all__ = [
     "metadata_payload",
     "read_metadata",
     "save_node_metadata",
+    "save_graph_node",
+    "delete_graph_node",
     "studio_dir",
     "write_metadata",
 ]

@@ -303,6 +303,10 @@ def make_handler(ctx):
                 return self._json(graph.model_dump())
             if url.path == "/api/metadata/node":
                 return self._json(state.save_metadata(data))
+            if url.path == "/api/metadata/graph-node":
+                return self._json(state.save_graph_node(data))
+            if url.path == "/api/metadata/graph-node/delete":
+                return self._json(state.delete_graph_node(data))
             if url.path == "/api/plan/preview":
                 return self._json(state.plan_preview(data))
             if url.path == "/api/plan":

@@ -321,7 +321,7 @@ function setSaveState(next){
 }
 function currentPositions(){
   const dump=map=>Object.fromEntries([...map.entries()]);
-  return{map:dump(S.mapPos),scen:dump(S.scenPos),nested:dump(S.nestedPos),zones:dump(S.scenZonePos)};
+  return{map:dump(S.mapPos),scen:dump(S.scenPos),nested:dump(S.nestedPos),zones:dump(S.scenZonePos),mapMethods:dump(S.mapMethods),mapFastbase:S.mapFastbase,mapOffpath:S.mapOffpath};
 }
 function uiSnapshot(){
   return{
@@ -378,6 +378,9 @@ function restoreUiState(saved){
   Object.entries(positions.zones||{}).forEach(([k,v])=>{
     if(v&&Number.isFinite(v.x)&&Number.isFinite(v.y))S.scenZonePos.set(k,{x:v.x,y:v.y});
   });
+  Object.entries(positions.mapMethods||{}).forEach(([k,v])=>{if(v&&Number.isFinite(v.x)&&Number.isFinite(v.y))S.mapMethods.set(k,{x:v.x,y:v.y})});
+  if(positions.mapFastbase&&Number.isFinite(positions.mapFastbase.x)&&Number.isFinite(positions.mapFastbase.y))S.mapFastbase={x:positions.mapFastbase.x,y:positions.mapFastbase.y};
+  if(positions.mapOffpath&&Number.isFinite(positions.mapOffpath.x)&&Number.isFinite(positions.mapOffpath.y))S.mapOffpath={x:positions.mapOffpath.x,y:positions.mapOffpath.y};
   Object.entries(saved.listOpen||{}).forEach(([key,value])=>S.listOpen.set(key,!!value));
   const draft=normalizeDraft(saved.createDraft);
   S.createState=draft;

@@ -166,13 +166,16 @@ function renderMap(){
     const lab=document.createElement("div");lab.className="zlab";
     lab.innerHTML=`<span class="grip" title="перетащить">⠿</span><span class="method-dot" style="background:${METHOD_COLORS[method]||"#9a9aa2"}"></span>${esc(method)} <span class="hint">· ${items.length}</span>`;
     zone.appendChild(lab);fast.appendChild(zone);zones[method]=zone;
+    const rowHeights=[];
     items.forEach((n,i)=>{
       const d=n.details||{};
       const card=document.createElement("div");
       card.className=`card method-${method.toLowerCase()}${n.planned?" planned":""}${notesOf(n).length?" node--yellow":""}${nodeTodoClass(n)}`;card.dataset.id=n.id;
       const saved=S.mapPos.get(n.id);
-      const lx=saved?saved.x:14+(i%2)*292;
-      const ly=saved?saved.y:38+Math.floor(i/2)*94;
+      const row=Math.floor(i/2),col=i%2;
+      const rowOffset=rowHeights.slice(0,row).reduce((total,height)=>total+height+16,0);
+      const lx=saved?saved.x:14+col*310;
+      const ly=saved?saved.y:38+rowOffset;
       card.style.left=lx+"px";card.style.top=ly+"px";
       const url=urlOfEndpoint(n);
       const title=url?`${method} ${url}`:`${method} · ${n.label}`;
@@ -191,7 +194,17 @@ function renderMap(){
         button.onclick=ev=>{ev.stopPropagation();openEndpointScenario(n.id);S.selectedNode=button.dataset.nested;renderScenario();renderInspector()};
       });
       zone.appendChild(card);
-      enableNodeDrag(card,"map",n.id,lx,ly,S.mapView,
+      // Keep legacy/custom coordinates when they are clear, but never let a new
+      // endpoint land on top of a saved card after a rescan or plan creation.
+      if(proposedOverlap(zone,[card],[{el:card,x:lx,y:ly}])){
+        let y=38;const step=Math.max(card.offsetHeight+16,52);
+        while(proposedOverlap(zone,[card],[{el:card,x:14,y}]))y+=step;
+        card.style.left="14px";card.style.top=y+"px";S.mapPos.set(n.id,{x:14,y});
+      }
+      const finalX=parseFloat(card.style.left)||0,finalY=parseFloat(card.style.top)||0;
+      S.mapPos.set(n.id,{x:finalX,y:finalY});
+      rowHeights[row]=Math.max(rowHeights[row]||0,finalY+card.offsetHeight-(38+rowOffset));
+      enableNodeDrag(card,"map",n.id,finalX,finalY,S.mapView,
         (nx,ny)=>{
           const cx=Math.max(14,nx),cy=Math.max(38,ny);
           const proposed=[{el:card,x:cx,y:cy}];
@@ -209,6 +222,10 @@ function renderMap(){
   });
   recomputeMapSizes();
   let cursor=18;
+  methods.forEach(method=>{
+    const zone=zones[method],pos=S.mapMethods.get(method);
+    if(pos){zone.style.left=pos.x+"px";zone.style.top=pos.y+"px";cursor=Math.max(cursor,pos.x+zone.offsetWidth+28)}
+  });
   methods.forEach(method=>{
     const zone=zones[method];
     let pos=S.mapMethods.get(method);

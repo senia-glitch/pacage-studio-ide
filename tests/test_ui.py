@@ -16,8 +16,10 @@ JS = "\n".join(
 def test_три_вкладки_одного_окна():
     assert 'data-tab="map"' in HTML
     assert 'data-tab="scenario"' in HTML
-    assert 'data-tab="create"' in HTML
-    assert "Карта" in HTML and "Сценарий" in HTML and "Создание" in HTML
+    assert 'data-tab="ideas"' in HTML
+    assert "Карта проекта" in HTML
+    assert "Конструктор сценариев" in HTML
+    assert "Генератор идей" in HTML
 
 
 def test_интерфейс_на_русском():
@@ -56,6 +58,8 @@ def test_статика_на_месте():
 
 def test_есть_ключевые_возможности():
     assert "/api/metadata/node" in JS
+    assert "/api/metadata/graph-node" in JS
+    assert "/api/metadata/graph-node/delete" in JS
     assert "X-Studio-Token" in JS
     assert "buildEditorUrl" in JS
     assert "localStorage" in JS

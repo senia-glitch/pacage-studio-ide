@@ -3,7 +3,7 @@ import {S, esc, setTab, schedulePersist, toast} from "./core.js";
 import {normalizeDraft} from "./chainmodel.js";
 import {storageKey} from "./storage.js";
 
-const EMPTY = {version: 1, ideas: []};
+const EMPTY = {version: 1, activeId: "", ideas: []};
 let board = EMPTY;
 let persistTimer = null;
 let loadedKey = "";
@@ -14,7 +14,7 @@ function clone(value){return JSON.parse(JSON.stringify(value))}
 function promptBasis(idea){return JSON.stringify([idea.title,idea.description])}
 function normalizeBoard(value){
   if(!value||!Array.isArray(value.ideas))return clone(EMPTY);
-  return {version:1,ideas:value.ideas.filter(item=>item&&typeof item==="object"&&!Array.isArray(item)).map((item,index)=>{
+  const ideas=value.ideas.filter(item=>item&&typeof item==="object"&&!Array.isArray(item)).map((item,index)=>{
     const idea={id:text(item.id)||id(),title:text(item.title)||`Идея ${index+1}`,description:text(item.description),prompt:text(item.prompt),promptBasis:text(item.promptBasis),jsonText:text(item.jsonText),payload:item.payload&&typeof item.payload==="object"?item.payload:{scenarios:[]},scenarios:[]};
     idea.scenarios=(Array.isArray(item.scenarios)?item.scenarios:[]).filter(s=>s&&typeof s==="object"&&!Array.isArray(s)).map((scenario,scenarioIndex)=>{
       const source=scenario.source&&typeof scenario.source==="object"&&!Array.isArray(scenario.source)?scenario.source:{};
@@ -23,7 +23,9 @@ function normalizeBoard(value){
     });
     idea.payload=payloadFor(idea);if(!idea.jsonText&&idea.scenarios.length)idea.jsonText=JSON.stringify(idea.payload,null,2);
     return idea;
-  })};
+  });
+  const requested=text(value.activeId);
+  return {version:1,activeId:ideas.some(item=>item.id===requested)?requested:(ideas[0]?.id||""),ideas};
 }
 function save(){
   clearTimeout(persistTimer);
@@ -69,7 +71,7 @@ function syncScenario(idea,scenario){
 function addIdea(){
   const search=$("searchBox");if(search&&search.value){search.value="";S.lastSearchQuery="";const count=$("searchCount");if(count)count.textContent=""}
   const idea={id:id(),title:"Новая идея",description:"",prompt:"",jsonText:"",payload:{scenarios:[]},scenarios:[]};
-  board.ideas.push(idea);render();save();
+  board.ideas.push(idea);board.activeId=idea.id;render();save();
   const input=document.querySelector(`[data-idea-title="${idea.id}"]`);if(input){input.focus();input.select()}
 }
 function card(idea){
@@ -99,8 +101,10 @@ function render(){
   const query=String(S.lastSearchQuery||"").trim().toLocaleLowerCase("ru");
   const visible=board.ideas.filter(idea=>!query||[idea.title,idea.description,...idea.scenarios.flatMap(s=>[s.title,s.description,s.domain])].some(value=>String(value||"").toLocaleLowerCase("ru").includes(query)));
   const count=$("searchCount");if(count&&S.tab==="ideas")count.textContent=query?`идей: ${visible.length} из ${board.ideas.length}`:"";
-  boardEl.innerHTML=visible.length?visible.map(card).join(""):query?'<div class="ideas-welcome"><span>⌕</span><h3>Ничего не найдено</h3><p>Попробуйте изменить поисковый запрос.</p></div>':board.ideas.length?"":'<div class="ideas-welcome"><span>✳</span><h3>Начните с идеи</h3><p>Создайте корневой узел, сформируйте промпт для LLM и добавьте сценарии в виде связанной ветки.</p><button class="primary" type="button" data-add-first>＋ Создать первую идею</button></div>';
-  list.innerHTML=visible.length?visible.map((idea,i)=>`<button type="button" class="idea-rail-item" data-focus-idea="${esc(idea.id)}"><span>${String(i+1).padStart(2,"0")}</span><b>${esc(idea.title||"Без названия")}</b><small>${idea.scenarios.length} сценариев</small></button>`).join(""):query?'<p class="rail-empty">Совпадений нет</p>':'<p class="rail-empty">Пока нет идей</p>';
+  if(visible.length&&!visible.some(idea=>idea.id===board.activeId))board.activeId=visible[0].id;
+  const active=visible.find(idea=>idea.id===board.activeId);
+  boardEl.innerHTML=active?card(active):query?'<div class="ideas-welcome"><span>⌕</span><h3>Ничего не найдено</h3><p>Попробуйте изменить поисковый запрос.</p></div>':board.ideas.length?'<div class="ideas-welcome"><span>⌁</span><h3>Выберите идею</h3><p>Выберите ветку в списке слева.</p></div>':'<div class="ideas-welcome"><span>✳</span><h3>Начните с идеи</h3><p>Создайте корневой узел, сформируйте промпт для LLM и добавьте сценарии в виде связанной ветки.</p><button class="primary" type="button" data-add-first>＋ Создать первую идею</button></div>';
+  list.innerHTML=visible.length?visible.map((idea,i)=>`<button type="button" class="idea-rail-item${idea.id===board.activeId?" on":""}" data-focus-idea="${esc(idea.id)}"><span>${String(i+1).padStart(2,"0")}</span><b>${esc(idea.title||"Без названия")}</b><small>${idea.scenarios.length} сценариев</small></button>`).join(""):query?'<p class="rail-empty">Совпадений нет</p>':'<p class="rail-empty">Пока нет идей</p>';
   boardEl.querySelectorAll("[data-idea-title]").forEach(el=>el.oninput=()=>{const idea=find(el.dataset.ideaTitle);if(!idea)return;idea.title=el.value;updateRail();updatePromptState(idea);save()});
   boardEl.querySelectorAll("[data-idea-description]").forEach(el=>el.oninput=()=>{const idea=find(el.dataset.ideaDescription);if(idea){idea.description=el.value;updatePromptState(idea);save()}});
   boardEl.querySelectorAll("[data-idea-json]").forEach(el=>el.oninput=()=>{const idea=find(el.dataset.ideaJson);if(idea)idea.jsonText=el.value;save()});
@@ -110,14 +114,14 @@ function render(){
     syncScenario(idea,scenario);
     const json=boardEl.querySelector(`[data-idea-json="${idea.id}"]`);if(json)json.value=idea.jsonText;
   });
-  boardEl.querySelectorAll("[data-delete-idea]").forEach(el=>el.onclick=()=>{if(!confirm("Удалить идею вместе со всеми сценариями?"))return;board.ideas=board.ideas.filter(x=>x.id!==el.dataset.deleteIdea);render();save()});
+  boardEl.querySelectorAll("[data-delete-idea]").forEach(el=>el.onclick=()=>{if(!confirm("Удалить идею вместе со всеми сценариями?"))return;board.ideas=board.ideas.filter(x=>x.id!==el.dataset.deleteIdea);if(board.activeId===el.dataset.deleteIdea)board.activeId=board.ideas[0]?.id||"";render();save()});
   boardEl.querySelectorAll("[data-delete-scenario]").forEach(el=>el.onclick=()=>{const idea=find(el.closest("[data-idea]").dataset.idea);if(!idea)return;idea.scenarios=idea.scenarios.filter(x=>x.id!==el.dataset.deleteScenario);idea.payload=payloadFor(idea);idea.jsonText=JSON.stringify(idea.payload,null,2);render();save();toast("Сценарий удалён из ветки и JSON")});
   boardEl.querySelectorAll("[data-to-plan]").forEach(el=>el.onclick=()=>sendToConstructor(el));
   boardEl.querySelectorAll("[data-generate-prompt]").forEach(el=>el.onclick=()=>generatePrompt(el.dataset.generatePrompt,el));
   boardEl.querySelectorAll("[data-copy-prompt]").forEach(el=>el.onclick=()=>copy(find(el.dataset.copyPrompt)?.prompt||""));
   boardEl.querySelectorAll("[data-import-json]").forEach(el=>el.onclick=()=>importJson(el.dataset.importJson));
   boardEl.querySelectorAll("[data-add-first]").forEach(el=>el.onclick=addIdea);
-  list.querySelectorAll("[data-focus-idea]").forEach(el=>el.onclick=()=>{document.querySelector(`[data-idea="${el.dataset.focusIdea}"]`)?.scrollIntoView({behavior:"smooth",block:"start"});list.querySelectorAll(".idea-rail-item").forEach(x=>x.classList.toggle("on",x===el))});
+  list.querySelectorAll("[data-focus-idea]").forEach(el=>el.onclick=()=>{board.activeId=el.dataset.focusIdea;render();save()});
 }
 function find(ideaId){return board.ideas.find(x=>x.id===ideaId)}
 function updatePromptState(idea){

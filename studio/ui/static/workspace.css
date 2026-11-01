@@ -280,6 +280,7 @@ svg.edges { position: absolute; z-index: 1; overflow: visible; pointer-events: n
 #scenarioWorkbench { position: relative; display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; overflow: hidden; }
 .constructor-view { display: none !important; }
 .constructor-view.on { display: flex !important; }
+#scenWrap.constructor-view.on { display: grid !important; }
 #scenWrap { display: grid; min-height: 0; flex: 1 1 auto; grid-template-columns: 240px minmax(0,1fr) 330px; background: #11161d; }
 #scenList, #inspector { min-width: 0; background: #151b23; }
 #scenList { overflow: auto; padding: 10px; border-right: 1px solid #28313c; }
@@ -306,6 +307,18 @@ svg.edges { position: absolute; z-index: 1; overflow: visible; pointer-events: n
 .kv { display: flex; align-items: baseline; gap: 8px; margin: 5px 0; font-size: 12px; }
 .kv span { min-width: 76px; color: var(--muted); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
 .kv b { overflow-wrap: anywhere; font-weight: 600; }
+.graph-add { padding: 10px; border: 1px solid #2d3c4c; border-radius: 8px; background: #131a22; }
+.graph-add summary { color: #9ac8f2; font-size: 12px; font-weight: 650; cursor: pointer; }
+.graph-node-form { display: grid; gap: 9px; margin-top: 12px; }
+.graph-node-form label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
+.graph-node-form input, .graph-node-form textarea, .graph-node-form select { width: 100%; min-width: 0; padding: 8px 9px; border: 1px solid #344252; border-radius: 6px; background: #11171e; color: var(--text); font: inherit; font-size: 12px; }
+.graph-node-form textarea { resize: vertical; }
+.graph-node-form [hidden] { display: none !important; }
+.graph-form-actions { display: grid; gap: 7px; }
+.graph-form-actions .hint { font-size: 10px; line-height: 1.4; }
+.graph-delete { width: 100%; margin-top: 10px; border-color: #693d44 !important; background: #2b1d22 !important; color: #ffaaaa !important; }
+.graph-delete:hover { border-color: #a95861 !important; background: #3a2228 !important; }
+.danger { border-color: #693d44; color: #ffaaaa; }
 .field { margin: 11px 0; }
 .field label { display: block; margin-bottom: 4px; color: var(--muted); font-size: 10px; letter-spacing: .05em; text-transform: uppercase; }
 .field textarea, .field input, .field select, .plan-edit input, .plan-edit textarea, .plan-edit select {
@@ -485,8 +498,9 @@ body[data-active-tab="scenario"] .header-canvas #rescan { display: none; }
   .header-global, .header-canvas { min-height: 34px; }
   .header-canvas { margin-left: auto; }
   .mapbar { min-height: 42px; gap: 8px; padding-right: 12px; padding-left: 12px; }
-  #scenWrap { grid-template-columns: 210px minmax(0,1fr); }
-  #inspector { display: none; }
+  #scenWrap { grid-template-columns: minmax(0,1fr) 290px; }
+  #scenList { display: none; }
+  #inspector { display: flex; }
   .plan-scroll { grid-template-columns: minmax(0,1fr); }
   .plan-chain-wrap { padding: 4px 0 8px; }
   .ideas-workspace { grid-template-columns: 190px minmax(0,1fr); }
@@ -538,4 +552,55 @@ body[data-active-tab="scenario"] .header-canvas #rescan { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+}
+
+/* Idea board: one focused branch fills the viewport; the board itself never scrolls vertically. */
+.ideas-scroll { min-height: 0; height: 100%; overflow: hidden; }
+.ideas-canvas, #ideasBoard { min-width: 0; width: 100%; height: 100%; min-height: 0; padding: 0; }
+.ideas-welcome { display: flex; height: 100%; max-width: 560px; flex-direction: column; align-items: center; justify-content: center; margin: 0 auto; padding: 28px; }
+.idea-row { height: 100%; min-height: 0; grid-template-columns: minmax(360px,420px) minmax(0,1fr); align-items: stretch; gap: 30px; margin: 0; padding: 18px 22px; }
+.idea-root-card { width: auto; min-height: 0; max-height: 100%; overflow: auto; padding: 18px 20px; }
+.idea-title { font-size: 19px; }
+.idea-field-label { font-size: 10px; }
+.idea-root-card textarea, .idea-scenario-card textarea, .idea-scenario-card input { font-size: 14px; line-height: 1.55; }
+.idea-root-card textarea { min-height: 112px; }
+.idea-root-card .idea-json { min-height: 150px; font-size: 12px; }
+.idea-node-actions button { min-height: 34px; padding: 6px 10px; font-size: 12px; }
+.idea-root-card summary { font-size: 12px; }
+.idea-branch { display: flex; min-height: 0; flex-direction: column; overflow: hidden; padding-top: 7px; }
+.idea-branch::before { top: 27px; left: -30px; width: 30px; }
+.branch-label { min-height: 25px; flex: 0 0 auto; font-size: 10px; }
+.scenario-branch { display: flex; min-height: 0; flex: 1 1 auto; align-items: stretch; gap: 16px; overflow-x: auto; overflow-y: hidden; padding: 2px 4px 10px 0; }
+.idea-scenario-card { width: 380px; min-width: 380px; max-height: 100%; overflow: auto; padding: 16px; }
+.scenario-title { font-size: 14px; }
+.idea-scenario-head .text-button { font-size: 11px; }
+.idea-scenario-card .idea-field-label { margin-top: 12px; }
+.idea-scenario-card textarea { min-height: 112px; }
+.idea-scenario-card .idea-field-label:nth-of-type(2) textarea { min-height: 84px; }
+.branch-empty { min-width: 280px; flex: 1 0 280px; min-height: 180px; }
+.branch-empty b { font-size: 13px; }
+.branch-empty small { font-size: 12px; }
+.idea-rail-item { min-height: 54px; padding: 9px; }
+.idea-rail-item b { font-size: 12px; }
+.idea-rail-item small { font-size: 10px; }
+
+@media (max-width: 980px) {
+  .idea-row { grid-template-columns: minmax(330px,390px) minmax(380px,1fr); gap: 24px; min-width: 790px; padding: 14px 16px; }
+  .ideas-scroll { overflow-x: auto; overflow-y: hidden; }
+  .ideas-canvas, #ideasBoard { min-width: 790px; }
+}
+@media (max-width: 680px) {
+  .ideas-workspace { grid-template-columns: minmax(0,1fr); grid-template-rows: 72px minmax(0,1fr); }
+  .ideas-rail { display: block; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 7px 9px; border-right: 0; border-bottom: 1px solid #28313c; }
+  .rail-title { display: none; }
+  #ideaList { display: flex; min-width: max-content; height: 100%; gap: 6px; align-items: center; }
+  .rail-note { display: none; }
+  .idea-rail-item { width: 190px; min-height: 50px; flex: 0 0 190px; padding: 6px 8px; }
+  .rail-empty { align-self: center; }
+  .ideas-scroll { overflow-x: auto; overflow-y: hidden; }
+  .ideas-canvas, #ideasBoard { min-width: 790px; }
+  .idea-row { min-width: 790px; grid-template-columns: 350px minmax(400px,1fr); gap: 22px; padding: 12px; }
+  .idea-root-card { width: 350px; }
+  .idea-branch::before { top: 27px; left: -22px; width: 22px; height: 1px; }
+  .idea-scenario-card { width: 360px; min-width: 360px; }
 }

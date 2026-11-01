@@ -42,7 +42,7 @@ function scenMoveNode(card,key,scope,nx,ny){
   const oldX=parseFloat(card.style.left)||0,oldY=parseFloat(card.style.top)||0;
   const dx=cx-oldX,dy=cy-oldY;
   const moving=[card],proposed=[{el:card,x:cx,y:cy}];
-  const nestedNodes=[...zone.querySelectorAll(".nested-node")].filter(pc=>pc.dataset.parentId===card.dataset.id);
+  const nestedNodes=nestedDescendants(zone,card.dataset.id);
   for(const pc of nestedNodes){
     const px=(parseFloat(pc.style.left)||0)+dx,py=(parseFloat(pc.style.top)||0)+dy;
     if(px<14||py<34)return;
@@ -59,6 +59,20 @@ function scenMoveNode(card,key,scope,nx,ny){
     S.nestedPos.set(nestedLayoutKey(scope,pc.dataset.id),{x:p.x,y:p.y});
   });
   recomputeScenarioSizes();redrawScenarioEdges();
+}
+
+function nestedDescendants(zone,parentId){
+  const descendants=[],parents=new Set([parentId]);
+  let added=true;
+  while(added){
+    added=false;
+    [...zone.querySelectorAll(".nested-node")].forEach(node=>{
+      if(parents.has(node.dataset.parentId)&&!parents.has(node.dataset.id)){
+        descendants.push(node);parents.add(node.dataset.id);added=true;
+      }
+    });
+  }
+  return descendants;
 }
 
 function scenZones(){return[...$("scenStage").querySelectorAll(".scen-zone")]}
@@ -198,8 +212,10 @@ function recomputeScenarioSizes(){
   });
   sizeStage(stage,svg);
 }
-function renderNested(zone,parentCard,node,scope){
-  if(S.hideNested)return;
+function renderNested(zone,parentCard,node,scope,seen=new Set()){
+  if(S.hideNested)return (parseFloat(parentCard.style.top)||0)+parentCard.offsetHeight;
+  if(seen.has(node.id))return (parseFloat(parentCard.style.top)||0)+parentCard.offsetHeight;
+  seen.add(node.id);
   let cursor=(parseFloat(parentCard.style.top)||0)+parentCard.offsetHeight+10;
   const left=(parseFloat(parentCard.style.left)||0)+18;
   nestedOf(node.id).forEach((item,index)=>{
@@ -211,8 +227,10 @@ function renderNested(zone,parentCard,node,scope){
     card.classList.add("nested-node");
     card.dataset.parentId=node.id;
     card.title=item.id;
-    cursor=Math.max(cursor,(parseFloat(card.style.top)||y)+card.offsetHeight+8);
+    const nestedBottom=renderNested(zone,card,item,scope,seen);
+    cursor=Math.max(cursor,nestedBottom,(parseFloat(card.style.top)||y)+card.offsetHeight+8);
   });
+  return cursor;
 }
 function renderScenario(){
   fillScenarioSelect();
@@ -275,33 +293,42 @@ function renderScenario(){
     const card=add(id,layer,14,y,opts,S.selectedScenario);
     if(card){
       let bottom=(parseFloat(card.style.top)||y)+card.offsetHeight;
-      layers[layer].querySelectorAll(".nested-node").forEach(pc=>{
-        if(pc.dataset.parentId===card.dataset.id)bottom=Math.max(bottom,(parseFloat(pc.style.top)||0)+pc.offsetHeight);
-      });
+      nestedDescendants(layers[layer],card.dataset.id).forEach(pc=>bottom=Math.max(bottom,(parseFloat(pc.style.top)||0)+pc.offsetHeight));
       nextY[layer]=bottom+12;
     }
     return card;
   };
-  if(path.endpoint)stack(path.endpoint,"endpoint",{});
-  else{
+  const endpointIds=[...(path.endpoints||[]),path.endpoint].filter((id,index,list)=>id&&list.indexOf(id)===index&&S.byId[id]);
+  if(!endpointIds.length){
+    const inbound=(S.G.edges||[]).filter(edge=>edge.kind==="dispatch"&&edge.to_node===S.selectedScenario).map(edge=>edge.from_node);
+    endpointIds.push(...inbound.filter(id=>S.byId[id]));
+  }
+  endpointIds.forEach(id=>stack(id,"endpoint",{}));
+  if(!endpointIds.length){
     const note=document.createElement("div");note.className="hint";note.style.position="absolute";note.style.left="14px";note.style.top="42px";
     note.textContent="нет эндпоинта — узел в «неполных», но цепочка показана";layers.endpoint.appendChild(note);
   }
-  stack(path.scenario,"scenario",{});
-  (path.called_scenarios||[]).forEach(id=>{if(id!==S.selectedScenario)stack(id,"scenario",{nested:true})});
-  (path.io_calls||[]).forEach(id=>stack(id,"io",{}));
-  (path.models||[]).forEach(id=>stack(id,"model",{}));
-  (path.tests||[]).forEach(id=>stack(id,"tests",{}));
-  const shown=new Set([path.endpoint,path.scenario,...(path.called_scenarios||[]),...(path.io_calls||[]),...(path.models||[]),...(path.tests||[])].filter(Boolean));
-  (S.G.edges||[])
-    .filter(edge=>edge.from_node===S.selectedScenario||edge.to_node===S.selectedScenario)
-    .forEach(edge=>{
-      const otherId=edge.from_node===S.selectedScenario?edge.to_node:edge.from_node;
-      if(shown.has(otherId)||!S.byId[otherId])return;
-      const other=S.byId[otherId];
-      const layer=other.kind==="test"?"tests":other.kind;
-      if(layers[layer]){stack(otherId,layer,{nested:true});shown.add(otherId)}
+  const traversalRoots=[S.selectedScenario,...(path.called_scenarios||[]),...(path.io_calls||[]),...(path.models||[]),...(path.tests||[])].filter((id,index,list)=>id&&list.indexOf(id)===index&&S.byId[id]);
+  const descendants=[];const seen=new Set(traversalRoots);const queue=traversalRoots.slice();
+  while(queue.length){
+    const current=queue.shift();
+    (S.G.edges||[]).filter(edge=>edge.from_node===current).forEach(edge=>{
+      const child=S.byId[edge.to_node];
+      if(!child||seen.has(child.id))return;
+      seen.add(child.id);descendants.push(child.id);queue.push(child.id);
     });
+  }
+  const byKind=(kind,preferred=[])=>[...new Set([...preferred,...descendants.filter(id=>S.byId[id]?.kind===kind)])].filter(id=>S.byId[id]);
+  const scenarioIds=byKind("scenario",[S.selectedScenario,...(path.called_scenarios||[])]);
+  const ioIds=byKind("io",path.io_calls||[]);
+  const modelIds=byKind("model",path.models||[]);
+  const nestedIds=byKind("nested");
+  const testIds=byKind("test",path.tests||[]);
+  scenarioIds.forEach(id=>{if(id!==S.selectedScenario)stack(id,"scenario",{nested:true});else stack(id,"scenario",{})});
+  ioIds.forEach(id=>stack(id,"io",{}));
+  modelIds.forEach(id=>stack(id,"model",{}));
+  testIds.forEach(id=>stack(id,"tests",{}));
+  const shown=new Set([...endpointIds,...scenarioIds,...ioIds,...modelIds,...nestedIds,...testIds]);
   const columnX={scenario:14,io:330,model:646,test:962,endpoint:14};
   const columnY={};
   incompleteNodes()
@@ -314,9 +341,7 @@ function renderScenario(){
       const y=columnY[n.kind]===undefined?38:columnY[n.kind];
       const card=add(n.id,"incomplete",x,y,{}, "incomplete");
       let bottom=(parseFloat(card.style.top)||y)+card.offsetHeight;
-      layer.querySelectorAll(".nested-node").forEach(pc=>{
-        if(pc.dataset.parentId===card.dataset.id)bottom=Math.max(bottom,(parseFloat(pc.style.top)||0)+pc.offsetHeight);
-      });
+      nestedDescendants(layer,card.dataset.id).forEach(pc=>bottom=Math.max(bottom,(parseFloat(pc.style.top)||0)+pc.offsetHeight));
       columnY[n.kind]=bottom+12;
     });
   defs.forEach(([kind])=>{
