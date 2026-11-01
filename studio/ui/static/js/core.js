@@ -210,7 +210,7 @@ function nestedLayoutKey(scope,nid){return `${scope}|${nid}`}
 async function onCardClick(id){
   if(Date.now()-S.justDraggedAt<250)return;
   const n=S.byId[id];if(!n)return;
-  if(!(await flushPending()))return;
+  if(!(await flushPending()))return false;
   if(S.tab==="map"&&n.kind==="endpoint"){openEndpointScenario(id);return}
   S.selectedNode=id;hooks.renderScenario();hooks.renderInspector();schedulePersist();
 }
@@ -226,12 +226,14 @@ async function setTab(name){
   if(name==="create")name="ideas";
   if(!(await flushPending()))return;
   S.tab=name;
-  document.querySelectorAll(".tabbtn").forEach(b=>b.classList.toggle("on",b.dataset.tab===name));
+  document.querySelectorAll(".tabbtn").forEach(b=>{const active=b.dataset.tab===name;b.classList.toggle("on",active);b.setAttribute("aria-selected",String(active))});
   document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="tab-"+(name==="ideas"?"ideas":name)));
+  const search=$("searchBox");if(search){search.placeholder=name==="ideas"?"Поиск по идеям и сценариям":"Поиск — метод, URL, имя, домен";search.setAttribute("aria-label",name==="ideas"?"Поиск по идеям и сценариям":"Поиск по проекту")}
   if(name==="map")hooks.renderMap();
   else if(name==="scenario")hooks.renderScenario();
   else hooks.renderIdeas();
   schedulePersist();
+  return true;
 }
 
 /* ---------- viewport ---------- */
@@ -497,7 +499,7 @@ function initSearch(){
   };
   box.addEventListener("input",update);
   box.addEventListener("keydown",ev=>{
-    if(ev.key!=="Enter")return;
+    if(ev.key!=="Enter"||S.tab==="ideas")return;
     const all=(S.G.nodes||[]).filter(n=>n.kind==="endpoint");
     const first=all.find(n=>matchesAll(S.lastSearchQuery,[n.label,methodOfEndpoint(n),urlOfEndpoint(n),n.domain,n.description]));
     if(first)openEndpointScenario(first.id);

@@ -12,12 +12,12 @@
 <body>
 <header>
   <span class="logo" id="logoBtn" title="О проекте"><span class="logo-mark">⬢</span> studio</span>
-  <span class="tabs">
-    <button class="tabbtn on" data-tab="map"><span class="tab-index">01</span> Карта проекта</button>
-    <button class="tabbtn" data-tab="scenario"><span class="tab-index">02</span> Конструктор сценариев</button>
-    <button class="tabbtn" data-tab="ideas"><span class="tab-index">03</span> Генератор идей</button>
+  <span class="tabs" role="tablist" aria-label="Рабочие пространства">
+    <button class="tabbtn on" id="tab-map-button" data-tab="map" role="tab" aria-selected="true" aria-controls="tab-map"><span class="tab-index">01</span> Карта проекта</button>
+    <button class="tabbtn" id="tab-scenario-button" data-tab="scenario" role="tab" aria-selected="false" aria-controls="tab-scenario"><span class="tab-index">02</span> Конструктор сценариев</button>
+    <button class="tabbtn" id="tab-ideas-button" data-tab="ideas" role="tab" aria-selected="false" aria-controls="tab-ideas"><span class="tab-index">03</span> Генератор идей</button>
   </span>
-  <span class="search-wrap"><input id="searchBox" type="search" placeholder="Поиск (/) — метод, URL, имя, домен" aria-label="Поиск"><span class="hint" id="searchCount"></span></span>
+  <span class="search-wrap"><input id="searchBox" type="search" placeholder="Поиск — метод, URL, имя, домен" aria-label="Поиск по проекту"><span class="hint" id="searchCount"></span></span>
   <select id="editorChoice" title="Открывать в редакторе" aria-label="Редактор"></select>
   <span id="liveDot" class="live off" title="нет связи со студией">●</span>
   <span class="todo-chip-wrap">
@@ -41,20 +41,20 @@
 </header>
 <div id="offlineBanner" class="offline-banner" role="alert" hidden>Нет связи со студией: правки не сохраняются. Перезапустите <b>studio</b> и обновите страницу.</div>
 <main>
-  <section class="tab on" id="tab-map">
+  <section class="tab on" id="tab-map" role="tabpanel" aria-labelledby="tab-map-button">
     <div id="mapPane">
       <div class="mapbar"><span>Границы пакета: <b>fastbase</b></span><span class="hint">показаны только эндпоинты; домен → HTTP-метод; клик открывает сценарий</span><span id="domainChips" class="chips"></span></div>
       <div class="canvas" id="mapCanvas"><div class="view" id="mapView"><div class="stage" id="mapStage"><svg class="edges" id="mapEdges"></svg></div></div></div>
     </div>
   </section>
-  <section class="tab" id="tab-scenario">
+  <section class="tab" id="tab-scenario" role="tabpanel" aria-labelledby="tab-scenario-button">
     <div class="workspace-switch" role="tablist" aria-label="Разделы конструктора">
-      <button class="workspace-btn on" type="button" data-workspace="graph">Граф сценариев</button>
-      <button class="workspace-btn" type="button" data-workspace="plans">Планы и создание</button>
+      <button class="workspace-btn on" id="workspace-graph-button" type="button" role="tab" aria-selected="true" aria-controls="scenWrap" data-workspace="graph">Граф сценариев</button>
+      <button class="workspace-btn" id="workspace-plans-button" type="button" role="tab" aria-selected="false" aria-controls="createPane" data-workspace="plans">Планы и создание</button>
       <span class="workspace-description">Выберите сценарий, изучите его путь и редактируйте метаданные</span>
     </div>
     <div id="scenarioWorkbench">
-    <div id="scenWrap" class="constructor-view on" data-constructor-view="graph">
+    <div id="scenWrap" class="constructor-view on" role="tabpanel" aria-labelledby="workspace-graph-button" data-constructor-view="graph">
       <aside id="scenList"></aside>
       <div id="scenMain">
         <div id="scenBar">
@@ -71,7 +71,7 @@
         <div id="inspFoot">Правки сохраняются при потере фокуса.</div>
       </aside>
     </div>
-    <div id="createPane" class="constructor-view" data-constructor-view="plans">
+    <div id="createPane" class="constructor-view" role="tabpanel" aria-labelledby="workspace-plans-button" data-constructor-view="plans">
       <div class="constructor-heading"><div><div class="eyebrow">КОНСТРУКТОР</div><h2>Планы сценариев</h2><p>Создавайте заготовки, редактируйте описание и готовьте задачи для реализации.</p></div><div class="constructor-count" id="constructorCount">— планов</div></div>
       <div class="plan-scroll">
         <form id="planForm" class="plan-form" autocomplete="off">
@@ -107,9 +107,9 @@
     </div>
     </div>
   </section>
-  <section class="tab" id="tab-ideas">
+  <section class="tab" id="tab-ideas" role="tabpanel" aria-labelledby="tab-ideas-button">
     <div id="ideasPane">
-      <div class="ideas-toolbar"><div><div class="eyebrow">ПРОЕКТИРОВАНИЕ</div><h2>Генератор идей сценариев</h2><p>Каждая идея становится корнем ветки. Добавьте ответ LLM — сценарии появятся связанными карточками.</p></div><div class="ideas-actions"><span class="save-indicator" id="ideasSaveState">Все изменения сохранены</span><button type="button" id="addIdeaBtn" class="primary">＋ Новая идея</button></div></div>
+      <div class="ideas-toolbar"><div><div class="eyebrow">ПРОЕКТИРОВАНИЕ</div><h2>Генератор идей сценариев</h2><p>Каждая идея становится корнем ветки. Добавьте ответ LLM — сценарии появятся связанными карточками.</p></div><div class="ideas-actions"><span class="save-indicator" id="ideasSaveState" role="status" aria-live="polite">Все изменения сохранены</span><button type="button" id="ideasExportBtn" title="Скачать доску идей в JSON">Экспорт</button><button type="button" id="ideasImportBtn" title="Загрузить доску идей из JSON">Импорт</button><input type="file" id="ideasImportFile" accept="application/json,.json" hidden><button type="button" id="addIdeaBtn" class="primary">＋ Новая идея</button></div></div>
       <div class="ideas-workspace">
         <aside class="ideas-rail"><div class="rail-title">ИДЕИ ПРОЕКТА</div><div id="ideaList"></div><div class="rail-note"><b>Рабочий процесс</b><span>Идея → промпт → ответ LLM → сценарии</span></div></aside>
         <div class="ideas-scroll"><div class="ideas-canvas" id="ideasCanvas"><div id="ideasBoard"></div></div></div>

@@ -41,7 +41,7 @@ async function boot(){
   initEditorChoice();
   document.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
   const showWorkspace=(name)=>{
-    document.querySelectorAll(".workspace-btn").forEach(button=>button.classList.toggle("on",button.dataset.workspace===name));
+    document.querySelectorAll(".workspace-btn").forEach(button=>{const active=button.dataset.workspace===name;button.classList.toggle("on",active);button.setAttribute("aria-selected",String(active))});
     document.querySelectorAll("[data-constructor-view]").forEach(view=>view.classList.toggle("on",view.dataset.constructorView===name));
     if(name==="plans")renderCreate();
   };
@@ -61,6 +61,7 @@ async function boot(){
     if(ev.key==="Escape"&&S.tab==="scenario"&&S.selectedNode!==null&&!typing){flushPending();S.selectedNode=null;renderScenario()}
     if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==="k"){ev.preventDefault();openPalette();return}
     if(typing)return;
+    if(S.tab==="ideas"&&["f","+","=","-","h"].includes(ev.key.toLowerCase()))return;
     if(ev.key==="/") {ev.preventDefault();const box=$("searchBox");if(box){box.focus();box.select()}}
     if(ev.key.toLowerCase()==="o"&&S.selectedNode){ev.preventDefault();openEditorForNode(S.byId[S.selectedNode])}
     if(ev.key.toLowerCase()==="f"&&!ev.ctrlKey&&!ev.metaKey){ev.preventDefault();const a=activeView();fitView(a.canvas,a.view,()=>applyTransform(a.id,a.view))}
