@@ -8,36 +8,38 @@
 
 <meta name="studio-token" content="">
 <link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/workspace.css">
 </head>
 <body>
 <header>
-  <span class="logo" id="logoBtn" title="О проекте"><span class="logo-mark">⬢</span> studio</span>
-  <span class="tabs" role="tablist" aria-label="Рабочие пространства">
-    <button class="tabbtn on" id="tab-map-button" data-tab="map" role="tab" aria-selected="true" aria-controls="tab-map"><span class="tab-index">01</span> Карта проекта</button>
-    <button class="tabbtn" id="tab-scenario-button" data-tab="scenario" role="tab" aria-selected="false" aria-controls="tab-scenario"><span class="tab-index">02</span> Конструктор сценариев</button>
-    <button class="tabbtn" id="tab-ideas-button" data-tab="ideas" role="tab" aria-selected="false" aria-controls="tab-ideas"><span class="tab-index">03</span> Генератор идей</button>
-  </span>
-  <span class="search-wrap"><input id="searchBox" type="search" placeholder="Поиск — метод, URL, имя, домен" aria-label="Поиск по проекту"><span class="hint" id="searchCount"></span></span>
-  <select id="editorChoice" title="Открывать в редакторе" aria-label="Редактор"></select>
-  <span id="liveDot" class="live off" title="нет связи со студией">●</span>
-  <span class="todo-chip-wrap">
-    <button id="briefBtn" type="button" title="Планируемые узлы и статус ТЗ">К реализации: 0</button>
-    <button id="todoMenuBtn" type="button" class="todo-menu-btn" title="Меню TODO" aria-label="Меню TODO">▾</button>
-    <span id="todoMenuPanel" class="todo-menu-panel" hidden>
-      <button id="todoBriefAction" type="button">Сформировать ТЗ для AI-агента</button>
-      <button id="todoStatusAction" type="button">Проверить выполнение ТЗ</button>
+  <div class="header-brand">
+    <span class="logo" id="logoBtn" title="О проекте"><span class="logo-mark">⬢</span> studio</span>
+    <span class="tabs" role="tablist" aria-label="Рабочие пространства">
+      <button class="tabbtn on" id="tab-map-button" data-tab="map" role="tab" aria-selected="true" aria-controls="tab-map"><span class="tab-index">01</span> Карта проекта</button>
+      <button class="tabbtn" id="tab-scenario-button" data-tab="scenario" role="tab" aria-selected="false" aria-controls="tab-scenario"><span class="tab-index">02</span> Конструктор сценариев</button>
+      <button class="tabbtn" id="tab-ideas-button" data-tab="ideas" role="tab" aria-selected="false" aria-controls="tab-ideas"><span class="tab-index">03</span> Генератор идей</button>
     </span>
-  </span>
-  <button id="diagBtn" type="button" title="Диагностика и жёлтые пометки">⚠ 0</button>
-  <span class="spacer"></span>
-  <label class="hint" title="визуально скрыть описания, критерии и домены на узлах"><input type="checkbox" id="hideMeta"> скрыть метаданные</label>
-  <label class="hint" title="скрыть nested-узлы на карте; в инспекторе и ТЗ они остаются"><input type="checkbox" id="hideNested"> скрыть вложенные</label>
-  <span class="hint" id="zoomLabel">100%</span>
-  <button id="zOut" title="отдалить">−</button>
-  <button id="zIn" title="приблизить">+</button>
-  <button id="zFit" title="вписать карту в окно">вписать</button>
-  <button id="zReset" title="масштаб 100%">1:1</button>
-  <button id="rescan" title="перечитать код проекта и метаданные">Обновить из кода</button>
+  </div>
+  <span class="search-wrap"><input id="searchBox" type="search" placeholder="Поиск — метод, URL, имя, домен" aria-label="Поиск по проекту"><span class="hint" id="searchCount"></span></span>
+  <div class="header-global">
+    <select id="editorChoice" title="Открывать в редакторе" aria-label="Редактор"></select>
+    <span id="liveDot" class="live off" title="нет связи со студией">●</span>
+    <span class="todo-chip-wrap">
+      <button id="briefBtn" type="button" title="Планируемые узлы и статус ТЗ">К реализации: 0</button>
+      <button id="todoMenuBtn" type="button" class="todo-menu-btn" title="Меню TODO" aria-label="Меню TODO">▾</button>
+      <span id="todoMenuPanel" class="todo-menu-panel" hidden>
+        <button id="todoBriefAction" type="button">Сформировать ТЗ для AI-агента</button>
+        <button id="todoStatusAction" type="button">Проверить выполнение ТЗ</button>
+      </span>
+    </span>
+    <button id="diagBtn" type="button" title="Диагностика и жёлтые пометки">⚠ 0</button>
+  </div>
+  <div class="header-canvas">
+    <label class="canvas-toggle" title="визуально скрыть описания, критерии и домены на узлах"><input type="checkbox" id="hideMeta"> <span>Метаданные</span></label>
+    <label class="canvas-toggle toggle-nested" title="скрыть nested-узлы на карте; в инспекторе и ТЗ они остаются"><input type="checkbox" id="hideNested"> <span>Вложенные</span></label>
+    <div class="zoom-tools" aria-label="Масштаб канваса"><span class="hint" id="zoomLabel">100%</span><button id="zOut" title="Отдалить" aria-label="Отдалить">−</button><button id="zIn" title="Приблизить" aria-label="Приблизить">+</button><button id="zFit" title="Вписать канвас">Вписать</button><button id="zReset" title="Масштаб 100%">1:1</button></div>
+    <button id="rescan" title="Перечитать код проекта и метаданные">Обновить код</button>
+  </div>
 </header>
 <div id="offlineBanner" class="offline-banner" role="alert" hidden>Нет связи со студией: правки не сохраняются. Перезапустите <b>studio</b> и обновите страницу.</div>
 <main>
