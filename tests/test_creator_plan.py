@@ -249,7 +249,7 @@ def test_create_откат_при_сбое_metadata(demo: Path, monkeypatch):
     import studio.creator.plan as plan_module
 
     before = _snapshot(demo)
-    monkeypatch.setattr(plan_module, "write_metadata", lambda root, metadata: False)
+    monkeypatch.setattr(plan_module, "write_metadata", lambda *args: False)
     with pytest.raises(CreateError, match="metadata.json"):
         create_plan(_data(), read_env(demo))
     assert _snapshot(demo) == before

@@ -360,9 +360,22 @@ def test_metadata_версия_выше_2_не_перезаписывается(
     assert path.read_bytes() == before
 
 
+@pytest.mark.parametrize("version", [None, True, 0])
+def test_metadata_неверный_тип_версии_не_перезаписывается(tmp_path: Path, version):
+    root = tmp_path / f"bad-{version}"
+    path = _write(root, {"version": version, "nodes": {}, "edges": []})
+    before = path.read_bytes()
+    metadata = read_metadata(root)
+
+    assert metadata.write_blocked is True
+    assert write_metadata(root, metadata) is False
+    assert path.read_bytes() == before
+
+
 @pytest.mark.parametrize(
     "plans",
     [
+        None,
         ["not-a-dict"],
         {"cancel_order": "not-a-dict"},
         {"cancel_order": {"layers": "bad"}},
@@ -371,11 +384,38 @@ def test_metadata_версия_выше_2_не_перезаписывается(
 )
 def test_повреждённые_plans_дают_W_PLAN_INVALID(tmp_path: Path, plans):
     root = tmp_path / "p"
-    _write(root, {"version": 2, "nodes": {}, "edges": [], "plans": plans})
+    path = _write(root, {"version": 2, "nodes": {}, "edges": [], "plans": plans})
+    before = path.read_bytes()
     sink = Sink()
     metadata = read_metadata(root, sink)
     assert any(item.code == "W_PLAN_INVALID" for item in sink.diagnostics())
     assert metadata.plans == {}
+    assert metadata.write_blocked is True
+    assert write_metadata(root, metadata) is False
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("nodes", ["not-a-map"]),
+        ("nodes", None),
+        ("edges", {"not": "a-list"}),
+        ("edges", None),
+    ],
+)
+def test_повреждённая_секция_metadata_не_перезаписывается(tmp_path: Path, field, value):
+    root = tmp_path / "p"
+    payload = {"version": 2, "nodes": {}, "edges": []}
+    payload[field] = value
+    path = _write(root, payload)
+    before = path.read_bytes()
+
+    metadata = read_metadata(root, Sink())
+
+    assert metadata.write_blocked is True
+    assert write_metadata(root, metadata) is False
+    assert path.read_bytes() == before
 
 
 # --------------------------------------------------------------- схема графа

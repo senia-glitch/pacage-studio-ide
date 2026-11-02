@@ -309,6 +309,16 @@ svg.edges { position: absolute; z-index: 1; overflow: visible; pointer-events: n
 .kv b { overflow-wrap: anywhere; font-weight: 600; }
 .graph-add { padding: 10px; border: 1px solid #2d3c4c; border-radius: 8px; background: #131a22; }
 .graph-add summary { color: #9ac8f2; font-size: 12px; font-weight: 650; cursor: pointer; }
+.node-origin { display: grid; gap: 4px; margin: 0 0 10px; padding: 9px 10px; border: 1px solid #344252; border-radius: 7px; font-size: 10px; line-height: 1.45; }
+.node-origin b { font-size: 11px; }
+.node-origin span { color: var(--muted); }
+.plan-origin { border-color: #73552e; background: rgba(232, 163, 90, .07); }
+.plan-origin b { color: #f0c58d; }
+.code-origin { border-color: #34536b; background: rgba(90, 160, 255, .06); }
+.code-origin b { color: #9ac8f2; }
+.graph-add-help { margin: 9px 0 4px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.graph-relation { padding: 7px 8px; border-left: 2px solid #597a9b; background: #18222d; color: #c5d9eb; font-size: 10px; line-height: 1.4; }
+.graph-plans-link { padding: 3px 0; text-align: left; font-size: 10px; }
 .graph-node-form { display: grid; gap: 9px; margin-top: 12px; }
 .graph-node-form label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
 .graph-node-form input, .graph-node-form textarea, .graph-node-form select { width: 100%; min-width: 0; padding: 8px 9px; border: 1px solid #344252; border-radius: 6px; background: #11171e; color: var(--text); font: inherit; font-size: 12px; }

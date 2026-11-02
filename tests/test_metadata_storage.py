@@ -13,6 +13,7 @@ import pytest
 
 from studio import store
 from studio.metadata import metadata_path, save_node_metadata
+from studio.metadata.store import Metadata, write_metadata
 from studio.scanner import scan
 from studio.server import make_handler
 from studio.server.state import ProjectState
@@ -22,6 +23,17 @@ LIST_ORDERS = "endpoint:app/api/v1/routes/orders.py:list_orders"
 
 def _read_raw(root: Path) -> dict:
     return json.loads(metadata_path(root).read_text(encoding="utf-8"))
+
+
+def test_expected_missing_metadata_never_overwrites_concurrent_file(tmp_path: Path):
+    root = tmp_path / "project"
+    path = metadata_path(root)
+    path.parent.mkdir(parents=True)
+    original = b'{"version":2,"nodes":{"external":"keep"},"edges":[]}'
+    path.write_bytes(original)
+
+    assert write_metadata(root, Metadata(), expected_hash=None) is False
+    assert path.read_bytes() == original
 
 
 # --------------------------------------------------------------- D1: git

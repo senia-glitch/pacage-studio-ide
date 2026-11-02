@@ -42,6 +42,7 @@ ALLOWED_FIELDS = (
     "studio_owned",
 )
 _TOP_LEVEL_FIELDS = frozenset({"version", "nodes", "edges", "plans"})
+_UNSET = object()
 
 
 class MetadataError(Exception):
@@ -163,8 +164,8 @@ def read_metadata(project_root: Path, sink: Sink | None = None) -> Metadata:
             )
         return Metadata(version=METADATA_VERSION, write_blocked=True)
     raw_version = raw.get("version")
-    version = 1 if raw_version is None else raw_version
-    if not isinstance(version, int) or version < 1:
+    version = 1 if "version" not in raw else raw_version
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
         if sink is not None:
             sink.add(
                 "W_METADATA_INVALID",
@@ -183,46 +184,86 @@ def read_metadata(project_root: Path, sink: Sink | None = None) -> Metadata:
                 hint="Обновите studio; файл не перезаписывается.",
             )
         return Metadata(version=METADATA_VERSION, write_blocked=True)
+    write_blocked = False
+
+    def invalid(code: str, message: str, hint: str) -> None:
+        nonlocal write_blocked
+        write_blocked = True
+        if sink is not None:
+            sink.add(
+                code,
+                message,
+                file=f"{STUDIO_DIR}/{METADATA_NAME}",
+                hint=hint,
+            )
+
     nodes: dict[str, dict] = {}
-    raw_nodes = raw.get("nodes")
+    raw_nodes = raw.get("nodes", {})
     if isinstance(raw_nodes, dict):
         for key, value in raw_nodes.items():
             record = _clean_node(value)
             if record:
                 record.setdefault("kind", str(key).split(":", 1)[0])
                 nodes[str(key)] = record
+            else:
+                invalid(
+                    "W_METADATA_INVALID",
+                    f"metadata.json: узел {key!r} должен быть объектом",
+                    "Исправьте запись узла; сохранение заблокировано, чтобы не потерять данные.",
+                )
+    else:
+        invalid(
+            "W_METADATA_INVALID",
+            "metadata.json: nodes должен быть объектом «id → узел»",
+            "Исправьте nodes; сохранение заблокировано, чтобы не потерять данные.",
+        )
     edges: list[dict] = []
-    raw_edges = raw.get("edges")
+    raw_edges = raw.get("edges", [])
     if isinstance(raw_edges, list):
         for value in raw_edges:
             edge = _clean_edge(value)
             if edge is not None:
                 edges.append(edge)
+            else:
+                invalid(
+                    "W_METADATA_INVALID",
+                    "metadata.json: некорректная связь пропущена",
+                    "Исправьте связь; сохранение заблокировано, чтобы не потерять данные.",
+                )
+    else:
+        invalid(
+            "W_METADATA_INVALID",
+            "metadata.json: edges должен быть списком",
+            "Исправьте edges; сохранение заблокировано, чтобы не потерять данные.",
+        )
     plans: dict[str, Plan] = {}
     raw_plans = raw.get("plans")
     if raw_plans is not None:
         if not isinstance(raw_plans, dict):
-            if sink is not None:
-                sink.add(
-                    "W_PLAN_INVALID",
-                    "metadata.json: plans должен быть объектом «slug → план»",
-                    file=f"{STUDIO_DIR}/{METADATA_NAME}",
-                    hint="Удалите plans или исправьте его форму.",
-                )
+            invalid(
+                "W_PLAN_INVALID",
+                "metadata.json: plans должен быть объектом «slug → план»",
+                "Исправьте plans; сохранение заблокировано, чтобы не потерять данные.",
+            )
         else:
             for key, value in raw_plans.items():
                 try:
                     plan = plan_from_record(str(key), value)
                 except PlanError as exc:
-                    if sink is not None:
-                        sink.add(
-                            "W_PLAN_INVALID",
-                            f"metadata.json: план {key!r} не читается: {exc}",
-                            file=f"{STUDIO_DIR}/{METADATA_NAME}",
-                            hint="Исправьте типы полей плана или удалите запись.",
-                        )
+                    invalid(
+                        "W_PLAN_INVALID",
+                        f"metadata.json: план {key!r} не читается: {exc}",
+                        "Исправьте поля плана; сохранение заблокировано, "
+                        "чтобы не потерять данные.",
+                    )
                     continue
                 plans[str(key)] = plan
+    elif "plans" in raw:
+        invalid(
+            "W_PLAN_INVALID",
+            "metadata.json: plans должен быть объектом «slug → план»",
+            "Исправьте plans; сохранение заблокировано, чтобы не потерять данные.",
+        )
     extra = {
         key: value for key, value in raw.items() if key not in _TOP_LEVEL_FIELDS
     }
@@ -232,6 +273,7 @@ def read_metadata(project_root: Path, sink: Sink | None = None) -> Metadata:
         edges=edges,
         plans=plans,
         extra=extra,
+        write_blocked=write_blocked,
     )
 
 
@@ -279,7 +321,7 @@ def _file_hash(path: Path) -> str | None:
 
 
 def write_metadata(
-    project_root: Path, metadata: Metadata, expected_hash: str | None = None
+    project_root: Path, metadata: Metadata, expected_hash: str | None | object = _UNSET
 ) -> bool:
     """Атомарно записать metadata.json. False — запись не удалась или запрещена.
 
@@ -289,7 +331,7 @@ def write_metadata(
     if metadata.write_blocked:
         return False
     path = metadata_path(project_root)
-    if expected_hash is not None and _file_hash(path) != expected_hash:
+    if expected_hash is not _UNSET and _file_hash(path) != expected_hash:
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
     return atomic_write(path, metadata_payload(metadata))

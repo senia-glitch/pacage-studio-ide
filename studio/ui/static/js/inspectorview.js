@@ -13,26 +13,51 @@ function editableName(node){
   return details.function_name||details.class_name||details.test_name||details.name||details.method||node.label;
 }
 function graphOwned(node){return !!node?.planned&&node.id.startsWith("studio:")}
+function removablePlanBranch(rootId){
+  const nodes=S.byId||{},edges=S.G?.edges||[],removable=new Set([rootId]);
+  let changed=true;
+  while(changed){
+    changed=false;
+    for(const edge of edges){
+      const parent=edge.kind==="tests"?edge.to_node:edge.from_node;
+      const childId=edge.kind==="tests"?edge.from_node:edge.to_node;
+      if(!removable.has(parent)||removable.has(childId))continue;
+      const child=nodes[childId];
+      if(!graphOwned(child))continue;
+      const parents=edges.filter(item=>(item.kind==="tests"?item.from_node:item.to_node)===childId);
+      const onlyThisBranch=parents.every(item=>removable.has(item.kind==="tests"?item.to_node:item.from_node));
+      if(onlyThisBranch){removable.add(childId);changed=true;}
+    }
+  }
+  return [...removable].map(id=>nodes[id]).filter(Boolean);
+}
 
 function renderInspector(){
   const chips=$("inspChips"),body=$("inspBody"),foot=$("inspFoot");
   chips.innerHTML="";body.innerHTML="";
   if(!S.selectedNode||!S.byId[S.selectedNode]){
-    body.innerHTML='<p class="hint">Выберите узел на карте. Описание, критерии и домен хранятся в .studio/metadata.json; код проекта не изменяется.</p>';
+    body.innerHTML='<p class="hint">Выберите узел на карте, чтобы добавить к нему плановый узел. Структура найденных в коде узлов меняется в IDE; описания и плановые карточки студия хранит в .studio/metadata.json.</p><button id="emptyInspectorPlans" class="primary" type="button">Создать сценарий целиком →</button>';
+    $("emptyInspectorPlans")?.addEventListener("click",()=>$("workspace-plans-button")?.click());
     foot.textContent="Правки сохраняются при потере фокуса.";return;
   }
   const n=S.byId[S.selectedNode];
   chips.innerHTML=`<span class="chip acc">${esc(KIND_NAMES[n.kind]||n.kind)}</span>${todoBadgeHtml(n)}${notesOf(n).length?'<span class="chip warn">неточно</span>':""}<span class="chip">${esc(n.file_path)}${n.planned?"":":"+n.line}</span>`;
   let h="";
-  if(n.planned)h+=`<div class="insp-todo">Этот узел — TODO. Кода пока нет. Файл: <b>${esc((n.details||{}).target_file||n.file_path)}</b></div>`;
+  h+=n.planned
+    ?`<div class="node-origin plan-origin"><b>Плановый узел</b><span>Кода пока нет · описание и связи хранятся в .studio/metadata.json.</span><span>${graphOwned(n)?"Название, задача и критерии редактируются здесь.":"Описание и критерии редактируются здесь; файлы создаются в «Планы и создание»."}</span></div>`
+    :`<div class="node-origin code-origin"><b>Узел из кода</b><span>Источник структуры — ${esc(n.file_path)}.</span><span>Код меняется в IDE; здесь редактируются описание и критерии.</span></div>`;
+  if(n.planned)h+=`<div class="insp-todo">Этот узел — TODO · Файл для реализации: <b>${esc((n.details||{}).target_file||n.file_path)}</b></div>`;
   h+=`<div class="kv"><span>${n.planned?"узел":"якорь"}</span><b>${esc(anchorText(n))}</b></div>`;
   h+=`<div class="insp-actions"><button id="openEditorBtn" type="button">Открыть в VS Code</button><button id="copyLocBtn" type="button">Копировать путь:строка</button></div>`;
-  h+=`<details class="field graph-add"><summary>＋ Добавить связанный узел</summary><form id="graphNodeCreate" class="graph-node-form">
-    <label>Тип узла<select name="kind"><option value="scenario">Сценарий</option><option value="io">IO</option><option value="model">Модель</option><option value="test">Тест</option><option value="nested">Дополнительный узел</option></select></label>
-    <label>Связь<select name="edge_kind"><option value="uses">использует</option><option value="dispatch">вызывает endpoint → scenario</option><option value="scenario_call">вызывает сценарий</option><option value="port_call">вызов IO</option><option value="table">работает с таблицей</option><option value="tests">проверяется тестом</option><option value="depends">зависит от</option></select></label>
+  h+=`<details class="field graph-add" open><summary>＋ Добавить узел в эту ветку</summary>
+    <p class="graph-add-help">Создаст плановую карточку и связь с «${esc(n.label)}». Для нового сценария целиком используйте «Планы и создание».</p>
+    <button type="button" class="link graph-plans-link" id="graphPlansLink">Создать сценарий целиком →</button>
+    <form id="graphNodeCreate" class="graph-node-form">
+    <label>Какой узел добавить<select name="kind"><option value="scenario">Сценарий</option><option value="io">IO</option><option value="model">Модель</option><option value="test">Тест</option><option value="nested">Дополнительный узел</option></select></label>
+    <div class="graph-relation" id="graphRelation" role="status"></div>
     <label>Название<input name="name" required maxlength="180" placeholder="Например: LoadOrderIO"></label>
     <label>Описание<textarea name="description" rows="3" placeholder="Назначение узла"></textarea></label>
-    <div class="graph-form-actions"><button type="submit" class="primary">Создать и связать</button><span class="hint">Направление связи определяется её типом.</span></div>
+    <div class="graph-form-actions"><button type="submit" class="primary">＋ Создать плановый узел</button></div>
   </form></details>`;
   if(notesOf(n).length){
     h+=`<div class="field yellow-block"><label>Почему жёлтый</label>`+
@@ -65,7 +90,7 @@ function renderInspector(){
       nestedItems.map(p=>`<button type="button" class="link nested-insp" data-nested="${esc(p.id)}">${esc(p.label)}</button> — ${esc(ROLE_NAMES[(p.details||{}).role]||(p.details||{}).role||"")} · ${esc(p.file_path)}:${p.line}`).join("<br>")+
       `</div></div>`;
   }
-  if(graphOwned(n))h+=`<button id="deleteGraphNode" class="danger graph-delete" type="button">Удалить узел и его плановую ветку</button>`;
+  if(graphOwned(n))h+=`<button id="deleteGraphNode" class="danger graph-delete" type="button">Удалить плановый узел и ветку…</button>`;
   body.innerHTML=h;
   const openBtn=$("openEditorBtn");if(openBtn)openBtn.onclick=()=>openEditorForNode(n);
   const copyBtn=$("copyLocBtn");if(copyBtn)copyBtn.onclick=()=>copyNodeLocation(n);
@@ -73,32 +98,44 @@ function renderInspector(){
     button.onclick=()=>{S.selectedNode=button.dataset.nested;hooks.renderScenario();renderInspector()};
   });
   const createForm=$("graphNodeCreate");
+  $("graphPlansLink")?.addEventListener("click",()=>$("workspace-plans-button")?.click());
   if(createForm){
-    const kindField=createForm.elements.kind,edgeField=createForm.elements.edge_kind;
+    const kindField=createForm.elements.kind,relation=$("graphRelation");
     const preferred={endpoint:"scenario",scenario:"io",io:"model",model:"nested",test:"nested",nested:"nested"}[n.kind];
     if(preferred)kindField.value=preferred;
+    const relations={
+      endpoint:{scenario:["dispatch","эндпоинт вызывает сценарий"],nested:["uses","дополнительный узел относится к эндпоинту"]},
+      scenario:{scenario:["scenario_call","сценарий вызывает сценарий"],io:["port_call","сценарий вызывает IO"],test:["tests","тест проверяет сценарий"],nested:["uses","дополнительный узел относится к сценарию"]},
+      io:{model:["table","IO работает с моделью / таблицей"],nested:["uses","дополнительный узел относится к IO"]},
+      model:{nested:["uses","дополнительный узел относится к модели"]},
+      test:{nested:["uses","дополнительный узел относится к тесту"]},
+      nested:{nested:["uses","дополнительный узел относится к этому узлу"]},
+    };
     const applySuggestedEdge=()=>{
-      const child=kindField.value;
-      const allowed={endpoint:["scenario","nested"],scenario:["scenario","io","test","nested"],io:["model","nested"],model:["nested"],test:["nested"],nested:["nested"]}[n.kind]||["nested"];
+      const choices=relations[n.kind]||{};
+      const allowed=Object.keys(choices);
       [...kindField.options].forEach(option=>{option.hidden=!allowed.includes(option.value);option.disabled=!allowed.includes(option.value)});
-      if(!allowed.includes(child))kindField.value=allowed[0];
-      const selectedKind=kindField.value;
-      const suggested=n.kind==="endpoint"&&selectedKind==="scenario"?"dispatch":n.kind==="scenario"&&selectedKind==="scenario"?"scenario_call":n.kind==="scenario"&&selectedKind==="io"?"port_call":n.kind==="io"&&selectedKind==="model"?"table":selectedKind==="test"?"tests":"uses";
-      edgeField.value=suggested;
+      if(!allowed.includes(kindField.value))kindField.value=allowed[0];
+      const selected=choices[kindField.value]||choices[allowed[0]];
+      relation.textContent=`Связь: ${selected?.[1]||"использует"}`;
+      createForm.dataset.edgeKind=selected?.[0]||"uses";
     };
     kindField.onchange=applySuggestedEdge;applySuggestedEdge();
     createForm.onsubmit=async event=>{
       event.preventDefault();const values=new FormData(createForm);const submit=createForm.querySelector('[type="submit"]');
       submit.disabled=true;submit.textContent="Создаю…";
       try{
-        if(!(await saveMetadata())){submit.disabled=false;submit.textContent="Создать и связать";return}
-        const data=await api("/api/metadata/graph-node","POST",{kind:values.get("kind"),name:values.get("name"),description:values.get("description"),parent_id:n.id,edge_kind:values.get("edge_kind"),target_file:n.file_path});
+        if(!(await saveMetadata())){submit.disabled=false;submit.textContent="＋ Создать плановый узел";return}
+        const data=await api("/api/metadata/graph-node","POST",{kind:values.get("kind"),name:values.get("name"),description:values.get("description"),parent_id:n.id,edge_kind:createForm.dataset.edgeKind||"uses",target_file:n.file_path});
         applyGraph(data.graph);S.selectedNode=data.node_id;hooks.renderScenario();renderInspector();schedulePersist();toast("Узел добавлен в ветку");
-      }catch(error){submit.disabled=false;submit.textContent="Создать и связать";toast("Не удалось добавить узел: "+error.message)}
+      }catch(error){submit.disabled=false;submit.textContent="＋ Создать плановый узел";toast("Не удалось добавить узел: "+error.message)}
     };
   }
   $("deleteGraphNode")?.addEventListener("click",async()=>{
-    if(!confirm("Удалить этот узел и все связанные с ним плановые узлы? Реальные узлы проекта останутся на месте."))return;
+    const branch=removablePlanBranch(n.id);
+    const names=branch.map(node=>`• ${KIND_NAMES[node.kind]||node.kind}: ${node.label}`);
+    const message=`Удалить плановую ветку из ${branch.length} ${branch.length===1?"узла":"узлов"}?\n\n${names.join("\n")}\n\nСвязи затронутых узлов будут удалены. Узлы кода и плановые узлы, используемые другими ветками, сохранятся.`;
+    if(!confirm(message))return;
     const button=$("deleteGraphNode");button.disabled=true;
     try{if(!(await saveMetadata())){button.disabled=false;return}const data=await api("/api/metadata/graph-node/delete","POST",{node_id:n.id});applyGraph(data.graph);S.selectedNode=null;hooks.renderScenario();renderInspector();schedulePersist();toast("Плановая ветка удалена")}
     catch(error){button.disabled=false;toast("Не удалось удалить узел: "+error.message)}

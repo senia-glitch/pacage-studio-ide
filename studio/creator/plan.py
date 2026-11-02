@@ -256,6 +256,18 @@ def _metadata_problems(root: Path) -> tuple[Metadata, list[dict]]:
     return metadata, issues
 
 
+def _write_metadata_against_stamp(root: Path, metadata: Metadata, stamp: str | None) -> None:
+    """Write only if the metadata file still matches the version we read."""
+    if write_metadata(root, metadata, stamp):
+        return
+    if metadata_hash(root) != stamp:
+        raise CreateError(
+            "metadata.json изменили из другой вкладки или IDE — повторите действие",
+            "W_METADATA_INVALID",
+        )
+    raise CreateError("не удалось записать .studio/metadata.json", "not_writable")
+
+
 def preview_plan(data, env: ProjectEnv) -> dict:
     """Предложить цепочку и конфликты, ничего не записывая."""
     if not isinstance(data, dict):
@@ -502,10 +514,7 @@ def create_plan(data, env: ProjectEnv) -> PlanResult:
                 "повторите создание плана",
                 "W_METADATA_INVALID",
             )
-        if not write_metadata(root, metadata):
-            raise CreateError(
-                "не удалось записать .studio/metadata.json", "not_writable"
-            )
+        _write_metadata_against_stamp(root, metadata, stamp)
     except (CreateError, OSError, MetadataError) as exc:
         failures = _rollback(root, written, backup, created_dirs, expected_metadata)
         if not failures:
@@ -591,8 +600,7 @@ def update_plan(data, env: ProjectEnv) -> Plan:
             "metadata.json изменили из другой вкладки или IDE — повторите правку",
             "W_METADATA_INVALID",
         )
-    if not write_metadata(root, metadata):
-        raise CreateError("не удалось записать .studio/metadata.json", "not_writable")
+    _write_metadata_against_stamp(root, metadata, stamp)
     return updated
 
 
@@ -637,8 +645,7 @@ def delete_plan(data, env: ProjectEnv) -> PlanDeleteResult:
             "metadata.json изменили из другой вкладки или IDE — повторите удаление",
             "W_METADATA_INVALID",
         )
-    if not write_metadata(root, metadata):
-        raise CreateError("не удалось записать .studio/metadata.json", "not_writable")
+    _write_metadata_against_stamp(root, metadata, stamp)
 
     result = PlanDeleteResult(
         slug=slug,
