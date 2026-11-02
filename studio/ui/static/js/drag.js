@@ -15,6 +15,8 @@ function bindDrag(element, handle, view, onMove, onEnd, hooks = {}) {
     const startX = Number.parseFloat(element.style.left) || 0;
     const startY = Number.parseFloat(element.style.top) || 0;
     const scale = view.k || 1;
+    const pointerId = event.pointerId;
+    const eventTarget = typeof window === "undefined" ? handle : window;
     let moved = false;
     let frame = 0;
     let latest = null;
@@ -30,12 +32,14 @@ function bindDrag(element, handle, view, onMove, onEnd, hooks = {}) {
       onMove(startX + (latest.x - sx) / scale, startY + (latest.y - sy) / scale);
     };
     const move = (moveEvent) => {
+      if (moveEvent.pointerId !== pointerId) return;
       latest = {x: moveEvent.clientX, y: moveEvent.clientY};
       if (!moved && Math.hypot(latest.x - sx, latest.y - sy) < 3) return;
       beginDrag();
       if (!frame) frame = requestAnimationFrame(applyMove);
     };
     const up = (upEvent) => {
+      if (upEvent.pointerId !== pointerId) return;
       if (Number.isFinite(upEvent?.clientX) && Number.isFinite(upEvent?.clientY)) {
         latest = {x: upEvent.clientX, y: upEvent.clientY};
         if (!moved && Math.hypot(latest.x - sx, latest.y - sy) >= 3) beginDrag();
@@ -44,9 +48,9 @@ function bindDrag(element, handle, view, onMove, onEnd, hooks = {}) {
         cancelAnimationFrame(frame);
       }
       if (moved) applyMove();
-      handle.removeEventListener("pointermove", move);
-      handle.removeEventListener("pointerup", up);
-      handle.removeEventListener("pointercancel", up);
+      eventTarget.removeEventListener("pointermove", move);
+      eventTarget.removeEventListener("pointerup", up);
+      eventTarget.removeEventListener("pointercancel", up);
       try {
         handle.releasePointerCapture(event.pointerId);
       } catch (_error) {
@@ -59,9 +63,9 @@ function bindDrag(element, handle, view, onMove, onEnd, hooks = {}) {
         if (hooks.persist) hooks.persist();
       }
     };
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", up);
-    handle.addEventListener("pointercancel", up);
+    eventTarget.addEventListener("pointermove", move);
+    eventTarget.addEventListener("pointerup", up);
+    eventTarget.addEventListener("pointercancel", up);
   });
 }
 

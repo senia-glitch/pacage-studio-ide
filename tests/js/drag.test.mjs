@@ -3,16 +3,9 @@ import test from "node:test";
 
 import {enableNodeDrag} from "../../studio/ui/static/js/drag.js";
 
-class FakeCard {
+class FakeEventTarget {
   constructor() {
     this.listeners = new Map();
-    this.classes = new Set();
-    this.classList = {
-      contains: (name) => this.classes.has(name),
-      add: (name) => this.classes.add(name),
-      remove: (name) => this.classes.delete(name),
-    };
-    this.style = {left: "100px", top: "200px"};
   }
 
   addEventListener(name, callback) {
@@ -24,9 +17,6 @@ class FakeCard {
   removeEventListener(name, callback) {
     this.listeners.get(name)?.delete(callback);
   }
-
-  setPointerCapture() {}
-  releasePointerCapture() {}
 
   emit(name, values = {}) {
     const event = {
@@ -40,9 +30,27 @@ class FakeCard {
   }
 }
 
+class FakeCard extends FakeEventTarget {
+  constructor() {
+    super();
+    this.classes = new Set();
+    this.classList = {
+      contains: (name) => this.classes.has(name),
+      add: (name) => this.classes.add(name),
+      remove: (name) => this.classes.delete(name),
+    };
+    this.style = {left: "100px", top: "200px"};
+  }
+
+  setPointerCapture() {}
+  releasePointerCapture() {}
+}
+
 function withAnimationFrames(run) {
   const oldRequest = globalThis.requestAnimationFrame;
   const oldCancel = globalThis.cancelAnimationFrame;
+  const oldWindow = globalThis.window;
+  globalThis.window = new FakeEventTarget();
   const callbacks = new Map();
   let id = 0;
   globalThis.requestAnimationFrame = (callback) => {
@@ -61,6 +69,7 @@ function withAnimationFrames(run) {
   } finally {
     globalThis.requestAnimationFrame = oldRequest;
     globalThis.cancelAnimationFrame = oldCancel;
+    globalThis.window = oldWindow;
   }
 }
 
@@ -75,16 +84,16 @@ test("drag ignores click jitter, batches moves, and converts by fixed zoom", () 
       persist: () => lifecycle.push("persist"),
     });
     card.emit("pointerdown", {clientX: 10, clientY: 10});
-    card.emit("pointermove", {clientX: 11, clientY: 11});
+    window.emit("pointermove", {clientX: 11, clientY: 11});
     assert.deepEqual(positions, []);
     assert.equal(card.classList.contains("dragging"), false);
 
-    card.emit("pointermove", {clientX: 20, clientY: 30});
-    card.emit("pointermove", {clientX: 30, clientY: 50});
+    window.emit("pointermove", {clientX: 20, clientY: 30});
+    window.emit("pointermove", {clientX: 30, clientY: 50});
     assert.deepEqual(positions, []);
     flush();
     assert.deepEqual(positions, [{x: 110, y: 220}]);
-    card.emit("pointerup");
+    window.emit("pointerup");
     assert.deepEqual(lifecycle, ["start", "end", "persist"]);
   });
 });
@@ -95,8 +104,8 @@ test("pointer up applies a queued final move before finishing", () => {
     const positions = [];
     enableNodeDrag(card, {k: 1}, (x, y) => positions.push({x, y}));
     card.emit("pointerdown", {clientX: 0, clientY: 0});
-    card.emit("pointermove", {clientX: 10, clientY: 12});
-    card.emit("pointerup", {clientX: 12, clientY: 14});
+    window.emit("pointermove", {clientX: 10, clientY: 12});
+    window.emit("pointerup", {clientX: 12, clientY: 14});
     assert.deepEqual(positions, [{x: 112, y: 214}]);
   });
 });
@@ -107,7 +116,7 @@ test("pointer up starts a drag when the final position crosses the threshold", (
     const positions = [];
     enableNodeDrag(card, {k: 1}, (x, y) => positions.push({x, y}));
     card.emit("pointerdown", {clientX: 0, clientY: 0});
-    card.emit("pointerup", {clientX: 4, clientY: 0});
+    window.emit("pointerup", {clientX: 4, clientY: 0});
     assert.deepEqual(positions, [{x: 104, y: 200}]);
   });
 });
@@ -122,7 +131,7 @@ test("click without drag does not start persistence lifecycle", () => {
       persist: () => lifecycle.push("persist"),
     });
     card.emit("pointerdown", {clientX: 5, clientY: 5});
-    card.emit("pointerup", {clientX: 5, clientY: 5});
+    window.emit("pointerup", {clientX: 5, clientY: 5});
     assert.deepEqual(lifecycle, []);
   });
 });
