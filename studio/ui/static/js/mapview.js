@@ -199,7 +199,7 @@ function draw(){
       const stationaryRects=nodes.filter(other=>!moving.has(other.viewId)).map(other=>{const p0=positions.get(other.viewId);return{x:p0.x,y:p0.y,w:widths.get(other.viewId)||W,h:H}});
       const delta=clampGroupDelta(movingRects,stationaryRects,{x:currentDx,y:currentDy},{x:requestedDx,y:requestedDy});
       currentDx=delta.x;currentDy=delta.y;
-      const candidates=[...moving].map(id=>({id,x:(positions.get(id)?.x||0)+dx,y:(positions.get(id)?.y||0)+dy}));
+      const candidates=[...moving].map(id=>({id,x:(positions.get(id)?.x||0)+delta.x,y:(positions.get(id)?.y||0)+delta.y}));
       candidates.forEach(a=>{const el=stage.querySelector(`[data-id="${CSS.escape(a.id)}"]`);if(el){el.style.left=`${a.x}px`;el.style.top=`${a.y}px`}S.mapPos.set(a.id,{x:a.x,y:a.y})});S.justDraggedAt=Date.now();
       const liveBoxes=measure(stage);S.mapBoxes=liveBoxes;drawEdges(svg,liveBoxes,edges.filter(e=>shown.has(e.from_node)&&shown.has(e.to_node)));sizeStage(stage,svg);
     },()=>{schedulePersist();draw()});
