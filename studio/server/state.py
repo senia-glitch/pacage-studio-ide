@@ -34,6 +34,9 @@ from studio.metadata import (
     read_metadata,
     save_graph_node,
     save_node_metadata,
+    save_planned_change,
+    save_domain_plan,
+    delete_domain_plan,
 )
 from studio.metamodel import EDGE_KINDS, NODE_KINDS, Graph, Node
 from studio.scanner import scan
@@ -86,6 +89,21 @@ class ProjectState:
             self.scanning = True
             try:
                 graph = scan(self.root)
+                metadata = read_metadata(self.root)
+                planned_changes = metadata.extra.get("planned_changes")
+                if not isinstance(planned_changes, dict):
+                    planned_changes = {}
+                planned_domains = metadata.extra.get("planned_domains")
+                if not isinstance(planned_domains, list):
+                    planned_domains = []
+                domain_changes = metadata.extra.get("domain_changes")
+                if not isinstance(domain_changes, dict):
+                    domain_changes = {}
+                for node in graph.nodes:
+                    change = planned_changes.get(node.id)
+                    node.planned_change = dict(change) if isinstance(change, dict) else {}
+                graph.planned_domains = [dict(item) for item in planned_domains if isinstance(item, dict)]
+                graph.domain_changes = {str(key): dict(value) for key, value in domain_changes.items() if isinstance(value, dict)}
                 try:
                     store.write_graph(self.root, graph)
                 except OSError as exc:
@@ -181,6 +199,53 @@ class ProjectState:
                 "changed": result.changed,
             }
 
+    def save_planned_change(self, data: dict) -> dict:
+        with self.lock:
+            node_id = str(data.get("node_id") or "")
+            node = self._resolve_node(node_id)
+            if node.planned:
+                raise MetadataError("invalid_input", "Пометка правки доступна только фактическим узлам")
+            acceptance = data.get("acceptance") or []
+            if isinstance(acceptance, str):
+                acceptance = [line.strip() for line in acceptance.splitlines() if line.strip()]
+            if not isinstance(acceptance, list):
+                raise MetadataError("invalid_input", "Критерии должны быть списком строк")
+            result = save_planned_change(self.root, node_id, str(data.get("note") or ""), acceptance)
+            graph = self.rescan("planned_change")
+            return {"graph": graph.model_dump(), "changed": result.changed}
+
+    def save_domain_plan(self, data: dict) -> dict:
+        with self.lock:
+            graph = self.ensure_graph()
+            source = str(data.get("source") or "").strip()
+            name = str(data.get("name") or "").strip()
+            factual_domains = {
+                part.strip()
+                for node in graph.nodes if node.kind == "endpoint"
+                for part in str(node.domain or "").split(",") if part.strip()
+            }
+            planned_domains = read_metadata(self.root).extra.get("planned_domains") or []
+            if source and source not in factual_domains:
+                raise MetadataError("invalid_input", "Фактический домен не найден — обновите карту")
+            other_domains = factual_domains - ({source} if source else set())
+            if name in other_domains:
+                raise MetadataError("invalid_input", f"Домен «{name}» уже существует")
+            if any(
+                isinstance(item, dict) and str(item.get("name") or "").strip() == name
+                and str(item.get("id") or "") != str(data.get("id") or "")
+                for item in planned_domains
+            ):
+                raise MetadataError("invalid_input", f"Плановый домен «{name}» уже существует")
+            result = save_domain_plan(self.root, data)
+            graph = self.rescan("domain_plan")
+            return {"graph": graph.model_dump(), "changed": result.changed}
+
+    def delete_domain_plan(self, data: dict) -> dict:
+        with self.lock:
+            result = delete_domain_plan(self.root, str(data.get("id") or ""))
+            graph = self.rescan("domain_plan_delete")
+            return {"graph": graph.model_dump(), "changed": result.changed}
+
     def save_graph_node(self, data: dict) -> dict:
         """Persist a visual TODO node and its optional parent relationship."""
         with self.lock:
@@ -248,6 +313,9 @@ class ProjectState:
                         "path": str(data.get("path", details.get("path") or "") or ""),
                     }
                 )
+                domain_plan_id = str(data.get("domain_plan_id") or "")
+                if domain_plan_id:
+                    details["domain_plan_id"] = domain_plan_id
             elif kind == "scenario":
                 details.update({"name": name, "class_name": name})
             elif kind == "io":

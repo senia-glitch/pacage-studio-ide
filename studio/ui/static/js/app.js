@@ -1,30 +1,24 @@
-import {api, studioToken} from "./api.js";
+import {api} from "./api.js";
 import {
   $, S, applyGraph, applyTransform, flushPending, hooks, initEditorChoice, initSearch,
   initUiStorage, modal, openEditorForNode, openPalette, persistNow, schedulePersist, setTab, showAbout,
   setLive, startLive, toast,
 } from "./core.js";
 import {refreshBriefStatus, scheduleBriefStatus, updateBriefBadge, initTodoChip} from "./briefview.js";
-import {renderCreate} from "./createview.js";
 import {openDiagnostics, updateDiagBadge} from "./diagnosticsview.js";
-import {renderInspector, saveMetadata} from "./inspectorview.js";
+import {renderInspector} from "./inspectorview.js";
 import {renderMap} from "./mapview.js";
-import {renderScenario} from "./scenarioview.js";
 import {initIdeas, renderIdeas} from "./ideaview.js";
 import {bindViewport, fitView} from "./viewport.js";
 
 hooks.renderMap = renderMap;
-hooks.renderScenario = renderScenario;
-hooks.renderCreate = renderCreate;
 hooks.renderIdeas = renderIdeas;
 hooks.renderInspector = renderInspector;
 hooks.updateBriefBadge = updateBriefBadge;
 hooks.scheduleBriefStatus = scheduleBriefStatus;
 hooks.updateDiagBadge = updateDiagBadge;
-hooks.saveMetadata = saveMetadata;
 
 function activeView(){
-  if(S.tab==="scenario")return{view:S.scenView,id:"scenView",canvas:$("scenCanvas")};
   return{view:S.mapView,id:"mapView",canvas:$("mapCanvas")};
 }
 async function boot(){
@@ -40,25 +34,16 @@ async function boot(){
   initIdeas();
   initEditorChoice();
   document.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
-  const showWorkspace=(name)=>{
-    document.querySelectorAll(".workspace-btn").forEach(button=>{const active=button.dataset.workspace===name;button.classList.toggle("on",active);button.setAttribute("aria-selected",String(active))});
-    document.querySelectorAll("[data-constructor-view]").forEach(view=>view.classList.toggle("on",view.dataset.constructorView===name));
-    if(name==="plans")renderCreate();
-  };
-  document.querySelectorAll(".workspace-btn").forEach(button=>button.onclick=()=>showWorkspace(button.dataset.workspace));
-  const newPlanShortcut=$("newPlanShortcut");if(newPlanShortcut)newPlanShortcut.onclick=()=>{showWorkspace("plans");$("planTitle")?.focus()};
   bindViewport("mapCanvas",S.mapView,()=>applyTransform("mapView",S.mapView));
-  bindViewport("scenCanvas",S.scenView,()=>applyTransform("scenView",S.scenView));
-  $("scenCanvas").addEventListener("click",ev=>{
-    if(S.tab!=="scenario")return;
+  $("mapCanvas").addEventListener("click",ev=>{
     if(Date.now()-S.justDraggedAt<250)return;
-    if(ev.target.closest(".card")||ev.target.closest(".zlab"))return;
-    if(S.selectedNode!==null){flushPending();S.selectedNode=null;renderScenario();schedulePersist()}
+    if(ev.target.closest(".card"))return;
+    if(S.selectedNode!==null){S.selectedNode=null;hooks.renderInspector();renderMap();schedulePersist()}
   });
   document.addEventListener("keydown",ev=>{
     const tag=(ev.target&&ev.target.tagName||"").toLowerCase();
     const typing=tag==="input"||tag==="textarea"||tag==="select"||ev.target.isContentEditable;
-    if(ev.key==="Escape"&&S.tab==="scenario"&&S.selectedNode!==null&&!typing){flushPending();S.selectedNode=null;renderScenario()}
+    if(ev.key==="Escape"&&S.tab==="map"&&S.selectedNode!==null&&!typing){S.selectedNode=null;hooks.renderInspector();renderMap()}
     if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==="k"){ev.preventDefault();openPalette();return}
     if(typing)return;
     if(S.tab==="ideas"&&["f","+","=","-","h"].includes(ev.key.toLowerCase()))return;
@@ -67,20 +52,25 @@ async function boot(){
     if(ev.key.toLowerCase()==="f"&&!ev.ctrlKey&&!ev.metaKey){ev.preventDefault();const a=activeView();fitView(a.canvas,a.view,()=>applyTransform(a.id,a.view))}
     if(ev.key==="+"||ev.key==="=") {ev.preventDefault();const a=activeView();a.view.k=Math.min(2.5,a.view.k*1.15);applyTransform(a.id,a.view)}
     if(ev.key==="-") {ev.preventDefault();const a=activeView();a.view.k=Math.max(.2,a.view.k*.87);applyTransform(a.id,a.view)}
-    if(ev.key.toLowerCase()==="h") {ev.preventDefault();S.hideMeta=!S.hideMeta;if($("hideMeta"))$("hideMeta").checked=S.hideMeta;if(S.tab==="map")renderMap();else if(S.tab==="scenario")renderScenario();schedulePersist()}
+    if(ev.key.toLowerCase()==="h") {ev.preventDefault();S.hideMeta=!S.hideMeta;if($("hideMeta"))$("hideMeta").checked=S.hideMeta;renderMap();schedulePersist()}
     if(ev.key==="?") {ev.preventDefault();modal("Горячие клавиши","<div class=hotkeys><div><b>Esc</b> снять выделение</div><div><b>/</b> поиск</div><div><b>Ctrl+K</b> палитра узлов</div><div><b>O</b> открыть в редакторе</div><div><b>F</b> вписать</div><div><b>+ / −</b> зум</div><div><b>H</b> скрыть метаданные</div><div><b>Ctrl+Enter</b> сохранить поле</div></div>",[{label:"Сбросить раскладку",action:()=>{try{if(S.uiStorage)S.uiStorage.reset()}catch(_){ }location.reload()}},{label:"Закрыть",cls:"primary",action:()=>{}}])}
   });
   $("zIn").onclick=()=>{const a=activeView();a.view.k=Math.min(2.5,a.view.k*1.15);applyTransform(a.id,a.view);schedulePersist()};
   $("zOut").onclick=()=>{const a=activeView();a.view.k=Math.max(.2,a.view.k*.87);applyTransform(a.id,a.view);schedulePersist()};
   $("zReset").onclick=()=>{const a=activeView();a.view.k=1;a.view.x=30;a.view.y=30;applyTransform(a.id,a.view);schedulePersist()};
   $("zFit").onclick=()=>{const a=activeView();fitView(a.canvas,a.view,()=>applyTransform(a.id,a.view));schedulePersist()};
-  $("hideMeta").onchange=()=>{S.hideMeta=$("hideMeta").checked;if(S.tab==="map")renderMap();else if(S.tab==="scenario")renderScenario();schedulePersist()};
-  $("hideNested").onchange=()=>{S.hideNested=$("hideNested").checked;if(S.tab==="map")renderMap();else if(S.tab==="scenario")renderScenario();schedulePersist()};
+  $("hideMeta").onchange=()=>{S.hideMeta=$("hideMeta").checked;renderMap();schedulePersist()};
+  document.querySelectorAll("[data-map-mode]").forEach(button=>button.onclick=()=>{S.mapMode=button.dataset.mapMode;document.querySelectorAll("[data-map-mode]").forEach(b=>b.classList.toggle("on",b===button));renderMap();hooks.renderInspector();schedulePersist()});
+  const addDomain=()=>{S.selectedNode="__new_domain__";hooks.renderInspector()};$("addDomainBtn")?.addEventListener("click",addDomain);
+  const toggleInspector=()=>{S.inspectorOpen=!S.inspectorOpen;document.body.classList.toggle("inspector-hidden",!S.inspectorOpen);$("inspectorToggle").textContent=S.inspectorOpen?"Скрыть свойства":"Показать свойства";schedulePersist()};
+  $("inspectorToggle")?.addEventListener("click",toggleInspector);$("collapseInspector")?.addEventListener("click",toggleInspector);
+  const resize=$("inspectorResize");if(resize){let startX=0,startW=0;resize.addEventListener("pointerdown",ev=>{startX=ev.clientX;startW=S.inspectorWidth;resize.setPointerCapture(ev.pointerId);document.body.classList.add("resizing-inspector")});resize.addEventListener("pointermove",ev=>{if(!resize.hasPointerCapture(ev.pointerId))return;S.inspectorWidth=Math.max(280,Math.min(520,startW-(ev.clientX-startX)));document.documentElement.style.setProperty("--inspector-width",`${S.inspectorWidth}px`)});resize.addEventListener("pointerup",ev=>{if(resize.hasPointerCapture(ev.pointerId))resize.releasePointerCapture(ev.pointerId);document.body.classList.remove("resizing-inspector");schedulePersist()})}
+  document.documentElement.style.setProperty("--inspector-width",`${S.inspectorWidth}px`);document.body.classList.toggle("inspector-hidden",!S.inspectorOpen);document.querySelectorAll("[data-map-mode]").forEach(button=>button.classList.toggle("on",button.dataset.mapMode===S.mapMode));
   $("rescan").onclick=async()=>{
     await flushPending();
     try{
       applyGraph(await api("/api/rescan","POST",{}));
-      if(S.tab==="map")renderMap();else if(S.tab==="scenario")renderScenario();else renderIdeas();
+      if(S.tab==="map"){renderMap();hooks.renderInspector()}else renderIdeas();
       updateDiagBadge();toast("карта обновлена");schedulePersist();
     }catch(e){toast("ошибка скана: "+e.message)}
   };
@@ -93,23 +83,11 @@ async function boot(){
   refreshBriefStatus();
   setLive(false);
   startLive();
-  window.addEventListener("beforeunload",ev=>{
-    persistNow();
-    if(S.formDirty&&S.selectedNode){
-      ev.preventDefault();ev.returnValue="";
-      try{
-        const n=S.byId[S.selectedNode];
-        const desc=$("fDesc")?$("fDesc").value:n.description;
-        const acc=$("fAcc")?$("fAcc").value.split("\n").map(s=>s.trim()).filter(Boolean):n.acceptance;
-        const dom=$("fDomain")?$("fDomain").value:(n.kind==="endpoint"?n.domain:"");
-        fetch("/api/metadata/node",{method:"POST",keepalive:true,headers:{"Content-Type":"application/json","X-Studio-Token":studioToken()},body:JSON.stringify({node_id:n.id,description:desc,acceptance:acc,domain:dom})});
-      }catch(_){}
-    }
-  });
+  window.addEventListener("beforeunload",()=>persistNow());
   document.addEventListener("click",schedulePersist);
   document.addEventListener("change",schedulePersist);
   const initial=location.hash.replace(/^#/,"");
-  setTab(["map","scenario","ideas","create"].includes(initial)?initial:S.tab);
+  setTab(["map","ideas"].includes(initial)?initial:S.tab);
 }
 boot();
 

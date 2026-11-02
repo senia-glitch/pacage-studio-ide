@@ -1,6 +1,5 @@
 import {api} from "./api.js";
-import {S, esc, setTab, schedulePersist, toast} from "./core.js";
-import {normalizeDraft} from "./chainmodel.js";
+import {S, esc, setTab, schedulePersist, toast, applyGraph, hooks} from "./core.js";
 import {storageKey} from "./storage.js";
 
 const EMPTY = {version: 1, activeId: "", ideas: []};
@@ -77,7 +76,7 @@ function addIdea(){
 function card(idea){
   const promptIsFresh=!!idea.prompt&&idea.promptBasis===promptBasis(idea);
   const children=idea.scenarios.map((s,index)=>`<article class="idea-scenario-card" data-scenario="${esc(s.id)}">
-    <div class="idea-scenario-head"><span class="scenario-index">${String(index+1).padStart(2,"0")}</span><input class="scenario-title" data-field="title" aria-label="Название сценария" value="${esc(s.title)}"><button class="text-button" type="button" data-to-plan="${esc(s.id)}" title="Передать сценарий в конструктор">В конструктор ↗</button><button class="icon-button danger" type="button" data-delete-scenario="${esc(s.id)}" title="Удалить ветку сценария" aria-label="Удалить сценарий">×</button></div>
+    <div class="idea-scenario-head"><span class="scenario-index">${String(index+1).padStart(2,"0")}</span><input class="scenario-title" data-field="title" aria-label="Название сценария" value="${esc(s.title)}"><button class="text-button" type="button" data-to-plan="${esc(s.id)}" title="Создать плановые узлы на общей карте">На карту ↗</button><button class="icon-button danger" type="button" data-delete-scenario="${esc(s.id)}" title="Удалить ветку сценария" aria-label="Удалить сценарий">×</button></div>
     <label class="idea-field-label">ОПИСАНИЕ<textarea data-field="description" rows="5" placeholder="Опишите сценарий…">${esc(s.description)}</textarea></label>
     <label class="idea-field-label">КРИТЕРИИ ПРИЁМКИ<textarea data-field="acceptance" rows="3" placeholder="По одному критерию на строку">${esc(s.acceptance.join("\n"))}</textarea></label>
     <label class="idea-field-label">ДОМЕН<input data-field="domain" value="${esc(s.domain)}" placeholder="orders"></label>
@@ -131,9 +130,14 @@ function updatePromptState(idea){
 }
 async function sendToConstructor(button){
   const idea=find(button.closest("[data-idea]").dataset.idea);const scenario=idea&&idea.scenarios.find(item=>item.id===button.dataset.toPlan);if(!scenario)return;
-  if(!(await setTab("scenario")))return;
-  S.createState=normalizeDraft({...S.createState,title:scenario.title,description:scenario.description,acceptance:scenario.acceptance.join("\n"),domain:scenario.domain,http_method:scenario.source.http_method||"",path:scenario.source.path||"",slug:scenario.source.slug||"",uses_db:scenario.source.uses_db!==false,with_test:scenario.source.with_test!==false});
-  schedulePersist();document.querySelector('[data-workspace="plans"]')?.click();document.getElementById("planTitle")?.focus();toast("Сценарий перенесён в форму плана");
+  if(!(await setTab("map")))return;
+  try{
+    let parentId="";
+    const path=scenario.source.path||"";
+    if(path){const endpoint=await api("/api/metadata/graph-node","POST",{kind:"endpoint",name:scenario.title,description:scenario.description,acceptance:scenario.acceptance,domain:scenario.domain,http_method:scenario.source.http_method||"GET",path});applyGraph(endpoint.graph);parentId=endpoint.node_id;}
+    const node=await api("/api/metadata/graph-node","POST",{kind:"scenario",name:scenario.title,description:scenario.description,acceptance:scenario.acceptance,domain:scenario.domain,parent_id:parentId,edge_kind:"dispatch"});
+    applyGraph(node.graph);S.selectedNode=node.node_id;hooks.renderMap();hooks.renderInspector();schedulePersist();toast("Идея добавлена на карту как плановый узел");
+  }catch(error){toast("Не удалось передать идею на карту: "+error.message)}
 }
 function updateRail(){const list=$("ideaList");if(!list)return;list.querySelectorAll(".idea-rail-item").forEach(el=>{const item=find(el.dataset.focusIdea);if(item){el.querySelector("b").textContent=item.title||"Без названия";el.querySelector("small").textContent=`${item.scenarios.length} сценариев`}})}
 async function generatePrompt(ideaId,button){

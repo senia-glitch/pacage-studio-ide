@@ -550,6 +550,99 @@ def delete_graph_node(
     return _mutate_metadata(project_root, apply)
 
 
+def save_planned_change(project_root: Path, node_id: str, note: str, acceptance: list[str]) -> SaveResult:
+    """Store a proposed change separately from the scanned facts of a code node."""
+    def apply(metadata: Metadata) -> None:
+        changes = metadata.extra.get("planned_changes")
+        if not isinstance(changes, dict):
+            changes = {}
+            metadata.extra["planned_changes"] = changes
+        cleaned = {"note": note.strip(), "acceptance": [str(x).strip() for x in acceptance if str(x).strip()]}
+        if cleaned["note"] or cleaned["acceptance"]:
+            changes[node_id] = cleaned
+        else:
+            changes.pop(node_id, None)
+    return _mutate_metadata(project_root, apply)
+
+
+def save_domain_plan(project_root: Path, data: dict) -> SaveResult:
+    """Create a planned domain or propose renaming an existing factual domain."""
+    source = str(data.get("source") or "").strip()
+    from_name = str(data.get("from_name") or "").strip()
+    name = str(data.get("name") or "").strip()
+    if not name:
+        raise MetadataError("invalid_input", "Укажите название домена")
+    if len(name) > 120:
+        raise MetadataError("invalid_input", "Название домена слишком длинное")
+    acceptance = data.get("acceptance") or []
+    if isinstance(acceptance, str):
+        acceptance = [line.strip() for line in acceptance.splitlines() if line.strip()]
+    if not isinstance(acceptance, list):
+        raise MetadataError("invalid_input", "Критерии должны быть списком строк")
+    record = {"name": name, "note": str(data.get("note") or "").strip(), "acceptance": [str(x).strip() for x in acceptance if str(x).strip()]}
+    def apply(metadata: Metadata) -> None:
+        domains = metadata.extra.get("planned_domains")
+        if not isinstance(domains, list):
+            domains = []
+            metadata.extra["planned_domains"] = domains
+        else:
+            domains[:] = [item for item in domains if isinstance(item, dict)]
+        changes = metadata.extra.get("domain_changes")
+        if not isinstance(changes, dict):
+            changes = {}
+            metadata.extra["domain_changes"] = changes
+        if source:
+            if name == source and not record["note"] and not record["acceptance"]:
+                changes.pop(source, None)
+            else:
+                changes[source] = record
+        else:
+            domain_id = str(data.get("id") or "")
+            if not domain_id:
+                raise MetadataError("invalid_input", "Не удалось определить идентификатор домена")
+            domains[:] = [item for item in domains if str(item.get("id") or "") != str(data.get("id") or "")]
+            if not data.get("delete"):
+                domains.append({"id": domain_id, **record})
+                for node in metadata.nodes.values():
+                    details = node.get("details")
+                    details = dict(details) if isinstance(details, dict) else {}
+                    linked = details.get("domain_plan_id") == domain_id
+                    if node.get("studio_owned") and node.get("kind") == "endpoint" and (linked or node.get("domain") in {name, from_name}):
+                        node["domain"] = name
+                        details["domain_plan_id"] = domain_id
+                        node["details"] = details
+    return _mutate_metadata(project_root, apply)
+
+
+def delete_domain_plan(project_root: Path, domain_id: str) -> SaveResult:
+    def apply(metadata: Metadata) -> None:
+        domains = metadata.extra.get("planned_domains")
+        domain = next((item for item in domains or [] if isinstance(item, dict) and str(item.get("id") or "") == domain_id), None)
+        if domain is None:
+            raise MetadataError("invalid_input", "Плановый домен не найден")
+        removable = {
+            key for key, record in metadata.nodes.items()
+            if record.get("studio_owned") and (record.get("details") or {}).get("domain_plan_id") == domain_id
+        }
+        changed = True
+        while changed:
+            changed = False
+            for edge in metadata.edges:
+                parent = edge.get("to") if edge.get("kind") == "tests" else edge.get("from")
+                child = edge.get("from") if edge.get("kind") == "tests" else edge.get("to")
+                record = metadata.nodes.get(child) or {}
+                if parent in removable and child not in removable and record.get("studio_owned"):
+                    removable.add(child)
+                    changed = True
+        for node_id in removable:
+            metadata.nodes.pop(node_id, None)
+        if removable:
+            metadata.edges = [edge for edge in metadata.edges if edge.get("from") not in removable and edge.get("to") not in removable]
+        if isinstance(domains, list):
+            metadata.extra["planned_domains"] = [item for item in domains if isinstance(item, dict) and str(item.get("id") or "") != domain_id]
+    return _mutate_metadata(project_root, apply)
+
+
 __all__ = [
     "METADATA_NAME",
     "METADATA_VERSION",
@@ -563,6 +656,9 @@ __all__ = [
     "save_node_metadata",
     "save_graph_node",
     "delete_graph_node",
+    "save_planned_change",
+    "save_domain_plan",
+    "delete_domain_plan",
     "studio_dir",
     "write_metadata",
 ]

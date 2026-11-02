@@ -121,6 +121,8 @@ class Node(BaseModel):
     file_hash: str = ""
     # Причины жёлтой подсветки: [{"code", "message", "hint"}].
     notes: list[dict] = Field(default_factory=list)
+    # Planning annotation for an existing code node; never changes scanned facts.
+    planned_change: dict = Field(default_factory=dict)
 
 
 class Edge(BaseModel):
@@ -185,6 +187,8 @@ class Graph(BaseModel):
     scenarios: list[str] = Field(default_factory=list)
     scenario_paths: dict[str, ScenarioPath] = Field(default_factory=dict)
     plans: list[PlanState] = Field(default_factory=list)
+    planned_domains: list[dict] = Field(default_factory=list)
+    domain_changes: dict[str, dict] = Field(default_factory=dict)
     diagnostics: list[Diagnostic] = Field(default_factory=list)
     generated_at: str = ""
     fingerprint: str = ""

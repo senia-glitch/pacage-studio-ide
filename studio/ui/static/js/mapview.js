@@ -1,265 +1,119 @@
-﻿import {
-  $, S, applyTransform, areaSize, drawEdges, enableNodeDrag, enableZoneDrag, esc,
-  methodOfEndpoint, nestedListHtml, nodeMeta, nodeTodoClass,
-  notesOf, openEditorForNode, openEndpointScenario, planLineHtml, proposedOverlap, renderDomainChips,
-  schedulePersist, styleRect, todoBadgeHtml, todoDownstreamHtml, urlOfEndpoint,
-  domainOfNode, zoneOverlaps, KIND_NAMES, METHOD_COLORS, NO_DOMAIN,
-} from "./core.js";
-import {clearStage, measure, sizeStage} from "./edges.js";
-import {methodOrder, proposedZoneRect} from "./geometry.js";
-import {focusIncompleteNode} from "./scenarioview.js";
+import {$,S,applyTransform,drawEdges,esc,KIND_NAMES,EDGE_COLORS,EDGE_NAMES,nodeMeta,methodOfEndpoint,urlOfEndpoint,openEditorForNode,toast,schedulePersist,enableNodeDrag} from "./core.js";
+import {clearStage,measure,sizeStage} from "./edges.js";
 import {matchesAll} from "./search.js";
-import {OFF_PATH_KINDS, OFF_PATH_TITLES, groupOffPath, isTodo, offPathCount} from "./todo.js";
+import {renderInspector} from "./inspectorview.js";
 
-function mapZones(){return[...$("mapStage").querySelectorAll(".map-method,.map-offpath")]}
-function recomputeMapSizes(){
-  const stage=$("mapStage"),svg=$("mapEdges"),fast=stage.querySelector(".map-fastbase");
-  if(!fast)return;
-  fast.querySelectorAll(".map-method").forEach(zone=>{
-    let w=240,h=70;
-    zone.querySelectorAll(".card[data-id]").forEach(card=>{
-      const r=styleRect(card);
-      w=Math.max(w,r.x+r.w+14);h=Math.max(h,r.y+r.h+14);
-    });
-    zone.style.width=w+"px";zone.style.height=h+"px";
-  });
-  let fw=280,fh=90;
-  fast.querySelectorAll(".map-method").forEach(zone=>{
-    const r=styleRect(zone);
-    fw=Math.max(fw,r.x+r.w+18);fh=Math.max(fh,r.y+r.h+18);
-  });
-  fast.style.width=fw+"px";fast.style.height=fh+"px";
-  sizeStage(stage,svg);
-}
-function redrawMapEdges(){
-  const stage=$("mapStage"),svg=$("mapEdges");
-  if(!stage||!svg)return;
-  S.mapBoxes=measure(stage);
-  const edges=(S.G.edges||[]).filter(e=>S.mapBoxes[e.from_node]&&S.mapBoxes[e.to_node]).map(e=>({
-    ...e,
-    todo:!!(S.byId[e.from_node]?.planned||S.byId[e.to_node]?.planned),
-    yellow:!!(e.notes&&e.notes.length),
-  }));
-  drawEdges(svg,S.mapBoxes,edges);
-}
-function offpathCard(zone,n,x,y){
-  const card=document.createElement("div");
-  card.className=`card k-${n.kind}${nodeTodoClass(n)}${notesOf(n).length?" node--yellow":""}`;card.dataset.id=n.id;
-  const saved=S.mapPos.get(n.id);
-  const left=saved?saved.x:x,top=saved?saved.y:y;
-  card.style.left=left+"px";card.style.top=top+"px";card.title=n.id;
-  card.innerHTML=`<div class="hd"><span class="grip" title="перетащить">⠿</span><span class="chip">${esc(KIND_NAMES[n.kind]||n.kind)}</span>${todoBadgeHtml(n)}<span class="t">${esc(n.label)}</span><button class="open-editor" type="button" title="Открыть в VS Code" aria-label="Открыть в VS Code">↗</button></div>`+
-    planLineHtml(n)+`<div class="mt">${esc(nodeMeta(n)||"неполный узел")}</div>`+
-    (n.description?`<div class="sec"><div class="lbl">${isTodo(n)?"что сделать":"описание"}</div><div class="body">${esc(n.description)}</div></div>`:"");
-  card.tabIndex=0;card.setAttribute("role","button");card.setAttribute("aria-label",n.label);
-  card.onclick=ev=>{ev.stopPropagation();if(Date.now()-S.justDraggedAt<250)return;focusIncompleteNode(n.id)};
-  card.addEventListener("keydown",ev=>{
-    if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();focusIncompleteNode(n.id)}
-    if(ev.key.toLowerCase()==="o"){ev.preventDefault();openEditorForNode(n)}
-  });
-  const openBtn=card.querySelector(".open-editor");
-  if(openBtn)openBtn.onclick=ev=>{ev.stopPropagation();openEditorForNode(n)};
-  zone.appendChild(card);
-  enableNodeDrag(card,"map",n.id,left,top,S.mapView,
-    (nx,ny)=>{
-      const cx=Math.max(14,nx),cy=Math.max(38,ny);
-      if(proposedOverlap(zone,[card],[{el:card,x:cx,y:cy}]))return;
-      card.style.left=cx+"px";card.style.top=cy+"px";
-      S.mapPos.set(n.id,{x:cx,y:cy});recomputeMapSizes();
-      sizeStage($("mapStage"),$("mapEdges"));redrawMapEdges();
-    },
-    ()=>{
-      S.mapPos.set(n.id,{x:parseFloat(card.style.left)||0,y:parseFloat(card.style.top)||0});
-      recomputeMapSizes();sizeStage($("mapStage"),$("mapEdges"));redrawMapEdges();
-    });
-  return card;
-}
-function renderOffPathMap(stage,svg){
-  const groups=groupOffPath((S.G&&S.G.nodes)||[]);
-  const total=offPathCount(groups);
-  if(!total)return;
-  const zone=document.createElement("div");
-  zone.className="zone map-zone map-offpath";
-  zone.style.left=S.mapOffpath.x+"px";zone.style.top=S.mapOffpath.y+"px";
-  zone.style.width="280px";zone.style.height="80px";
-  const lab=document.createElement("div");lab.className="zlab";
-  lab.innerHTML=`<span class="grip" title="перетащить">⠿</span><b>Вне путей запроса (${total})</b>`;
-  zone.appendChild(lab);stage.appendChild(zone);
-  let cursor=38;
-  OFF_PATH_KINDS.forEach(kind=>{
-    const items=groups[kind]||[];
-    if(!items.length)return;
-    const title=document.createElement("div");
-    title.className="off-group-title";title.textContent=`${OFF_PATH_TITLES[kind]} · ${items.length}`;
-    title.style.top=cursor+"px";zone.appendChild(title);cursor+=18;
-    items.forEach(n=>{
-      const card=offpathCard(zone,n,14,cursor);
-      cursor=Math.max(cursor,(parseFloat(card.style.top)||cursor)+card.offsetHeight+10);
-    });
-    cursor+=4;
-  });
-  let width=260;
-  zone.querySelectorAll(".card[data-id]").forEach(card=>{
-    const r=styleRect(card);width=Math.max(width,r.x+r.w+18);
-  });
-  zone.style.width=width+"px";zone.style.height=(cursor+8)+"px";
-  enableZoneDrag(zone,S.mapView,
-    (nx,ny)=>{
-      const cx=Math.max(20,nx),cy=Math.max(20,ny);
-      const rect={x:cx,y:cy,w:zone.offsetWidth,h:zone.offsetHeight};
-      if(zoneOverlaps(zone,rect,mapZones()))return;
-      zone.style.left=cx+"px";zone.style.top=cy+"px";
-      S.mapOffpath.x=cx;S.mapOffpath.y=cy;sizeStage(stage,svg);redrawMapEdges();
-    },
-    ()=>{S.mapOffpath.x=parseFloat(zone.style.left)||40;S.mapOffpath.y=parseFloat(zone.style.top)||420;sizeStage(stage,svg);redrawMapEdges()});
-  redrawMapEdges();
-  sizeStage(stage,svg);
-}
-function renderMap(){
-  const stage=$("mapStage"),svg=$("mapEdges");
-  clearStage(stage,svg);S.mapBoxes={};
-  renderDomainChips();
-  const allEndpoints=(S.G.nodes||[]).filter(n=>n.kind==="endpoint");
-  const endpoints=allEndpoints.filter(n=>{
-    if(S.lastSearchQuery&&!matchesAll(S.lastSearchQuery,[n.label,methodOfEndpoint(n),urlOfEndpoint(n),n.domain,n.description,(n.details||{}).function_name]))return false;
-    if(!S.domainFilter.size)return true;
-    const names=String(n.domain||NO_DOMAIN).split(",").map(s=>s.trim());
-    return names.some(name=>S.domainFilter.has(name));
-  });
-  if(!endpoints.length){
-    const e=document.createElement("div");e.className="empty";
-    if(allEndpoints.length){
-      e.innerHTML=`Ничего не найдено по запросу «${esc(S.lastSearchQuery)}».<br>Очистите поле поиска.`;
-    }else{
-      const env=(S.studioInfo&&S.studioInfo.env)||{};
-      e.innerHTML=`Эндпоинтов fastbase не найдено.<br>`+
-        `<span class="hint">Проверено: ${esc(env.routes_package||"app.api.v1.routes")} · `+
-        `сценарии: ${esc(env.core_discover||"app.scenarios")} · модели: ${esc(env.models||"models.py")}</span><br>`+
-        `Поправьте FAT_ROUTES_PACKAGE в .env.fastbase или выполните <b>studio doctor</b>.`;
-    }
-    stage.appendChild(e);
-    renderOffPathMap(stage,svg);
-    if(!stage.querySelector(".map-offpath")){stage.style.width="900px";stage.style.height="500px"}
-    applyTransform("mapView",S.mapView);return;
+const W=210,H=126,GAP_X=150,GAP_Y=36;
+const parentOf=edge=>edge.kind==="tests"?edge.to_node:edge.from_node;
+const childOf=edge=>edge.kind==="tests"?edge.from_node:edge.to_node;
+function model(){
+  const nodes=(S.G.nodes||[]).map(n=>({...n,viewId:n.id,synthetic:false}));
+  const byId=Object.fromEntries(nodes.map(n=>[n.id,n]));
+  const edges=(S.G.edges||[]).map(e=>({from_node:parentOf(e),to_node:childOf(e),kind:e.kind,label:e.label}));
+  const effectiveDomains=n=>String(n.domain||"").split(",").map(value=>value.trim()).filter(Boolean).map(domain=>S.mapMode==="plan"&&S.G.domain_changes?.[domain]?.name||domain);
+  const methods=new Map();
+  for(const endpoint of nodes.filter(n=>n.kind==="endpoint")){
+    const method=methodOfEndpoint(endpoint)||"Метод не указан";if(!methods.has(method))methods.set(method,[]);methods.get(method).push(endpoint);
   }
-  const byMethod=new Map();
-  endpoints.forEach(n=>{
-    const method=methodOfEndpoint(n);
-    if(!byMethod.has(method))byMethod.set(method,[]);
-    byMethod.get(method).push(n);
-  });
-  const methods=[...byMethod.keys()].sort((a,b)=>methodOrder(a)-methodOrder(b)||a.localeCompare(b));
-  const fast=document.createElement("div");
-  fast.className="zone map-zone map-fastbase";
-  fast.style.left=S.mapFastbase.x+"px";fast.style.top=S.mapFastbase.y+"px";
-  fast.style.width="320px";fast.style.height="120px";
-  const fastLab=document.createElement("div");fastLab.className="zlab";
-  fastLab.innerHTML='<span class="grip" title="перетащить">⠿</span><b style="color:var(--acc)">fastbase</b>';fast.appendChild(fastLab);
-  stage.appendChild(fast);
-
-  const zones={};
-  methods.forEach(method=>{
-    const items=byMethod.get(method).slice().sort((a,b)=>(a.domain||"").localeCompare(b.domain||"")||a.label.localeCompare(b.label));
-    const zone=document.createElement("div");
-    zone.className="zone map-zone map-method";zone.dataset.method=method;
-    zone.style.left="0px";zone.style.top="38px";zone.style.width="240px";zone.style.height="70px";
-    const lab=document.createElement("div");lab.className="zlab";
-    lab.innerHTML=`<span class="grip" title="перетащить">⠿</span><span class="method-dot" style="background:${METHOD_COLORS[method]||"#9a9aa2"}"></span>${esc(method)} <span class="hint">· ${items.length}</span>`;
-    zone.appendChild(lab);fast.appendChild(zone);zones[method]=zone;
-    const rowHeights=[];
-    items.forEach((n,i)=>{
-      const d=n.details||{};
-      const card=document.createElement("div");
-      card.className=`card method-${method.toLowerCase()}${n.planned?" planned":""}${notesOf(n).length?" node--yellow":""}${nodeTodoClass(n)}`;card.dataset.id=n.id;
-      const saved=S.mapPos.get(n.id);
-      const row=Math.floor(i/2),col=i%2;
-      const rowOffset=rowHeights.slice(0,row).reduce((total,height)=>total+height+16,0);
-      const lx=saved?saved.x:14+col*310;
-      const ly=saved?saved.y:38+rowOffset;
-      card.style.left=lx+"px";card.style.top=ly+"px";
-      const url=urlOfEndpoint(n);
-      const title=url?`${method} ${url}`:`${method} · ${n.label}`;
-      const sub=[url?(d.function_name||""):"URL неизвестен",domainOfNode(n)].filter(Boolean).join(" · ");
-      const mapYellow=notesOf(n).length>0;
-      card.innerHTML=`<div class="hd"><span class="grip" title="перетащить">⠿</span><span class="chip">${esc(KIND_NAMES[n.kind]||n.kind)}</span>${todoBadgeHtml(n)}${mapYellow?`<span class="chip warn">неточно</span>`:""}${todoDownstreamHtml(n)}<span class="t">${esc(title)}</span><button class="open-editor" type="button" title="Открыть в VS Code" aria-label="Открыть в VS Code">↗</button></div>`+
-        planLineHtml(n)+`<div class="mt">${esc(sub)}</div>`+nestedListHtml(n);
-      card.tabIndex=0;card.setAttribute("role","button");card.setAttribute("aria-label",title);
-      const chainBtn=card.querySelector(".todo-chain");
-      if(chainBtn)chainBtn.onclick=ev=>{ev.stopPropagation();openEndpointScenario(n.id)};
-      card.onclick=ev=>{ev.stopPropagation();if(Date.now()-S.justDraggedAt<250)return;openEndpointScenario(n.id)};
-      card.addEventListener("keydown",ev=>{if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();openEndpointScenario(n.id)}});
-      const mapOpen=card.querySelector(".open-editor");
-      if(mapOpen)mapOpen.onclick=ev=>{ev.stopPropagation();openEditorForNode(n)};
-      card.querySelectorAll(".nested-item").forEach(button=>{
-        button.onclick=ev=>{ev.stopPropagation();openEndpointScenario(n.id);S.selectedNode=button.dataset.nested;renderScenario();renderInspector()};
-      });
-      zone.appendChild(card);
-      // Keep legacy/custom coordinates when they are clear, but never let a new
-      // endpoint land on top of a saved card after a rescan or plan creation.
-      if(proposedOverlap(zone,[card],[{el:card,x:lx,y:ly}])){
-        let y=38;const step=Math.max(card.offsetHeight+16,52);
-        while(proposedOverlap(zone,[card],[{el:card,x:14,y}]))y+=step;
-        card.style.left="14px";card.style.top=y+"px";S.mapPos.set(n.id,{x:14,y});
-      }
-      const finalX=parseFloat(card.style.left)||0,finalY=parseFloat(card.style.top)||0;
-      S.mapPos.set(n.id,{x:finalX,y:finalY});
-      rowHeights[row]=Math.max(rowHeights[row]||0,finalY+card.offsetHeight-(38+rowOffset));
-      enableNodeDrag(card,"map",n.id,finalX,finalY,S.mapView,
-        (nx,ny)=>{
-          const cx=Math.max(14,nx),cy=Math.max(38,ny);
-          const proposed=[{el:card,x:cx,y:cy}];
-          if(proposedOverlap(zone,[card],proposed))return;
-          const size=areaSize(zone,new Map([[card,{x:cx,y:cy}]]));
-          if(zoneOverlaps(zone,proposedZoneRect(zone,size),mapZones()))return;
-          card.style.left=cx+"px";card.style.top=cy+"px";
-          S.mapPos.set(n.id,{x:cx,y:cy});recomputeMapSizes();redrawMapEdges();
-        },
-        ()=>{
-          S.mapPos.set(n.id,{x:parseFloat(card.style.left)||0,y:parseFloat(card.style.top)||0});
-          recomputeMapSizes();redrawMapEdges();
-        });
-    });
-  });
-  recomputeMapSizes();
-  let cursor=18;
-  methods.forEach(method=>{
-    const zone=zones[method],pos=S.mapMethods.get(method);
-    if(pos){zone.style.left=pos.x+"px";zone.style.top=pos.y+"px";cursor=Math.max(cursor,pos.x+zone.offsetWidth+28)}
-  });
-  methods.forEach(method=>{
-    const zone=zones[method];
-    let pos=S.mapMethods.get(method);
-    if(!pos){pos={x:cursor,y:38};S.mapMethods.set(method,pos);cursor+=zone.offsetWidth+28}
-    zone.style.left=pos.x+"px";zone.style.top=pos.y+"px";
-  });
-  recomputeMapSizes();
-  methods.forEach(method=>{
-    const zone=zones[method];
-    enableZoneDrag(zone,S.mapView,
-      (nx,ny)=>{
-        const cx=Math.max(16,nx),cy=Math.max(38,ny);
-        const rect={x:cx,y:cy,w:zone.offsetWidth,h:zone.offsetHeight};
-        if(zoneOverlaps(zone,rect,mapZones()))return;
-        zone.style.left=cx+"px";zone.style.top=cy+"px";
-        S.mapMethods.set(method,{x:cx,y:cy});recomputeMapSizes();redrawMapEdges();
-      },
-      ()=>{
-        S.mapMethods.set(method,{x:parseFloat(zone.style.left)||0,y:parseFloat(zone.style.top)||0});
-        recomputeMapSizes();redrawMapEdges();
-      });
-  });
-  enableZoneDrag(fast,S.mapView,
-    (nx,ny)=>{
-      const cx=Math.max(20,nx),cy=Math.max(20,ny);
-      fast.style.left=cx+"px";fast.style.top=cy+"px";
-      S.mapFastbase.x=cx;S.mapFastbase.y=cy;redrawMapEdges();
-    },
-    ()=>{S.mapFastbase.x=parseFloat(fast.style.left)||40;S.mapFastbase.y=parseFloat(fast.style.top)||40;sizeStage(stage,svg);redrawMapEdges()});
-  renderOffPathMap(stage,svg);
-  sizeStage(stage,svg);
-  applyTransform("mapView",S.mapView);
+  for(const [method,endpoints] of methods){
+    const mid=`@method:${method}`;nodes.push({id:mid,viewId:mid,kind:"method",label:method,synthetic:true,planned:false,details:{count:endpoints.length}});
+    const domains=new Map();for(const endpoint of endpoints){for(const d of (effectiveDomains(endpoint).length?effectiveDomains(endpoint):["Без домена"])){if(!domains.has(d))domains.set(d,[]);domains.get(d).push(endpoint)}}
+    for(const [domain,items] of domains){
+      const rename=Object.entries(S.G.domain_changes||{}).find(([old,v])=>v?.name===domain);
+      const plannedDomain=(S.G.planned_domains||[]).find(item=>item.name===domain);
+      const plannedGroup=!!rename||!!plannedDomain||items.every(n=>n.planned)&&items.length>0;
+      const did=plannedDomain?`@domain-plan:${plannedDomain.id}`:`@domain:${domain}`;
+      if(!byId[did]&&!nodes.some(n=>n.id===did))nodes.push({id:did,viewId:did,kind:"domain",label:domain,synthetic:true,planned:plannedGroup,sourceDomain:rename?.[0]||(S.G.domain_changes?.[domain]?domain:""),domainPlanId:plannedDomain?.id||"",domainRecord:plannedDomain||null,details:{count:items.length}});
+      edges.push({from_node:mid,to_node:did,kind:"uses",label:"домен",planned:plannedGroup});
+      for(const item of items)edges.push({from_node:did,to_node:item.id,kind:"uses",label:"эндпоинт",planned:!!item.planned});
+    }
+    if(S.mapMode==="fact")for(const [source,change] of Object.entries(S.G.domain_changes||{})){
+      if(!domains.has(source))continue;
+      const id=`@domain-change:${source}`;
+      nodes.push({id,viewId:id,kind:"domain",label:change.name||source,synthetic:true,planned:true,sourceDomain:source,details:{count:0}});
+      edges.push({from_node:mid,to_node:id,kind:"uses",label:"план переименования",planned:true});
+    }
+  }
+  for(const d of S.G.planned_domains||[]){
+    if(!nodes.some(n=>n.id===`@domain-plan:${d.id}`))nodes.push({id:`@domain-plan:${d.id}`,viewId:`@domain-plan:${d.id}`,kind:"domain",label:d.name,synthetic:true,planned:true,domainPlanId:d.id,domainRecord:d,details:{count:0}});
+  }
+  for(const n of nodes.filter(item=>!item.synthetic&&item.planned_change&&(item.planned_change.note||item.planned_change.acceptance?.length))){
+    const id=`@change:${n.id}`;
+    nodes.push({id,viewId:id,kind:"change",label:"Плановая правка",synthetic:true,planned:true,sourceNodeId:n.id,plannedChange:n.planned_change,details:{name:n.label}});
+    edges.push({from_node:n.id,to_node:id,kind:"uses",label:"плановая правка",planned:true});
+  }
+  return {nodes,edges};
 }
-
+function visibleClass(node){
+  if(S.mapMode==="fact"&&(node.planned||node.planned_change&&Object.keys(node.planned_change).length))return " faded";
+  if(S.mapMode==="plan"&&!node.planned&&!node.synthetic)return " faded";
+  return "";
+}
+function positionGraph(nodes,edges){
+  const byId=Object.fromEntries(nodes.map(n=>[n.id,n])),children=new Map(),parents=new Map();
+  nodes.forEach(n=>{children.set(n.id,[]);parents.set(n.id,[])});
+  edges.forEach(e=>{if(!byId[e.from_node]||!byId[e.to_node]||e.from_node===e.to_node)return;children.get(e.from_node).push(e.to_node);parents.get(e.to_node).push(e.from_node)});
+  const rank=new Map(),queue=nodes.filter(n=>!parents.get(n.id).length).map(n=>n.id),visited=new Set();queue.forEach(id=>rank.set(id,0));
+  for(let i=0;i<queue.length;i++){const id=queue[i];if(visited.has(id))continue;visited.add(id);for(const child of children.get(id)){if(rank.has(child))continue;rank.set(child,(rank.get(id)||0)+1);queue.push(child)}}
+  nodes.forEach(n=>{if(!rank.has(n.id))rank.set(n.id,0)});
+  const levels=new Map();for(const n of nodes){const r=rank.get(n.id);if(!levels.has(r))levels.set(r,[]);levels.get(r).push(n)}
+  const positions=new Map(),widths=new Map(),placed=[];let x=44;
+  for(const r of [...levels.keys()].sort((a,b)=>a-b)){
+    const items=levels.get(r).sort((a,b)=>String(a.label).localeCompare(String(b.label),"ru"));let y=42;
+    items.forEach(n=>{
+      const saved=S.mapPos.get(n.id),w=Math.max(154,250-r*12),p=saved?{...saved}:{x,y};widths.set(n.id,w);
+      while(placed.some(q=>p.x<q.x+q.w+12&&p.x+w+12>q.x&&p.y<q.y+H+GAP_Y&&p.y+H+GAP_Y>q.y))p.y+=H+GAP_Y;
+      positions.set(n.id,p);placed.push({x:p.x,y:p.y,w});y=Math.max(y,p.y+H+GAP_Y);
+    });x+=250+GAP_X;
+  }
+  return {positions,widths,children,parents};
+}
+function draw(){
+  const stage=$("mapStage"),svg=$("mapEdges");if(!stage||!svg)return;
+  clearStage(stage,svg);const {nodes,edges}=model(),{positions,widths,children}=positionGraph(nodes,edges),byId=Object.fromEntries(nodes.map(n=>[n.id,n]));
+  if(S.selectedNode&&!byId[S.selectedNode]){
+    const previous=S.mapViewNodes?.[S.selectedNode],source=previous?.sourceDomain;
+    if(source){const match=nodes.find(n=>n.sourceDomain===source&&(S.mapMode==="plan"?n.planned:!n.planned));if(match)S.selectedNode=match.id}
+    if(String(S.selectedNode).startsWith("@change:"))S.selectedNode=null;
+  }
+  S.mapViewNodes=byId;
+  const filtered=nodes.filter(n=>!S.lastSearchQuery||matchesAll(S.lastSearchQuery,[n.label,n.domain,n.description,n.file_path,n.kind,nodeMeta(n),n.planned_change?.note,n.plannedChange?.note,...(n.planned_change?.acceptance||[]),...(n.plannedChange?.acceptance||[])]));
+  const shown=new Set(filtered.map(n=>n.id));
+  // Keep connected context when searching: matching nodes and their immediate ancestors.
+  for(const e of edges)if(shown.has(e.to_node)&&byId[e.from_node])shown.add(e.from_node);
+  if(!shown.size){const empty=document.createElement("div");empty.className="empty";empty.textContent="Совпадений нет. Очистите поиск.";stage.appendChild(empty)}
+  nodes.filter(n=>shown.has(n.id)).forEach(n=>{
+    const p=positions.get(n.id)||{x:44,y:42},card=document.createElement("article");card.className=`card map-node k-${n.kind}${n.planned?" planned node--todo":""}${visibleClass(n)}${S.selectedNode===n.id?" sel":""}${n.synthetic?" synthetic":""}`;card.dataset.id=n.id;card.style.left=`${p.x}px`;card.style.top=`${p.y}px`;card.style.width=`${widths.get(n.id)||W}px`;
+    const kind=n.kind==="method"?"HTTP-метод":n.kind==="domain"?"домен":n.kind==="change"?"план правки":KIND_NAMES[n.kind]||n.kind;
+    const detail=n.kind==="endpoint"?`${methodOfEndpoint(n)} ${urlOfEndpoint(n)}\n${(n.details||{}).function_name||""}`:n.kind==="change"?S.byId[n.sourceNodeId]?.label||"фактический узел":n.synthetic?`${n.details?.count||0} узлов`:`${nodeMeta(n)||n.file_path+(n.line?":"+n.line:"")}`;
+    const note=n.plannedChange?.note;
+    card.innerHTML=`<div class="hd"><span class="grip" title="Перетащить узел и потомков">⠿</span><span class="chip">${esc(kind)}</span>${n.planned?'<span class="chip todo">план</span>':""}<span class="t">${esc(n.label)}</span>${!n.synthetic&&n.file_path?'<button class="open-editor" type="button" title="Открыть в редакторе">↗</button>':""}</div><div class="mt">${esc(detail)}</div>${n.kind==="change"&&note&&!S.hideMeta?`<div class="planned-note">${esc(note)}</div>`:""}${n.kind!=="change"?'<button type="button" class="map-add-child" aria-label="Добавить потомка" title="Добавить потомка">＋</button>':""}`;
+    card.onclick=ev=>{if(ev.target.closest("button,.grip"))return;ev.stopPropagation();if(Date.now()-S.justDraggedAt<250)return;S.selectedNode=n.id;renderInspector();draw();schedulePersist()};
+    card.tabIndex=0;card.setAttribute("role","button");card.setAttribute("aria-label",`${kind}: ${n.label}`);card.addEventListener("keydown",ev=>{if(ev.target!==card)return;if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();S.selectedNode=n.id;renderInspector();draw();schedulePersist()}});
+    card.querySelector(".map-add-child")?.addEventListener("click",ev=>{
+      ev.stopPropagation();
+      if(n.kind==="method")S.selectedNode="__new_domain__";
+      else S.selectedNode=n.id;
+      renderInspector();
+      if(n.kind==="domain")$("domainAddEndpoint")?.click();
+      draw();
+      document.querySelector("#graphNodeCreate input[name=name]")?.focus();
+    });
+    card.querySelector(".open-editor")?.addEventListener("click",ev=>{ev.stopPropagation();openEditorForNode(S.byId[n.id])});
+    stage.appendChild(card);
+    enableNodeDrag(card,"map",n.id,p.x,p.y,S.mapView,(nx,ny)=>{
+      const dx=nx-p.x,dy=ny-p.y,moving=new Set([n.id]),todo=[n.id];
+      while(todo.length){for(const c of children.get(todo.pop())||[])if(!moving.has(c)){moving.add(c);todo.push(c)}}
+      const candidates=[...moving].map(id=>({id,x:(positions.get(id)?.x||0)+(id===n.id?dx:dx),y:(positions.get(id)?.y||0)+dy}));
+      if(candidates.some(a=>nodes.some(other=>{const q=positions.get(other.id)||{x:0,y:0};return !moving.has(other.id)&&shown.has(other.id)&&a.x+widths.get(a.id)+12>q.x&&a.x<q.x+widths.get(other.id)+12&&a.y<q.y+H+12&&a.y+H+12>q.y})))return;
+      candidates.forEach(a=>{const el=stage.querySelector(`[data-id="${CSS.escape(a.id)}"]`);if(el){el.style.left=`${a.x}px`;el.style.top=`${a.y}px`}S.mapPos.set(a.id,{x:a.x,y:a.y})});S.justDraggedAt=Date.now();
+      const liveBoxes=measure(stage);S.mapBoxes=liveBoxes;drawEdges(svg,liveBoxes,edges.filter(e=>shown.has(e.from_node)&&shown.has(e.to_node)));sizeStage(stage,svg);
+    },()=>{schedulePersist()});
+  });
+  const boxes=measure(stage);S.mapBoxes=boxes;
+  const shownEdges=edges.filter(e=>shown.has(e.from_node)&&shown.has(e.to_node)).map(e=>({...e,todo:!!(byId[e.from_node]?.planned||byId[e.to_node]?.planned||e.planned)}));
+  drawEdges(svg,boxes,shownEdges);sizeStage(stage,svg);applyTransform("mapView",S.mapView);
+  const mode=$("mapModeCaption");if(mode)mode.textContent=S.mapMode==="fact"?"Фактическая структура проекта":"Планируемая структура и изменения";
+}
+function renderMap(){draw()}
 export {renderMap};
-
-

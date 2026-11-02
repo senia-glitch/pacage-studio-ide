@@ -15,6 +15,9 @@ from studio.metadata.store import (
     read_metadata,
     save_graph_node,
     save_node_metadata,
+    save_planned_change,
+    save_domain_plan,
+    delete_domain_plan,
     write_metadata,
 )
 
@@ -29,5 +32,8 @@ __all__ = [
     "delete_graph_node",
     "save_graph_node",
     "save_node_metadata",
+    "save_planned_change",
+    "save_domain_plan",
+    "delete_domain_plan",
     "write_metadata",
 ]

@@ -34,9 +34,7 @@ export function anchorOf(node) {
   const details = (node && node.details) || {};
   if (!node) return "";
   if (node.kind === "endpoint") return String(details.function_name || "");
-  if (node.kind === "scenario" || node.kind === "model") {
-    return String(details.class_name || "");
-  }
+  if (node.kind === "scenario" || node.kind === "model") return String(details.class_name || "");
   if (node.kind === "test") return String(details.test_name || "");
   if (node.kind === "io") {
     const base = `${details.scenario_class || ""}._db.${details.method || ""}`;
@@ -61,9 +59,7 @@ export function groupOffPath(nodes) {
     if (groups[node.kind]) groups[node.kind].push(node);
   }
   for (const kind of OFF_PATH_KINDS) {
-    groups[kind].sort((a, b) =>
-      String(a.label || a.id).localeCompare(String(b.label || b.id)),
-    );
+    groups[kind].sort((a, b) => String(a.label || a.id).localeCompare(String(b.label || b.id)));
   }
   return groups;
 }

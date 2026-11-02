@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>studio — проектирование сценариев</title>
+<title>studio — карта проекта</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23232428'/%3E%3Cpath d='M16 5l9 5v12l-9 5-9-5V10z' fill='%23e8833a'/%3E%3C/svg%3E">
 
 <meta name="studio-token" content="">
@@ -16,8 +16,7 @@
     <span class="logo" id="logoBtn" title="О проекте"><span class="logo-mark">⬢</span> studio</span>
     <span class="tabs" role="tablist" aria-label="Рабочие пространства">
       <button class="tabbtn on" id="tab-map-button" data-tab="map" role="tab" aria-selected="true" aria-controls="tab-map"><span class="tab-index">01</span> Карта проекта</button>
-      <button class="tabbtn" id="tab-scenario-button" data-tab="scenario" role="tab" aria-selected="false" aria-controls="tab-scenario"><span class="tab-index">02</span> Конструктор сценариев</button>
-      <button class="tabbtn" id="tab-ideas-button" data-tab="ideas" role="tab" aria-selected="false" aria-controls="tab-ideas"><span class="tab-index">03</span> Генератор идей</button>
+      <button class="tabbtn" id="tab-ideas-button" data-tab="ideas" role="tab" aria-selected="false" aria-controls="tab-ideas"><span class="tab-index">02</span> Генератор идей</button>
     </span>
   </div>
   <span class="search-wrap"><input id="searchBox" type="search" placeholder="Поиск — метод, URL, имя, домен" aria-label="Поиск по проекту"><span class="hint" id="searchCount"></span></span>
@@ -36,7 +35,7 @@
   </div>
   <div class="header-canvas">
     <label class="canvas-toggle" title="визуально скрыть описания, критерии и домены на узлах"><input type="checkbox" id="hideMeta"> <span>Метаданные</span></label>
-    <label class="canvas-toggle toggle-nested" title="скрыть nested-узлы на карте; в инспекторе и ТЗ они остаются"><input type="checkbox" id="hideNested"> <span>Вложенные</span></label>
+    <div class="map-mode" role="group" aria-label="Режим карты"><button type="button" class="on" data-map-mode="fact">Факт</button><button type="button" data-map-mode="plan">План</button></div>
     <div class="zoom-tools" aria-label="Масштаб канваса"><span class="hint" id="zoomLabel">100%</span><button id="zOut" title="Отдалить" aria-label="Отдалить">−</button><button id="zIn" title="Приблизить" aria-label="Приблизить">+</button><button id="zFit" title="Вписать канвас">Вписать</button><button id="zReset" title="Масштаб 100%">1:1</button></div>
     <button id="rescan" title="Перечитать код проекта и метаданные">Обновить код</button>
   </div>
@@ -45,68 +44,8 @@
 <main>
   <section class="tab on" id="tab-map" role="tabpanel" aria-labelledby="tab-map-button">
     <div id="mapPane">
-      <div class="mapbar"><span>Границы пакета: <b>fastbase</b></span><span class="hint">показаны только эндпоинты; домен → HTTP-метод; клик открывает сценарий</span><span id="domainChips" class="chips"></span></div>
-      <div class="canvas" id="mapCanvas"><div class="view" id="mapView"><div class="stage" id="mapStage"><svg class="edges" id="mapEdges"></svg></div></div></div>
-    </div>
-  </section>
-  <section class="tab" id="tab-scenario" role="tabpanel" aria-labelledby="tab-scenario-button">
-    <div class="workspace-switch" role="tablist" aria-label="Разделы конструктора">
-      <button class="workspace-btn on" id="workspace-graph-button" type="button" role="tab" aria-selected="true" aria-controls="scenWrap" data-workspace="graph">Граф сценариев</button>
-      <button class="workspace-btn" id="workspace-plans-button" type="button" role="tab" aria-selected="false" aria-controls="createPane" data-workspace="plans">Планы и создание</button>
-      <span class="workspace-description">Граф: добавить узел в выбранную ветку · Планы: создать сценарий целиком · код меняется в IDE</span>
-    </div>
-    <div id="scenarioWorkbench">
-    <div id="scenWrap" class="constructor-view on" role="tabpanel" aria-labelledby="workspace-graph-button" data-constructor-view="graph">
-      <aside id="scenList"></aside>
-      <div id="scenMain">
-        <div id="scenBar">
-          <span class="hint">Сценарий:</span>
-          <select id="scenSelect" style="min-width:260px"></select>
-          <span class="hint" id="scenHint">Узлы раскрываются по связям; в каждой ветке может быть несколько узлов одного типа</span>
-          <span class="spacer"></span><button id="newPlanShortcut" type="button" class="primary">＋ Новый сценарий</button>
-        </div>
-        <div class="canvas" id="scenCanvas"><div class="view" id="scenView"><div class="stage" id="scenStage"><svg class="edges" id="scenEdges"></svg></div></div></div>
-      </div>
-      <aside id="inspector">
-        <div id="inspHead"><h3 style="margin:0;font-size:12px;color:var(--acc)">Инспектор узла</h3><div id="inspChips" class="chips" style="margin-top:5px"></div></div>
-        <div id="inspBody"><p class="hint">Выберите узел на карте сценария.</p></div>
-        <div id="inspFoot">Правки сохраняются при потере фокуса.</div>
-      </aside>
-    </div>
-    <div id="createPane" class="constructor-view" role="tabpanel" aria-labelledby="workspace-plans-button" data-constructor-view="plans">
-      <div class="constructor-heading"><div><div class="eyebrow">КОНСТРУКТОР</div><h2>Планы сценариев</h2><p>Создавайте заготовки, редактируйте описание и готовьте задачи для реализации.</p></div><div class="constructor-count" id="constructorCount">— планов</div></div>
-      <div class="plan-scroll">
-        <form id="planForm" class="plan-form" autocomplete="off">
-          <div class="eyebrow">НОВЫЙ ПЛАН</div><h3>Опишите сценарий</h3>
-          <label class="field">Название
-            <input id="planTitle" name="title" type="text" placeholder="Например: Отмена заказа">
-          </label>
-          <label class="field">Описание сценария
-            <textarea id="planDescription" name="description" rows="7" placeholder="Опишите путь пользователя, входные данные, результат и поведение при ошибках."></textarea>
-          </label>
-          <label class="field">Критерии приёмки <span class="hint">— по одному на строку</span>
-            <textarea id="planAcceptance" name="acceptance" rows="3" placeholder="Заказ помечен как отменённый"></textarea>
-          </label>
-          <label class="field">Домен
-            <input id="planDomain" name="domain" type="text" list="planDomains" placeholder="например orders">
-            <datalist id="planDomains"></datalist>
-          </label>
-          <details id="planMore">
-            <summary>Параметры API и реализации</summary>
-            <div class="plan-more-grid">
-              <label class="field">HTTP-метод<select id="planMethod" name="http_method"><option value="">не указан</option><option value="get">GET</option><option value="post">POST</option><option value="put">PUT</option><option value="patch">PATCH</option><option value="delete">DELETE</option></select></label>
-              <label class="field">Путь<input id="planPath" name="path" type="text" placeholder="/orders/{id}/cancel"></label>
-              <label class="field">Slug<input id="planSlug" name="slug" type="text" placeholder="из названия"></label>
-            </div>
-            <label class="hint plan-check"><input id="planUsesDb" type="checkbox" checked> Сценарий работает с БД</label>
-            <label class="hint plan-check"><input id="planWithTest" type="checkbox" checked> Нужен тест</label>
-          </details>
-          <div class="plan-actions"><button id="planBuild" type="button">Предпросмотр цепочки</button><button id="planCreate" class="primary" type="button" disabled>Создать сценарий</button></div>
-        </form>
-        <div class="plan-chain-wrap"><h3>Будущая структура</h3><div id="planChain" class="plan-chain"><p class="hint">Заполните название, чтобы увидеть цепочку слоёв.</p></div><div id="createResult" class="create-result"></div></div>
-      </div>
-      <div class="plans-wrap"><div class="plans-heading"><h3>Существующие сценарии</h3><span class="hint">Выберите «Редактировать», чтобы обновить описание и параметры</span></div><div id="planList" class="plan-list"><p class="hint">Загрузка сценариев…</p></div></div>
-    </div>
+      <div class="mapbar"><span class="map-mode-caption" id="mapModeCaption">Фактическая структура проекта</span><span class="hint" id="mapSelectionHint">Выберите узел на карте · наведите курсор на узел, чтобы добавить потомка</span><span class="spacer"></span><button type="button" id="addDomainBtn">＋ Домен</button><button type="button" id="inspectorToggle" aria-label="Скрыть свойства" title="Скрыть свойства">Скрыть свойства</button></div>
+      <div class="map-workspace"><div class="canvas" id="mapCanvas"><div class="view" id="mapView"><div class="stage" id="mapStage"><svg class="edges" id="mapEdges"></svg></div></div></div><div class="inspector-resize" id="inspectorResize" role="separator" aria-orientation="vertical" aria-label="Изменить ширину панели свойств"></div><aside id="inspector"><div id="inspHead"><div class="insp-head-row"><h3>Свойства узла</h3><button type="button" id="collapseInspector" aria-label="Скрыть панель">›</button></div><div id="inspChips" class="chips"></div></div><div id="inspBody"><p class="hint">Выберите узел на карте.</p></div><div id="inspFoot">Плановые данные сохраняются в .studio/metadata.json.</div></aside></div>
     </div>
   </section>
   <section class="tab" id="tab-ideas" role="tabpanel" aria-labelledby="tab-ideas-button">

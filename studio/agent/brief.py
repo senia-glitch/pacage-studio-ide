@@ -1169,6 +1169,7 @@ def _build_markdown(
     map_mode = options.map_mode or ("related" if len(graph.nodes) > 150 else "full")
     total_tasks = len(plans) + len(tasks)
     total_unready = len(unready_plans) + len(unready_nodes)
+    planned_edits = sum(1 for node in graph.nodes if node.planned_change and (node.planned_change.get("note") or node.planned_change.get("acceptance"))) + len(graph.domain_changes or {}) + len(graph.planned_domains or [])
     lines = [f"# ТЗ для AI-агента: {project_name}", ""]
     lines.append(
         f"Сформировано: {generated_at} · studio {__version__} · brief {brief_id} · "
@@ -1178,7 +1179,7 @@ def _build_markdown(
         f"Область: {'выбрано ' + str(len(options.only or ())) if options.only else 'все узлы'}"
         f"{' · сценарий ' + options.scenario if options.scenario else ''}"
         f"{' · планы: ' + ', '.join(options.plans or ()) if options.plans else ''}"
-        f" · Карта: {map_mode} · Задач: {total_tasks} · Не готово: {total_unready}"
+        f" · Карта: {map_mode} · Задач: {total_tasks} · Плановых правок: {planned_edits} · Не готово: {total_unready}"
     )
     lines.append("")
     lines.append("## 1. Что нужно сделать")
@@ -1344,6 +1345,13 @@ def _make_brief_id(graph: Graph, options: BriefOptions, tasks: list[Node], plans
             "include_empty": options.include_empty,
             "tasks": _fingerprint_tasks(tasks),
             "plan_tasks": _fingerprint_plans(plans),
+            "planned_changes": [
+                (node.id, node.planned_change)
+                for node in sorted(graph.nodes, key=lambda item: item.id)
+                if node.planned_change
+            ],
+            "domain_changes": graph.domain_changes,
+            "planned_domains": graph.planned_domains,
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -1487,6 +1495,34 @@ def build_brief(
         brief_id,
         warnings,
     )
+    change_nodes = [node for node in graph.nodes if node.planned_change and (node.planned_change.get("note") or node.planned_change.get("acceptance"))]
+    domain_changes = graph.domain_changes or {}
+    planned_domains = graph.planned_domains or []
+    if change_nodes or domain_changes or planned_domains:
+        body += "\n## Плановые правки фактической структуры\n\n"
+        body += "Эти пункты относятся к существующим узлам и доменам. Сохраните текущие факты до реализации; после правки кода пересканируйте проект.\n\n"
+        for node in sorted(change_nodes, key=lambda item: (item.file_path, item.line, item.id)):
+            change = node.planned_change or {}
+            body += f"### {node.kind}: `{node.label}` (`{node.file_path}:{node.line}`)\n\n"
+            if change.get("note"):
+                body += f"- Изменение: {change['note']}\n"
+            for criterion in change.get("acceptance") or []:
+                body += f"- Критерий приёмки: {criterion}\n"
+            body += "\n"
+        for source, change in sorted(domain_changes.items()):
+            body += f"- Переименовать домен `{source}` → `{change.get('name') or source}`"
+            if change.get("note"):
+                body += f": {change['note']}"
+            body += "\n"
+            for criterion in change.get("acceptance") or []:
+                body += f"  - Критерий приёмки: {criterion}\n"
+        for domain in sorted(planned_domains, key=lambda item: str(item.get("name") or "")):
+            body += f"- Добавить домен `{domain.get('name') or 'без названия'}`"
+            if domain.get("note"):
+                body += f": {domain['note']}"
+            body += "\n"
+            for criterion in domain.get("acceptance") or []:
+                body += f"  - Критерий приёмки: {criterion}\n"
     payload = {
         "version": BRIEF_VERSION,
         "brief_id": brief_id,
@@ -1501,6 +1537,12 @@ def build_brief(
         },
         "tasks": [],
         "unready": [],
+        "planned_changes": [
+            {"id": node.id, "kind": node.kind, "label": node.label, "file": node.file_path, "line": node.line, **node.planned_change}
+            for node in change_nodes
+        ],
+        "domain_changes": domain_changes,
+        "planned_domains": planned_domains,
     }
     task_payloads: list[dict] = []
     for state in ordered_plans:
@@ -1539,6 +1581,7 @@ def build_brief(
         "unready": len(unready_plans) + len(unready_nodes),
         "chars": len(markdown),
         "approx_tokens": len(markdown) // 3,
+        "planned_changes": len(change_nodes) + len(domain_changes) + len(planned_domains),
     }
     return Brief(
         markdown=markdown,
