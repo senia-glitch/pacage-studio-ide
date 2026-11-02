@@ -13,13 +13,14 @@ JS = "\n".join(
 )
 
 
-def test_три_вкладки_одного_окна():
+def test_две_рабочие_области_одного_окна():
     assert 'data-tab="map"' in HTML
-    assert 'data-tab="scenario"' in HTML
     assert 'data-tab="ideas"' in HTML
+    assert 'data-tab="scenario"' not in HTML
     assert "Карта проекта" in HTML
-    assert "Конструктор сценариев" in HTML
     assert "Генератор идей" in HTML
+    assert 'data-map-mode="fact"' in HTML
+    assert 'data-map-mode="plan"' in HTML
 
 
 def test_интерфейс_на_русском():
@@ -47,29 +48,32 @@ def test_статика_на_месте():
     assert (JS_DIR / "app.js").is_file()
     assert (JS_DIR / "core.js").is_file()
     assert (JS_DIR / "mapview.js").is_file()
-    assert (JS_DIR / "scenarioview.js").is_file()
     assert (JS_DIR / "inspectorview.js").is_file()
-    assert (JS_DIR / "createview.js").is_file()
+    assert (JS_DIR / "drag.js").is_file()
+    assert (JS_DIR / "geometry.js").is_file()
     assert (JS_DIR / "diagnosticsview.js").is_file()
     assert (JS_DIR / "briefview.js").is_file()
+    assert not (JS_DIR / "scenarioview.js").exists()
+    assert not (JS_DIR / "createview.js").exists()
+    assert not (JS_DIR / "chainmodel.js").exists()
     assert not (JS_DIR / "legacy.js").exists()
     assert '<meta name="studio-token" content="">' in HTML
 
 
 def test_есть_ключевые_возможности():
-    assert "/api/metadata/node" in JS
     assert "/api/metadata/graph-node" in JS
     assert "/api/metadata/graph-node/delete" in JS
+    assert "/api/metadata/planned-change" in JS
+    assert "/api/metadata/domain-plan" in JS
     assert "X-Studio-Token" in JS
     assert "buildEditorUrl" in JS
     assert "localStorage" in JS
-    assert "incompleteNodes" in JS
-    assert "Неполные" in JS or "неполные" in JS
     assert "enableNodeDrag" in JS
-    assert "hideNested" in JS
-    assert "nestedOf" in JS
-    assert "Почему жёлтый" in JS
-    assert "node--yellow" in JS
+    assert "clampGroupDelta" in JS
+    assert "requestAnimationFrame" in JS
+    assert "@branch:" in (JS_DIR / "mapview.js").read_text(encoding="utf-8")
+    assert 'id="inspectorResize"' in HTML
+    assert 'id="inspectorToggle"' in HTML
 
 
 def test_есть_тз_для_агента():
@@ -81,20 +85,10 @@ def test_есть_тз_для_агента():
     assert "Выполнено" in JS
 
 
-def test_todo_узлы_явно_видны():
-    todo_js = (JS_DIR / "todo.js").read_text(encoding="utf-8")
-    assert "TODO · нет кода" in todo_js
-    assert "TODO · нет описания" in todo_js
-    assert "placeNode" in JS
-    assert "groupOffPath" in JS
-    assert "Вне путей запроса" in JS
-    assert "в цепочке TODO" in JS
-    assert "node--todo" in JS
-    assert "Этот узел — TODO" in JS
-    assert "Что сделать" in JS
-    assert "todoHighlight" in JS
-    assert 'id="hideNested"' in HTML
+def test_планирование_и_бриф_для_агента():
+    assert 'id="briefBtn"' in HTML
     assert "К реализации" in (JS_DIR / "briefmodel.js").read_text(encoding="utf-8")
+    assert "openBriefDialog" in (JS_DIR / "briefview.js").read_text(encoding="utf-8")
 
 
 def test_редактор_только_vscode():

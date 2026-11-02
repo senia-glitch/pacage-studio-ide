@@ -455,7 +455,8 @@ body[data-active-tab="ideas"] .header-canvas .zoom-tools { display: none; }
 .map-workspace #inspFoot { padding:8px 10px; border-top:1px solid #28313c; font-size:10px; color:var(--dim); }
 .inspector-hidden .map-workspace { grid-template-columns:minmax(0,1fr) 0 0; }
 .inspector-hidden .map-workspace #inspector,.inspector-hidden .inspector-resize { display:none; }
-.map-node { --c:#838997; height:118px; overflow:hidden; }
+.map-node { --c:#838997; height:118px; overflow:hidden; cursor:grab; user-select:none; touch-action:none; }
+.map-node.dragging { cursor:grabbing; transition:none; }
 .map-node.k-endpoint { --c:#5aa0ff; }
 .map-node.k-scenario { --c:#e8833a; }
 .map-node.k-io { --c:#7fc97f; }

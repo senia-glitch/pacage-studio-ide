@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   areaSize,
+  clampGroupDelta,
   methodOrder,
   proposedOverlap,
   rectsOverlap,
@@ -23,6 +24,38 @@ test("размер области по карточкам", () => {
 test("предложенное пересечение и зоны", () => {
   assert.equal(proposedOverlap([{x: 0, y: 0, w: 10, h: 10}], [{x: 5, y: 5, w: 10, h: 10}], 0), true);
   assert.equal(zoneOverlaps({x: 0, y: 0, w: 10, h: 10}, [{x: 30, y: 30, w: 10, h: 10}], 0), false);
+});
+
+test("перемещение ветки останавливается у первого препятствия", () => {
+  const moving = [
+    {x: 0, y: 0, w: 20, h: 20},
+    {x: 30, y: 0, w: 20, h: 20},
+  ];
+  const stationary = [{x: 80, y: 0, w: 20, h: 20}];
+  assert.deepEqual(
+    clampGroupDelta(moving, stationary, {x: 0, y: 0}, {x: 100, y: 0}, 10),
+    {x: 20, y: 0},
+  );
+});
+
+test("ветка скользит вдоль препятствия и может обойти его", () => {
+  const moving = [{x: 0, y: 0, w: 20, h: 20}];
+  const stationary = [{x: 30, y: 0, w: 20, h: 20}];
+  const first = clampGroupDelta(moving, stationary, {x: 0, y: 0}, {x: 50, y: 50}, 10);
+  assert.deepEqual(first, {x: 0, y: 50});
+  assert.deepEqual(
+    clampGroupDelta(moving, stationary, first, {x: 50, y: 50}, 10),
+    {x: 50, y: 50},
+  );
+});
+
+test("ветка не пересекает препятствие при движении в обратную сторону", () => {
+  const moving = [{x: 100, y: 40, w: 20, h: 20}];
+  const stationary = [{x: 20, y: 40, w: 30, h: 20}];
+  assert.deepEqual(
+    clampGroupDelta(moving, stationary, {x: 0, y: 0}, {x: -100, y: 0}, 10),
+    {x: -40, y: 0},
+  );
 });
 
 test("порядок методов", () => {

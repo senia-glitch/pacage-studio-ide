@@ -1,5 +1,6 @@
 import {$,S,applyTransform,drawEdges,esc,KIND_NAMES,EDGE_COLORS,EDGE_NAMES,nodeMeta,methodOfEndpoint,urlOfEndpoint,openEditorForNode,toast,schedulePersist,enableNodeDrag} from "./core.js";
 import {clearStage,measure,sizeStage} from "./edges.js";
+import {clampGroupDelta} from "./geometry.js";
 import {matchesAll} from "./search.js";
 import {renderInspector} from "./inspectorview.js";
 
@@ -190,14 +191,18 @@ function draw(){
     });
     card.querySelector(".open-editor")?.addEventListener("click",ev=>{ev.stopPropagation();openEditorForNode(S.byId[n.id])});
     stage.appendChild(card);
+    let currentDx=0,currentDy=0;
     enableNodeDrag(card,"map",n.viewId,p.x,p.y,S.mapView,(nx,ny)=>{
-      const dx=nx-p.x,dy=ny-p.y,moving=new Set([n.viewId]),todo=[n.viewId];
+      const requestedDx=nx-p.x,requestedDy=ny-p.y,moving=new Set([n.viewId]),todo=[n.viewId];
       while(todo.length){for(const c of children.get(todo.pop())||[])if(!moving.has(c)){moving.add(c);todo.push(c)}}
+      const movingRects=[...moving].map(id=>{const p0=positions.get(id);return{x:p0.x,y:p0.y,w:widths.get(id)||W,h:H}});
+      const stationaryRects=nodes.filter(other=>!moving.has(other.viewId)).map(other=>{const p0=positions.get(other.viewId);return{x:p0.x,y:p0.y,w:widths.get(other.viewId)||W,h:H}});
+      const delta=clampGroupDelta(movingRects,stationaryRects,{x:currentDx,y:currentDy},{x:requestedDx,y:requestedDy});
+      currentDx=delta.x;currentDy=delta.y;
       const candidates=[...moving].map(id=>({id,x:(positions.get(id)?.x||0)+dx,y:(positions.get(id)?.y||0)+dy}));
-      if(candidates.some(a=>nodes.some(other=>{const q=positions.get(other.viewId)||{x:0,y:0};return !moving.has(other.viewId)&&shown.has(other.viewId)&&a.x+widths.get(a.id)+12>q.x&&a.x<q.x+widths.get(other.viewId)+12&&a.y<q.y+H+12&&a.y+H+12>q.y})))return;
       candidates.forEach(a=>{const el=stage.querySelector(`[data-id="${CSS.escape(a.id)}"]`);if(el){el.style.left=`${a.x}px`;el.style.top=`${a.y}px`}S.mapPos.set(a.id,{x:a.x,y:a.y})});S.justDraggedAt=Date.now();
       const liveBoxes=measure(stage);S.mapBoxes=liveBoxes;drawEdges(svg,liveBoxes,edges.filter(e=>shown.has(e.from_node)&&shown.has(e.to_node)));sizeStage(stage,svg);
-    },()=>{schedulePersist()});
+    },()=>{schedulePersist();draw()});
   });
   const boxes=measure(stage);S.mapBoxes=boxes;
   const shownEdges=edges.filter(e=>shown.has(e.from_node)&&shown.has(e.to_node)).map(e=>({...e,todo:!!(byView[e.from_node]?.planned||byView[e.to_node]?.planned||e.planned)}));

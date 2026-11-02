@@ -4,7 +4,7 @@ import {EDITORS, buildEditorUrl} from "./editor.js";
 import {drawEdges as drawEdgesImpl} from "./edges.js";
 import {matchesAll, searchNodes} from "./search.js";
 import {createStorage, storageKey} from "./storage.js";
-import {anchorOf} from "./todo.js";
+import {anchorOf} from "./anchors.js";
 import {$, esc, toast} from "./util.js";
 import {applyTransform as applyTransformImpl} from "./viewport.js";
 
