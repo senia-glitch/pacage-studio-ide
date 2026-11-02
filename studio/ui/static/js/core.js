@@ -212,7 +212,7 @@ function restoreUiState(saved){
       const parts=key.split("|");
       const id=parts[parts.length-1];
       const scope=parts.slice(0,-1).join("|");
-      if(!ids.has(id)&&!id.startsWith("@method:")&&!id.startsWith("@domain:")&&!id.startsWith("@domain-plan:")&&!id.startsWith("@domain-change:")&&!scopes.has(scope)&&!scope.includes("incomplete"))continue;
+      if(!ids.has(id)&&!id.startsWith("@branch:")&&!id.startsWith("@method:")&&!id.startsWith("@domain:")&&!id.startsWith("@domain-plan:")&&!id.startsWith("@domain-change:")&&!scopes.has(scope)&&!scope.includes("incomplete"))continue;
       out.set(key,{x:value.x,y:value.y});
     }
     return out;
