@@ -30,6 +30,31 @@ export function defaultMapMode(nodeCount) {
   return Number(nodeCount) > 150 ? "related" : "full";
 }
 
+/* Потомки узла — по тому же правилу, что и на карте: ребро "tests" направлено
+   от теста к родителю, остальные — от родителя к потомку. */
+export function subtreeIds(graph, rootId) {
+  const ids = new Set(rootId ? [String(rootId)] : []);
+  const outgoing = new Map();
+  for (const edge of ((graph && graph.edges) || [])) {
+    if (!edge || typeof edge !== "object") continue;
+    const parent = edge.kind === "tests" ? edge.to_node : edge.from_node;
+    const child = edge.kind === "tests" ? edge.from_node : edge.to_node;
+    if (!parent || !child) continue;
+    if (!outgoing.has(parent)) outgoing.set(parent, []);
+    outgoing.get(parent).push(child);
+  }
+  const queue = rootId ? [String(rootId)] : [];
+  while (queue.length) {
+    for (const child of outgoing.get(queue.shift()) || []) {
+      if (!ids.has(child)) {
+        ids.add(child);
+        queue.push(child);
+      }
+    }
+  }
+  return ids;
+}
+
 export function briefRequest({selected, plans, map, includeEmpty, scenario}) {
   const payload = {
     only: Array.isArray(selected) ? selected : [...(selected || [])],

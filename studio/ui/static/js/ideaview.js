@@ -1,5 +1,5 @@
 import {api} from "./api.js";
-import {S, esc, setTab, schedulePersist, toast, applyGraph, hooks} from "./core.js";
+import {S, esc, setTab, schedulePersist, toast, applyGraph, hooks, modal} from "./core.js";
 import {storageKey} from "./storage.js";
 
 const EMPTY = {version: 1, activeId: "", ideas: []};
@@ -18,7 +18,7 @@ function normalizeBoard(value){
     idea.scenarios=(Array.isArray(item.scenarios)?item.scenarios:[]).filter(s=>s&&typeof s==="object"&&!Array.isArray(s)).map((scenario,scenarioIndex)=>{
       const source=scenario.source&&typeof scenario.source==="object"&&!Array.isArray(scenario.source)?scenario.source:{};
       const acceptance=Array.isArray(scenario.acceptance)?scenario.acceptance.map(String):[];
-      return {id:text(scenario.id)||id(),source,title:text(scenario.title)||scenarioName(source,scenarioIndex),description:text(scenario.description)||text(source.description),acceptance,domain:text(scenario.domain)||text(source.domain)};
+      return {id:text(scenario.id)||id(),source,title:text(scenario.title)||scenarioName(source,scenarioIndex),description:text(scenario.description)||text(source.description),acceptance,domain:text(scenario.domain)||text(source.domain),mapNodeId:text(scenario.mapNodeId),mapEndpointId:text(scenario.mapEndpointId)};
     });
     idea.payload=payloadFor(idea);if(!idea.jsonText&&idea.scenarios.length)idea.jsonText=JSON.stringify(idea.payload,null,2);
     return idea;
@@ -67,6 +67,45 @@ function syncScenario(idea,scenario){
   scenario.source={...scenario.source,title:scenario.title,description:scenario.description,acceptance:scenario.acceptance,domain:scenario.domain};
   idea.payload=payloadFor(idea);idea.jsonText=JSON.stringify(idea.payload,null,2);save();
 }
+/* ---------- связь сценария с плановыми узлами на карте ---------- */
+function domainSet(value){return String(value||"").split(",").map(x=>x.trim()).filter(Boolean).sort().join(",")}
+function sameAcceptance(left,right){
+  const a=(Array.isArray(left)?left:[]).map(x=>String(x).trim()).filter(Boolean).sort();
+  const b=(Array.isArray(right)?right:[]).map(x=>String(x).trim()).filter(Boolean).sort();
+  return a.length===b.length&&a.every((item,index)=>item===b[index]);
+}
+function mapScenarioNode(scenario){
+  if(!scenario.mapNodeId||!S.G||!Array.isArray(S.G.nodes))return null;
+  return S.G.nodes.find(node=>node.id===scenario.mapNodeId)||null;
+}
+function isOnMap(scenario){return !!mapScenarioNode(scenario)}
+function hydrateMapLinks(){
+  if(!S.G||!Array.isArray(S.G.nodes))return;
+  const nodes=S.G.nodes,edges=Array.isArray(S.G.edges)?S.G.edges:[];
+  const ids=new Set(nodes.map(node=>node.id));
+  const claimed=new Set();
+  let changed=false;
+  for(const idea of board.ideas)for(const scenario of idea.scenarios)
+    if(scenario.mapNodeId&&ids.has(scenario.mapNodeId))claimed.add(scenario.mapNodeId);
+  for(const idea of board.ideas)for(const scenario of idea.scenarios)
+    if(scenario.mapNodeId&&!ids.has(scenario.mapNodeId)){
+      scenario.mapNodeId="";changed=true;
+      const endpoint=scenario.mapEndpointId?nodes.find(node=>node.id===scenario.mapEndpointId&&node.kind==="endpoint"&&node.planned&&String(node.id||"").startsWith("studio:")):null;
+      if(!endpoint)scenario.mapEndpointId="";
+    }
+  for(const idea of board.ideas)for(const scenario of idea.scenarios){
+    if(scenario.mapNodeId)continue;
+    const match=nodes.find(node=>node.kind==="scenario"&&node.planned&&String(node.id||"").startsWith("studio:")&&!claimed.has(node.id)
+      &&node.label===scenario.title&&node.description===scenario.description
+      &&domainSet(node.domain)===domainSet(scenario.domain)&&sameAcceptance(node.acceptance,scenario.acceptance));
+    if(!match)continue;
+    scenario.mapNodeId=match.id;claimed.add(match.id);
+    const edge=edges.find(item=>item.to_node===match.id&&["dispatch","scenario_call"].includes(item.kind)&&ids.has(item.from_node)&&String(item.from_node).startsWith("studio:")&&nodes.some(node=>node.id===item.from_node&&node.kind==="endpoint"));
+    if(edge)scenario.mapEndpointId=edge.from_node;
+    changed=true;
+  }
+  if(changed)save();
+}
 function addIdea(){
   const search=$("searchBox");if(search&&search.value){search.value="";S.lastSearchQuery="";const count=$("searchCount");if(count)count.textContent=""}
   const idea={id:id(),title:"Новая идея",description:"",prompt:"",jsonText:"",payload:{scenarios:[]},scenarios:[]};
@@ -75,12 +114,15 @@ function addIdea(){
 }
 function card(idea){
   const promptIsFresh=!!idea.prompt&&idea.promptBasis===promptBasis(idea);
-  const children=idea.scenarios.map((s,index)=>`<article class="idea-scenario-card" data-scenario="${esc(s.id)}">
-    <div class="idea-scenario-head"><span class="scenario-index">${String(index+1).padStart(2,"0")}</span><input class="scenario-title" data-field="title" aria-label="Название сценария" value="${esc(s.title)}"><button class="text-button" type="button" data-to-plan="${esc(s.id)}" title="Создать плановые узлы на общей карте">На карту ↗</button><button class="icon-button danger" type="button" data-delete-scenario="${esc(s.id)}" title="Удалить ветку сценария" aria-label="Удалить сценарий">×</button></div>
+  const children=idea.scenarios.map((s,index)=>{
+    const onMap=isOnMap(s);
+    return `<article class="idea-scenario-card${onMap?" on-map":""}" data-scenario="${esc(s.id)}">
+    <div class="idea-scenario-head"><span class="scenario-index">${String(index+1).padStart(2,"0")}</span>${onMap?'<span class="scenario-on-map" title="Плановые узлы сценария уже созданы на карте">на карте</span>':""}<input class="scenario-title" data-field="title" aria-label="Название сценария" value="${esc(s.title)}"><button class="text-button" type="button" data-to-plan="${esc(s.id)}" title="${onMap?"Уже на карте — подтвердите пересоздание узлов":"Создать плановые узлы на общей карте"}">На карту ↗</button><button class="icon-button danger" type="button" data-delete-scenario="${esc(s.id)}" title="Удалить ветку сценария" aria-label="Удалить сценарий">×</button></div>
     <label class="idea-field-label">ОПИСАНИЕ<textarea data-field="description" rows="5" placeholder="Опишите сценарий…">${esc(s.description)}</textarea></label>
     <label class="idea-field-label">КРИТЕРИИ ПРИЁМКИ<textarea data-field="acceptance" rows="3" placeholder="По одному критерию на строку">${esc(s.acceptance.join("\n"))}</textarea></label>
     <label class="idea-field-label">ДОМЕН<input data-field="domain" value="${esc(s.domain)}" placeholder="orders"></label>
-  </article>`).join("");
+  </article>`;
+  }).join("");
   return `<section class="idea-row" data-idea="${esc(idea.id)}">
     <article class="idea-root-card">
       <div class="node-kicker"><span class="node-dot"></span> ИДЕЯ <span class="node-state">Корень ветки</span><button type="button" class="icon-button danger" data-delete-idea="${esc(idea.id)}" title="Удалить идею">×</button></div>
@@ -96,6 +138,7 @@ function card(idea){
   </section>`;
 }
 function render(){
+  hydrateMapLinks();
   const boardEl=$("ideasBoard"),list=$("ideaList");if(!boardEl||!list)return;
   const query=String(S.lastSearchQuery||"").trim().toLocaleLowerCase("ru");
   const visible=board.ideas.filter(idea=>!query||[idea.title,idea.description,...idea.scenarios.flatMap(s=>[s.title,s.description,s.domain])].some(value=>String(value||"").toLocaleLowerCase("ru").includes(query)));
@@ -130,14 +173,63 @@ function updatePromptState(idea){
 }
 async function sendToConstructor(button){
   const idea=find(button.closest("[data-idea]").dataset.idea);const scenario=idea&&idea.scenarios.find(item=>item.id===button.dataset.toPlan);if(!scenario)return;
+  if(isOnMap(scenario)){confirmRecreate(scenario);return}
   if(!(await setTab("map")))return;
+  await putScenarioOnMap(scenario);
+}
+function confirmRecreate(scenario){
+  modal("Сценарий уже есть на карте",
+    `<p class="hint">Сценарий «${esc(scenario.title)}» уже добавлен на карту как плановые узлы. Пересоздать?</p>
+     <p class="hint">Узлы, созданные из этой карточки, будут обновлены данными карточки. Добавленные вручную потомки и связи сохранятся.</p>`,
+    [
+      {label:"Нет",action:()=>{}},
+      {label:"Да, пересоздать",cls:"primary",action:()=>recreateScenario(scenario)},
+    ]);
+}
+function endpointPayload(scenario,nodeId){
+  const payload={kind:"endpoint",name:scenario.title,description:scenario.description,acceptance:scenario.acceptance,domain:scenario.domain,http_method:scenario.source.http_method||"GET",path:scenario.source.path||""};
+  if(nodeId)payload.node_id=nodeId;
+  return payload;
+}
+async function putScenarioOnMap(scenario){
   try{
     let parentId="";
-    const path=scenario.source.path||"";
-    if(path){const endpoint=await api("/api/metadata/graph-node","POST",{kind:"endpoint",name:scenario.title,description:scenario.description,acceptance:scenario.acceptance,domain:scenario.domain,http_method:scenario.source.http_method||"GET",path});applyGraph(endpoint.graph);parentId=endpoint.node_id;}
+    if(String(scenario.source.path||"")){
+      const reuse=scenario.mapEndpointId&&S.byId[scenario.mapEndpointId]?scenario.mapEndpointId:"";
+      const endpoint=await api("/api/metadata/graph-node","POST",endpointPayload(scenario,reuse));
+      applyGraph(endpoint.graph);parentId=endpoint.node_id;
+    }
     const node=await api("/api/metadata/graph-node","POST",{kind:"scenario",name:scenario.title,description:scenario.description,acceptance:scenario.acceptance,domain:scenario.domain,parent_id:parentId,edge_kind:"dispatch"});
-    applyGraph(node.graph);S.selectedNode=node.node_id;hooks.renderMap();hooks.renderInspector();schedulePersist();toast("Идея добавлена на карту как плановый узел");
+    applyGraph(node.graph);
+    scenario.mapEndpointId=parentId;scenario.mapNodeId=node.node_id;
+    S.selectedNode=node.node_id;hooks.renderMap();hooks.renderInspector();schedulePersist();save();hooks.renderIdeas();
+    toast("Идея добавлена на карту как плановый узел");
   }catch(error){toast("Не удалось передать идею на карту: "+error.message)}
+}
+async function recreateScenario(scenario){
+  try{
+    let parentId="";
+    if(String(scenario.source.path||"")){
+      const reuse=scenario.mapEndpointId&&S.byId[scenario.mapEndpointId]?scenario.mapEndpointId:"";
+      const endpoint=await api("/api/metadata/graph-node","POST",endpointPayload(scenario,reuse));
+      applyGraph(endpoint.graph);parentId=endpoint.node_id;
+    }
+    scenario.mapEndpointId=parentId;
+    const existing=scenario.mapNodeId&&S.byId[scenario.mapNodeId]?scenario.mapNodeId:"";
+    let nodeId="";
+    if(existing){
+      const updated=await api("/api/metadata/graph-node","POST",{node_id:existing,kind:"scenario",name:scenario.title,description:scenario.description,acceptance:scenario.acceptance,domain:scenario.domain});
+      applyGraph(updated.graph);
+      nodeId=updated.node_id||existing;
+    }else{
+      const node=await api("/api/metadata/graph-node","POST",{kind:"scenario",name:scenario.title,description:scenario.description,acceptance:scenario.acceptance,domain:scenario.domain,parent_id:parentId,edge_kind:"dispatch"});
+      applyGraph(node.graph);
+      nodeId=node.node_id;
+    }
+    scenario.mapNodeId=nodeId;
+    S.selectedNode=nodeId;hooks.renderMap();hooks.renderInspector();schedulePersist();save();hooks.renderIdeas();
+    toast("Сценарий на карте пересоздан данными карточки");
+  }catch(error){toast("Не удалось пересоздать сценарий на карте: "+error.message)}
 }
 function updateRail(){const list=$("ideaList");if(!list)return;list.querySelectorAll(".idea-rail-item").forEach(el=>{const item=find(el.dataset.focusIdea);if(item){el.querySelector("b").textContent=item.title||"Без названия";el.querySelector("small").textContent=`${item.scenarios.length} сценариев`}})}
 async function generatePrompt(ideaId,button){

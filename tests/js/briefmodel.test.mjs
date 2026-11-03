@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   briefRequest,
+  subtreeIds,
   defaultMapMode,
   plannedNodes,
   plannedStats,
@@ -78,4 +79,33 @@ test("сортировка планов и статус проверки", () =>
   assert.equal(statusText({total: 2, done: 1, partial: 1, not_done: 0}), "выполнено 1, частично 1, не сделано 0");
   assert.equal(verifyLabel(null, {nodes: [], plans: [{slug: "p", description: "d"}]}).urgent, false);
   assert.deepEqual(briefRequest({selected: new Set(["a"]), plans: new Set(), map: "compact", includeEmpty: 0, scenario: "s"}).only, ["a"]);
+});
+
+test("поддерево узла — правило карты (tests ребро наоборот)", () => {
+  const g = {
+    nodes: [],
+    edges: [
+      {from_node: "E", to_node: "S", kind: "dispatch"},
+      {from_node: "S", to_node: "I", kind: "port_call"},
+      {from_node: "I", to_node: "M", kind: "table"},
+      {from_node: "T", to_node: "S", kind: "tests"},
+    ],
+  };
+  assert.deepEqual([...subtreeIds(g, "E")].sort(), ["E", "I", "M", "S", "T"]);
+  assert.deepEqual([...subtreeIds(g, "S")].sort(), ["I", "M", "S", "T"]);
+  assert.deepEqual([...subtreeIds(g, "M")], ["M"]);
+  assert.deepEqual([...subtreeIds(g, "T")], ["T"]);
+  assert.deepEqual([...subtreeIds(g, "")], []);
+  assert.deepEqual([...subtreeIds(null, "E")], ["E"]);
+});
+
+test("поддерево узла — цикл не зацикливает обход", () => {
+  const g = {
+    nodes: [],
+    edges: [
+      {from_node: "A", to_node: "B", kind: "scenario_call"},
+      {from_node: "B", to_node: "A", kind: "scenario_call"},
+    ],
+  };
+  assert.deepEqual([...subtreeIds(g, "A")].sort(), ["A", "B"]);
 });

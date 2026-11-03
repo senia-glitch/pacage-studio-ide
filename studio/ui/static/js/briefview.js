@@ -1,7 +1,7 @@
 import {api} from "./api.js";
 import {
   briefRequest, defaultMapMode, plannedNodes, plannedStats, planStates, shortPrompt,
-  statusText, verifyLabel,
+  statusText, subtreeIds, verifyLabel,
 } from "./briefmodel.js";
 import {
   $, S, anchorText, esc, flushPending, modal, openEditorForNode, schedulePersist,
@@ -75,19 +75,30 @@ function openBriefStatus(){
 }
 async function openBriefDialog(options={}){
   await flushPending();
-  const nodes=plannedNodes(S.G);
+  const subtreeRoot=typeof options.subtreeRoot==="string"&&options.subtreeRoot?options.subtreeRoot:"";
+  const subtree=subtreeRoot?subtreeIds(S.G,subtreeRoot):null;
+  const scopePlans=subtree
+    ?[...new Set(((S.G&&S.G.nodes)||[]).filter(node=>node&&node.plan&&subtree.has(node.id)).map(node=>node.plan))]
+    :null;
+  const scopeLabel=subtreeRoot?String(S.byId[subtreeRoot]?.label||subtreeRoot):"";
+  const allNodes=plannedNodes(S.G);
+  const nodes=subtree?allNodes.filter(node=>subtree.has(node.id)):allNodes;
   const plans=planStates(S.G);
   const onlyPlans=Array.isArray(options.plans)?new Set(options.plans.filter(Boolean)):null;
   const includeEmpty=false;
   const selected=new Set(onlyPlans?[]:nodes.filter(node=>String(node.description||"").trim()).map(node=>node.id));
-  const selectedPlans=new Set(onlyPlans||plans.filter(plan=>String(plan.description||"").trim()).map(plan=>plan.slug));
+  const selectedPlans=new Set(onlyPlans||plans.filter(plan=>(!subtree||scopePlans.includes(plan.slug))&&String(plan.description||"").trim()).map(plan=>plan.slug));
   const mapMode=defaultMapMode(((S.G&&S.G.nodes)||[]).length);
+  const scopeHint=subtree
+    ?`Область: «${esc(scopeLabel)}» и потомки · узлов в ветке: ${subtree.size} · плановых задач: ${nodes.length}.`
+    :"";
   const overlay=document.createElement("div");
   overlay.className="studio-modal";
   overlay.innerHTML=`<div class="modal-box brief-box"><h3>ТЗ для AI-агента</h3>
     <div class="brief-layout">
       <div class="brief-left">
         <div class="brief-controls">
+          ${scopeHint?`<div class="hint brief-scope">${scopeHint}</div>`:""}
           <label class="hint">Карта:
             <select id="briefMap">
               <option value="related">связанная</option>
@@ -99,8 +110,8 @@ async function openBriefDialog(options={}){
           <label class="hint"><input type="checkbox" id="briefEmpty"> включать без описания</label>
           <div class="hint">Планы: ${plans.length} · старые планируемые узлы: ${nodes.length} · отмечены готовые.</div>
         </div>
-        <div id="briefPlans">${plans.length?plans.map(plan=>briefPlanChoice(plan,selectedPlans)).join(""):'<p class="hint">Планов нет. Создайте сценарий в конструкторе.</p>'}</div>
-        <div id="briefNodes">${nodes.length?nodes.map(node=>briefNodeChoice(node,selected)).join(""):'<p class="hint">Старых планируемых узлов нет.</p>'}</div>
+        <div id="briefPlans">${(()=>{const visible=subtree?plans.filter(plan=>scopePlans.includes(plan.slug)):plans;return visible.length?visible.map(plan=>briefPlanChoice(plan,selectedPlans)).join(""):(subtree?'<p class="hint">В ветке нет планов.</p>':'<p class="hint">Планов нет. Создайте сценарий в конструкторе.</p>')})()}</div>
+        <div id="briefNodes">${nodes.length?nodes.map(node=>briefNodeChoice(node,selected)).join(""):(subtree?'<p class="hint">В ветке нет отдельных плановых узлов — задачи берутся из планов.</p>':'<p class="hint">Старых планируемых узлов нет.</p>')}</div>
       </div>
       <div class="brief-preview">
         <div class="brief-stats" id="briefStats">Подготовка…</div>

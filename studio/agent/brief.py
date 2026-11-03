@@ -164,6 +164,30 @@ def _read_rules() -> str:
         return "## Правила работы AI-агента\n\nФайл правил не найден.\n"
 
 
+def rules_override_path(project_root: Path | None) -> Path | None:
+    """Файл переопределения шаблона правил внутри проекта (.studio/prompts/rules.md)."""
+    if project_root is None:
+        return None
+    return Path(project_root) / ".studio" / "prompts" / "rules.md"
+
+
+def load_rules(project_root: Path | None = None) -> str:
+    """Правила ТЗ: переопределение проекта, иначе шаблон пакета."""
+    override = rules_override_path(project_root)
+    if override is not None:
+        try:
+            text = override.read_text(encoding="utf-8")
+            if text.strip():
+                return text.rstrip() + "\n"
+        except (OSError, UnicodeDecodeError):
+            pass
+    return _read_rules()
+
+
+def standard_rules() -> str:
+    return _read_rules()
+
+
 def _resolve_node_id(graph: Graph, text: str) -> str | None:
     text = str(text or "").strip()
     if not text:
@@ -1230,7 +1254,7 @@ def _build_markdown(
     lines.append("")
     lines.append("## 2. Правила работы (обязательны)")
     lines.append("")
-    lines.append(_read_rules())
+    lines.append(load_rules(Path(graph.project_root)))
     project_rules = Path(graph.project_root) / "studio.rules.md"
     lines.append("## 3. Правила этого проекта")
     lines.append("")

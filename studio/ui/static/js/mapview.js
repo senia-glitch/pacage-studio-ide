@@ -1,10 +1,15 @@
-import {$,S,applyTransform,drawEdges,esc,KIND_NAMES,EDGE_COLORS,EDGE_NAMES,nodeMeta,methodOfEndpoint,urlOfEndpoint,openEditorForNode,toast,schedulePersist,enableNodeDrag} from "./core.js";
+import {api} from "./api.js";
+import {$,S,applyTransform,drawEdges,esc,KIND_NAMES,EDGE_COLORS,EDGE_NAMES,nodeMeta,methodOfEndpoint,urlOfEndpoint,openEditorForNode,toast,schedulePersist,enableNodeDrag,applyGraph} from "./core.js";
 import {clearStage,measure,sizeStage} from "./edges.js";
 import {clampGroupDelta} from "./geometry.js";
 import {matchesAll} from "./search.js";
-import {renderInspector} from "./inspectorview.js";
+import {renderInspector,CHILD_KINDS} from "./inspectorview.js";
 
-const W=210,H=126,GAP_Y=48;
+const W=210,H=126,GAP_Y=48,NEW_H=350,NEW_W=280;
+/* Неопределённый узел: один на канвасе, создаётся кнопкой ＋ и определяет
+   будущего потомка (тип/название/задача/критерии) прямо на карте. */
+let pendingChild=null;
+function closePending(){pendingChild=null;for(const key of [...S.mapPos.keys()])if(String(key).startsWith("@new:"))S.mapPos.delete(key)}
 const parentOf=edge=>edge.kind==="tests"?edge.to_node:edge.from_node;
 const childOf=edge=>edge.kind==="tests"?edge.from_node:edge.to_node;
 function model(){
@@ -77,15 +82,26 @@ function model(){
   const viewEdges=edges.filter(e=>!projectedIds.has(e.from_node)&&!projectedIds.has(e.to_node));
   viewEdges.push(...projectedEdges);
   for(const n of remaining)if(!selectedViews[n.id])selectedViews[n.id]=n;
+  if(pendingChild){
+    const parentEntry=viewNodes.find(n=>n.id===pendingChild.parentId);
+    if(!parentEntry)pendingChild=null;
+    else{
+      const newViewId=`@new:${parentEntry.viewId}`;
+      viewNodes.push({id:"@new",viewId:newViewId,kind:"new",label:"Новый узел",synthetic:false,pending:true,planned:true,parentId:pendingChild.parentId,branchId:parentEntry.branchId||""});
+      viewEdges.push({from_node:parentEntry.viewId,to_node:newViewId,kind:"uses",label:"",planned:true});
+    }
+  }
   return {nodes:viewNodes,edges:viewEdges,selectedViews};
 }
 function visibleClass(node){
+  if(node.pending)return "";
   if(S.mapMode==="fact"&&(node.planned||node.planned_change&&Object.keys(node.planned_change).length))return " faded";
   if(S.mapMode==="plan"&&!node.planned&&!node.synthetic)return " faded";
   return "";
 }
 function positionGraph(nodes,edges){
   const byView=Object.fromEntries(nodes.map(n=>[n.viewId,n])),children=new Map(),parents=new Map();
+  const heightOf=id=>byView[id]?.pending?NEW_H:H;
   nodes.forEach(n=>{children.set(n.viewId,[]);parents.set(n.viewId,[])});
   edges.forEach(e=>{if(!byView[e.from_node]||!byView[e.to_node]||e.from_node===e.to_node)return;children.get(e.from_node).push(e.to_node);parents.get(e.to_node).push(e.from_node)});
   const positions=new Map(),widths=new Map();
@@ -99,14 +115,14 @@ function positionGraph(nodes,edges){
     const measureTree=id=>{
       if(subtreeWidth.has(id)||measuring.has(id))return;
       measuring.add(id);for(const child of treeChildren.get(id)||[])measureTree(child);measuring.delete(id);
-      const d=depth.get(id)||0,nodeWidth=Math.max(154,250-d*14),kids=treeChildren.get(id)||[];
+      const d=depth.get(id)||0,nodeWidth=byView[id]?.pending?NEW_W:Math.max(154,250-d*14),kids=treeChildren.get(id)||[];
       widths.set(id,nodeWidth);subtreeWidth.set(id,Math.max(nodeWidth,kids.reduce((sum,child)=>sum+subtreeWidth.get(child),0)+Math.max(0,kids.length-1)*44));
-      subtreeHeight.set(id,H+(kids.length?GAP_Y+Math.max(...kids.map(child=>subtreeHeight.get(child))):0));
+      subtreeHeight.set(id,heightOf(id)+(kids.length?GAP_Y+Math.max(...kids.map(child=>subtreeHeight.get(child))):0));
     };
     measureTree(root);
     const place=(id,left,top)=>{
       const nodeWidth=widths.get(id),span=subtreeWidth.get(id);positions.set(id,{x:left+(span-nodeWidth)/2,y:top});
-      const kids=treeChildren.get(id)||[];let kidLeft=left,childTop=top+H+GAP_Y;
+      const kids=treeChildren.get(id)||[];let kidLeft=left,childTop=top+heightOf(id)+GAP_Y;
       for(const child of kids){place(child,kidLeft,childTop);kidLeft+=subtreeWidth.get(child)+44}
     };
     place(root,x,y);
@@ -152,42 +168,93 @@ function positionGraph(nodes,edges){
   }
   const placed=[];
   for(const n of [...nodes].sort((a,b)=>positions.get(a.viewId).y-positions.get(b.viewId).y||positions.get(a.viewId).x-positions.get(b.viewId).x)){
-    const p=positions.get(n.viewId),w=widths.get(n.viewId)||W;
-    while(placed.some(q=>p.x<q.x+q.w+12&&p.x+w+12>q.x&&p.y<q.y+H+12&&p.y+H+12>q.y))p.y+=H+12;
-    placed.push({x:p.x,y:p.y,w});
+    const p=positions.get(n.viewId),w=widths.get(n.viewId)||W,selfH=heightOf(n.viewId);
+    while(placed.some(q=>p.x<q.x+q.w+12&&p.x+w+12>q.x&&p.y<q.y+(q.h||H)+12&&p.y+selfH+12>q.y))p.y+=H+12;
+    placed.push({x:p.x,y:p.y,w,h:selfH});
   }
   return {positions,widths,children,parents};
 }
 function draw(){
   const stage=$("mapStage"),svg=$("mapEdges");if(!stage||!svg)return;
   clearStage(stage,svg);const graph=model(),{nodes,edges,selectedViews}=graph,{positions,widths,children}=positionGraph(nodes,edges),byView=Object.fromEntries(nodes.map(n=>[n.viewId,n]));
+  const heightOf=id=>byView[id]?.pending?NEW_H:H;
   if(S.selectedNode&&!selectedViews[S.selectedNode]){
     const previous=S.mapViewNodes?.[S.selectedNode],source=previous?.sourceDomain;
     if(source){const match=Object.values(selectedViews).find(n=>n.sourceDomain===source&&(S.mapMode==="plan"?n.planned:!n.planned));if(match)S.selectedNode=match.id}
     if(String(S.selectedNode).startsWith("@change:"))S.selectedNode=null;
   }
   S.mapViewNodes=selectedViews;
+  /* Выделение ветки: выбранный узел и все его потомки подсвечиваются, остальные приглушаются */
+  let highlightSet=null;
+  if(S.selectedNode){
+    const selEntry=selectedViews[S.selectedNode];
+    if(selEntry&&!selEntry.pending){
+      highlightSet=new Set([selEntry.viewId]);
+      const queue=[selEntry.viewId];
+      while(queue.length)for(const child of children.get(queue.shift())||[])if(!highlightSet.has(child)){highlightSet.add(child);queue.push(child)}
+    }
+  }
   const filtered=nodes.filter(n=>!S.lastSearchQuery||matchesAll(S.lastSearchQuery,[n.label,n.domain,n.description,n.file_path,n.kind,nodeMeta(n),n.planned_change?.note,n.plannedChange?.note,...(n.planned_change?.acceptance||[]),...(n.plannedChange?.acceptance||[])]));
   const shown=new Set(filtered.map(n=>n.viewId));
   // Keep every ancestor so a search result stays inside its endpoint branch.
   let grew=true;while(grew){grew=false;for(const e of edges)if(shown.has(e.to_node)&&byView[e.from_node]&&!shown.has(e.from_node)){shown.add(e.from_node);grew=true}}
   if(!shown.size){const empty=document.createElement("div");empty.className="empty";empty.textContent="Совпадений нет. Очистите поиск.";stage.appendChild(empty)}
   nodes.filter(n=>shown.has(n.viewId)).forEach(n=>{
-    const p=positions.get(n.viewId)||{x:44,y:42},card=document.createElement("article");card.className=`card map-node k-${n.kind}${n.planned?" planned node--todo":""}${visibleClass(n)}${S.selectedNode===n.id?" sel":""}${n.synthetic?" synthetic":""}`;card.dataset.id=n.viewId;card.dataset.nodeId=n.id;card.style.left=`${p.x}px`;card.style.top=`${p.y}px`;card.style.width=`${widths.get(n.viewId)||W}px`;
+    const p=positions.get(n.viewId)||{x:44,y:42};
+    if(n.pending){
+      const card=document.createElement("article");card.className="card map-node pending-node";card.dataset.id=n.viewId;card.dataset.nodeId=n.id;card.style.left=`${p.x}px`;card.style.top=`${p.y}px`;card.style.width=`${NEW_W}px`;
+      const parent=S.byId[n.parentId],kinds=(parent&&CHILD_KINDS[parent.kind])||["nested"];
+      card.innerHTML=`<div class="hd"><span class="grip" title="Перетащить узел">⠿</span><span class="chip">новый узел</span><span class="t">Неопределённый узел</span><button type="button" class="pending-close" aria-label="Отменить создание" title="Отменить создание (Esc)">×</button></div><form class="pending-form"><label>Тип узла<select name="kind">${kinds.map(k=>`<option value="${k}">${esc(KIND_NAMES[k]||k)}</option>`).join("")}</select></label><label>Название<input name="name" required maxlength="180" placeholder="Например: Проверить права доступа"></label><label>Задача<textarea name="description" rows="2" placeholder="Что должен делать узел"></textarea></label><label>Критерии приёмки<textarea name="acceptance" rows="2" placeholder="По одному на строку"></textarea></label><div class="pending-actions"><button type="submit" class="primary">Создать</button><button type="button" class="pending-cancel">Отмена</button></div></form>`;
+      card.addEventListener("click",ev=>{if(ev.target.closest("button,.grip,input,select,textarea"))return;card.querySelector("input[name=name]")?.focus({preventScroll:true})});
+      card.querySelector(".pending-close").addEventListener("click",ev=>{ev.stopPropagation();closePending();draw()});
+      card.querySelector(".pending-cancel").addEventListener("click",ev=>{ev.stopPropagation();closePending();draw()});
+      card.querySelector("form").addEventListener("submit",async ev=>{
+        ev.preventDefault();
+        const form=ev.currentTarget,v=new FormData(form),kind=String(v.get("kind")||""),parentKind=parent?.kind;
+        const relation=parentKind==="endpoint"&&kind==="scenario"?"dispatch":parentKind==="scenario"&&kind==="scenario"?"scenario_call":parentKind==="scenario"&&kind==="io"?"port_call":parentKind==="scenario"&&kind==="test"?"tests":parentKind==="io"&&kind==="model"?"table":"uses";
+        const submitButton=form.querySelector('button[type=submit]');if(submitButton)submitButton.disabled=true;
+        try{
+          const d=await api("/api/metadata/graph-node","POST",{kind,name:v.get("name"),description:v.get("description"),acceptance:String(v.get("acceptance")||"").split(/\r?\n/).filter(Boolean),domain:parentKind==="endpoint"?parent.domain||"":"",parent_id:n.parentId,edge_kind:relation});
+          applyGraph(d.graph);S.selectedNode=d.node_id;closePending();draw();renderInspector();toast("Плановый узел добавлен");
+        }catch(error){toast("Не удалось добавить: "+error.message);if(submitButton)submitButton.disabled=false}
+      });
+      stage.appendChild(card);
+      let currentDx=0,currentDy=0;
+      const stationaryRects=nodes.filter(other=>other.viewId!==n.viewId).map(other=>{const p0=positions.get(other.viewId);return{x:p0.x,y:p0.y,w:widths.get(other.viewId)||W,h:heightOf(other.viewId)}});
+      enableNodeDrag(card,"map",n.viewId,p.x,p.y,S.mapView,(nx,ny)=>{
+        const requestedDx=nx-p.x,requestedDy=ny-p.y;
+        const delta=clampGroupDelta([{x:p.x,y:p.y,w:NEW_W,h:NEW_H}],stationaryRects,{x:currentDx,y:currentDy},{x:requestedDx,y:requestedDy});
+        currentDx=delta.x;currentDy=delta.y;
+        const el=stage.querySelector(`[data-id="${CSS.escape(n.viewId)}"]`);
+        if(el){el.style.left=`${p.x+delta.x}px`;el.style.top=`${p.y+delta.y}px`}S.mapPos.set(n.viewId,{x:p.x+delta.x,y:p.y+delta.y});S.justDraggedAt=Date.now();
+        const liveBoxes=measure(stage);S.mapBoxes=liveBoxes;drawEdges(svg,liveBoxes,edges.filter(e=>shown.has(e.from_node)&&shown.has(e.to_node)));sizeStage(stage,svg);
+      },()=>{schedulePersist();draw()});
+      return;
+    }
+    const card=document.createElement("article");card.className=`card map-node k-${n.kind}${n.planned?" planned node--todo":""}${visibleClass(n)}${S.selectedNode===n.id?" sel":""}${n.synthetic?" synthetic":""}${highlightSet?(highlightSet.has(n.viewId)?" kin":" dim"):""}`;card.dataset.id=n.viewId;card.dataset.nodeId=n.id;card.style.left=`${p.x}px`;card.style.top=`${p.y}px`;card.style.width=`${widths.get(n.viewId)||W}px`;
     const kind=n.kind==="method"?"HTTP-метод":n.kind==="domain"?"домен":n.kind==="change"?"план правки":KIND_NAMES[n.kind]||n.kind;
     const detail=n.kind==="endpoint"?`${methodOfEndpoint(n)} ${urlOfEndpoint(n)}\n${(n.details||{}).function_name||""}`:n.kind==="change"?S.byId[n.sourceNodeId]?.label||"фактический узел":n.synthetic?`${n.details?.count||0} узлов`:`${nodeMeta(n)||n.file_path+(n.line?":"+n.line:"")}`;
     const note=n.plannedChange?.note;
-    card.innerHTML=`<div class="hd"><span class="grip" title="Перетащить узел и потомков этой ветки">⠿</span><span class="chip">${esc(kind)}</span>${n.planned?'<span class="chip todo">план</span>':""}<span class="t">${esc(n.label)}</span>${!n.synthetic&&n.file_path?'<button class="open-editor" type="button" title="Открыть в редакторе">↗</button>':""}</div><div class="mt">${esc(detail)}</div>${n.kind==="change"&&note&&!S.hideMeta?`<div class="planned-note">${esc(note)}</div>`:""}${n.kind!=="change"?'<button type="button" class="map-add-child" aria-label="Добавить потомка" title="Добавить потомка">＋</button>':""}`;
+    const metaBits=[];
+    if(!S.hideMeta){
+      const description=String(n.description||"").trim();
+      const acceptance=(Array.isArray(n.acceptance)?n.acceptance:[]).map(x=>String(x).trim()).filter(Boolean);
+      const domain=String(n.domain||"").trim();
+      if(description)metaBits.push(description);
+      if(acceptance.length)metaBits.push("✓ "+acceptance.join("  ✓ "));
+      if(domain)metaBits.push("домен: "+domain);
+    }
+    card.innerHTML=`<div class="hd"><span class="grip" title="Перетащить узел и потомков этой ветки">⠿</span><span class="chip">${esc(kind)}</span>${n.planned?'<span class="chip todo">план</span>':""}<span class="t">${esc(n.label)}</span>${!n.synthetic&&n.file_path?'<button class="open-editor" type="button" title="Открыть в редакторе">↗</button>':""}</div><div class="mt">${esc(detail)}</div>${metaBits.length?`<div class="map-meta">${esc(metaBits.join("\n"))}</div>`:""}${n.kind==="change"&&note&&!S.hideMeta?`<div class="planned-note">${esc(note)}</div>`:""}${n.kind!=="change"?'<button type="button" class="map-add-child" aria-label="Добавить потомка" title="Добавить потомка">＋</button>':""}`;
     card.onclick=ev=>{if(ev.target.closest("button,.grip"))return;ev.stopPropagation();if(Date.now()-S.justDraggedAt<250)return;S.selectedNode=n.id;renderInspector();draw();schedulePersist()};
     card.tabIndex=0;card.setAttribute("role","button");card.setAttribute("aria-label",`${kind}: ${n.label}`);card.addEventListener("keydown",ev=>{if(ev.target!==card)return;if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();S.selectedNode=n.id;renderInspector();draw();schedulePersist()}});
     card.querySelector(".map-add-child")?.addEventListener("click",ev=>{
       ev.stopPropagation();
-      if(n.kind==="method")S.selectedNode="__new_domain__";
-      else S.selectedNode=n.id;
-      renderInspector();
-      if(n.kind==="domain")$("domainAddEndpoint")?.click();
-      draw();
-      document.querySelector("#graphNodeCreate input[name=name]")?.focus();
+      if(n.kind==="method"){S.selectedNode="__new_domain__";renderInspector();draw();return}
+      if(n.kind==="domain"){S.selectedNode=n.id;renderInspector();$("domainAddEndpoint")?.click();draw();document.querySelector("#graphNodeCreate input[name=name]")?.focus();return}
+      closePending();
+      pendingChild={parentId:n.id};
+      S.selectedNode=n.id;renderInspector();draw();
+      document.querySelector(".pending-node input[name=name]")?.focus({preventScroll:true});
     });
     card.querySelector(".open-editor")?.addEventListener("click",ev=>{ev.stopPropagation();openEditorForNode(S.byId[n.id])});
     stage.appendChild(card);
@@ -195,8 +262,8 @@ function draw(){
     enableNodeDrag(card,"map",n.viewId,p.x,p.y,S.mapView,(nx,ny)=>{
       const requestedDx=nx-p.x,requestedDy=ny-p.y,moving=new Set([n.viewId]),todo=[n.viewId];
       while(todo.length){for(const c of children.get(todo.pop())||[])if(!moving.has(c)){moving.add(c);todo.push(c)}}
-      const movingRects=[...moving].map(id=>{const p0=positions.get(id);return{x:p0.x,y:p0.y,w:widths.get(id)||W,h:H}});
-      const stationaryRects=nodes.filter(other=>!moving.has(other.viewId)).map(other=>{const p0=positions.get(other.viewId);return{x:p0.x,y:p0.y,w:widths.get(other.viewId)||W,h:H}});
+      const movingRects=[...moving].map(id=>{const p0=positions.get(id);return{x:p0.x,y:p0.y,w:widths.get(id)||W,h:heightOf(id)}});
+      const stationaryRects=nodes.filter(other=>!moving.has(other.viewId)).map(other=>{const p0=positions.get(other.viewId);return{x:p0.x,y:p0.y,w:widths.get(other.viewId)||W,h:heightOf(other.viewId)}});
       const delta=clampGroupDelta(movingRects,stationaryRects,{x:currentDx,y:currentDy},{x:requestedDx,y:requestedDy});
       currentDx=delta.x;currentDy=delta.y;
       const candidates=[...moving].map(id=>({id,x:(positions.get(id)?.x||0)+delta.x,y:(positions.get(id)?.y||0)+delta.y}));
@@ -210,4 +277,9 @@ function draw(){
   const mode=$("mapModeCaption");if(mode)mode.textContent=S.mapMode==="fact"?"Фактическая структура проекта":"Планируемая структура и изменения";
 }
 function renderMap(){draw()}
+document.addEventListener("keydown",ev=>{
+  if(ev.key!=="Escape"||!pendingChild)return;
+  if(document.querySelector(".studio-modal"))return;
+  closePending();draw();
+});
 export {renderMap};

@@ -17,6 +17,7 @@
     <span class="tabs" role="tablist" aria-label="Рабочие пространства">
       <button class="tabbtn on" id="tab-map-button" data-tab="map" role="tab" aria-selected="true" aria-controls="tab-map"><span class="tab-index">01</span> Карта проекта</button>
       <button class="tabbtn" id="tab-ideas-button" data-tab="ideas" role="tab" aria-selected="false" aria-controls="tab-ideas"><span class="tab-index">02</span> Генератор идей</button>
+      <button class="tabbtn" id="tab-settings-button" data-tab="settings" role="tab" aria-selected="false" aria-controls="tab-settings"><span class="tab-index">03</span> Настройки</button>
     </span>
   </div>
   <span class="search-wrap"><input id="searchBox" type="search" placeholder="Поиск — метод, URL, имя, домен" aria-label="Поиск по проекту"><span class="hint" id="searchCount"></span></span>
@@ -55,6 +56,12 @@
         <aside class="ideas-rail"><div class="rail-title">ИДЕИ ПРОЕКТА</div><div id="ideaList"></div><div class="rail-note"><b>Рабочий процесс</b><span>Идея → промпт → ответ LLM → сценарии</span></div></aside>
         <div class="ideas-scroll"><div class="ideas-canvas" id="ideasCanvas"><div id="ideasBoard"></div></div></div>
       </div>
+    </div>
+  </section>
+  <section class="tab" id="tab-settings" role="tabpanel" aria-labelledby="tab-settings-button">
+    <div class="settings-workspace">
+      <div class="settings-head"><div class="eyebrow">ПАКЕТ</div><h2>Настройки промптов</h2><p>Шаблонные промпты пакета для этого проекта. Переопределения хранятся в <code>.studio/prompts/</code>; кнопка «Вернуть стандарт» удаляет переопределение.</p></div>
+      <div id="settingsBody"><p class="hint">Загрузка…</p></div>
     </div>
   </section>
 </main>

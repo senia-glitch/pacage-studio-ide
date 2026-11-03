@@ -18,6 +18,12 @@ from studio.agent import (
     load_brief,
     save_brief_sidecars,
 )
+from studio.agent.brief import load_rules, rules_override_path, standard_rules
+from studio.agent.decompose import (
+    decompose_override_path,
+    load_decompose_template,
+    standard_decompose_template,
+)
 from studio.agent import (
     save_brief as save_brief_file,
 )
@@ -465,6 +471,47 @@ class ProjectState:
             env = read_env(self.root)
             self.ensure_graph()
             return {"prompt": build_decompose_prompt(self.graph, env, task)}
+
+    # -------------------------------------------------- шаблонные промпты
+
+    _PROMPT_PATHS = {
+        "rules": ".studio/prompts/rules.md",
+        "decompose": ".studio/prompts/decompose-prompt.md",
+    }
+
+    def prompts_state(self) -> dict:
+        root = Path(self.root)
+        states = {
+            "rules": (load_rules(root), standard_rules(), rules_override_path(root)),
+            "decompose": (
+                load_decompose_template(root),
+                standard_decompose_template(),
+                decompose_override_path(root),
+            ),
+        }
+        return {
+            kind: {
+                "current": current,
+                "standard": standard,
+                "overridden": bool(override and override.is_file()),
+            }
+            for kind, (current, standard, override) in states.items()
+        }
+
+    def save_prompt(self, data: dict) -> dict:
+        kind = str(data.get("kind") or "")
+        if kind not in self._PROMPT_PATHS:
+            raise MetadataError("invalid_input", "Неизвестный шаблон промпта")
+        target = Path(self.root) / self._PROMPT_PATHS[kind]
+        if data.get("reset"):
+            target.unlink(missing_ok=True)
+        else:
+            text = str(data.get("text") or "")
+            if not text.strip():
+                raise MetadataError("invalid_input", "Текст шаблона пуст")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8", newline="\n")
+        return self.prompts_state()
 
     def decompose_apply(self, data: dict) -> dict:
         with self.lock:

@@ -9,10 +9,12 @@ import {openDiagnostics, updateDiagBadge} from "./diagnosticsview.js";
 import {renderInspector} from "./inspectorview.js";
 import {renderMap} from "./mapview.js";
 import {initIdeas, renderIdeas} from "./ideaview.js";
+import {renderSettings} from "./settingsview.js";
 import {bindViewport, fitView} from "./viewport.js";
 
 hooks.renderMap = renderMap;
 hooks.renderIdeas = renderIdeas;
+hooks.renderSettings = renderSettings;
 hooks.renderInspector = renderInspector;
 hooks.updateBriefBadge = updateBriefBadge;
 hooks.scheduleBriefStatus = scheduleBriefStatus;

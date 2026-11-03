@@ -291,6 +291,8 @@ def make_handler(ctx):
                 query = urllib.parse.parse_qs(url.query)
                 target = (query.get("brief") or [None])[0]
                 return self._json(state.verify_brief(target))
+            if url.path == "/api/settings/prompts":
+                return self._json(state.prompts_state())
             return self._error(404, "not_found", "Не найдено")
 
         # --------------------------------------------------------------- POST
@@ -325,6 +327,8 @@ def make_handler(ctx):
                 return self._json(state.brief(data))
             if url.path == "/api/brief/save":
                 return self._json(state.save_brief(data))
+            if url.path == "/api/settings/prompts":
+                return self._json(state.save_prompt(data))
             if url.path == "/api/decompose/prompt":
                 return self._json(state.decompose_prompt(data))
             if url.path == "/api/decompose":

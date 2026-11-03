@@ -121,6 +121,7 @@ async function setTab(name){
   document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="tab-"+(name==="ideas"?"ideas":name)));
   const search=$("searchBox");if(search){search.placeholder=name==="ideas"?"Поиск по идеям и сценариям":"Поиск — метод, URL, имя, домен";search.setAttribute("aria-label",name==="ideas"?"Поиск по идеям и сценариям":"Поиск по проекту")}
   if(name==="map"){hooks.renderMap();hooks.renderInspector()}
+  else if(name==="settings"){if(hooks.renderSettings)hooks.renderSettings()}
   else hooks.renderIdeas();
   schedulePersist();
   return true;

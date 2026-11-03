@@ -7,6 +7,8 @@ env-файлов и тела исходников в промпт не попа�
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from studio.env import ProjectEnv
 from studio.metamodel import Graph
 
@@ -157,10 +159,34 @@ def build_decompose_prompt(graph: Graph, env: ProjectEnv, task: str) -> str:
         "${plans}": _facts_block(_plan_lines(graph)),
         "${task}": task,
     }
-    text = _PROMPT_TEMPLATE
+    text = load_decompose_template(Path(graph.project_root))
     for placeholder, value in replacements.items():
         text = text.replace(placeholder, value)
     return text
+
+
+def decompose_override_path(project_root: Path | None) -> Path | None:
+    """Файл переопределения шаблона промпта внутри проекта (.studio/prompts/decompose-prompt.md)."""
+    if project_root is None:
+        return None
+    return Path(project_root) / ".studio" / "prompts" / "decompose-prompt.md"
+
+
+def load_decompose_template(project_root: Path | None = None) -> str:
+    """Шаблон промпта декомпозиции: переопределение проекта, иначе шаблон пакета."""
+    override = decompose_override_path(project_root)
+    if override is not None:
+        try:
+            text = override.read_text(encoding="utf-8")
+            if text.strip():
+                return text
+        except (OSError, UnicodeDecodeError):
+            pass
+    return _PROMPT_TEMPLATE
+
+
+def standard_decompose_template() -> str:
+    return _PROMPT_TEMPLATE
 
 
 __all__ = ["build_decompose_prompt"]
