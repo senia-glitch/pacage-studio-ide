@@ -8,16 +8,17 @@ from studio.metadata.apply import apply_metadata
 from studio.metadata.store import (
     METADATA_NAME,
     MetadataError,
+    delete_domain_plan,
     delete_graph_node,
     metadata_hash,
     metadata_path,
     metadata_payload,
     read_metadata,
+    restore_graph_node,
+    save_domain_plan,
     save_graph_node,
     save_node_metadata,
     save_planned_change,
-    save_domain_plan,
-    delete_domain_plan,
     write_metadata,
 )
 
@@ -30,6 +31,7 @@ __all__ = [
     "metadata_payload",
     "read_metadata",
     "delete_graph_node",
+    "restore_graph_node",
     "save_graph_node",
     "save_node_metadata",
     "save_planned_change",

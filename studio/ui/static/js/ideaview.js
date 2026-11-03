@@ -7,6 +7,10 @@ let board = EMPTY;
 let persistTimer = null;
 let loadedKey = "";
 let lifecycleBound = false;
+/* Отмена действий: снапшоты доски перед деструктивными операциями. */
+const undoStack = [];
+let syncTimer = null;
+let serverSynced = false;
 
 function key(){ return `${storageKey((S.G&&S.G.project_root)||location.origin)}:ideas:v1`; }
 function clone(value){return JSON.parse(JSON.stringify(value))}
@@ -26,23 +30,73 @@ function normalizeBoard(value){
   const requested=text(value.activeId);
   return {version:1,activeId:ideas.some(item=>item.id===requested)?requested:(ideas[0]?.id||""),ideas};
 }
+function pushUndo(){
+  undoStack.push(clone(board));
+  if(undoStack.length>30)undoStack.shift();
+  updateUndoButton();
+}
+function undoBoard(){
+  if(!undoStack.length){toast("Отменять нечего");return}
+  board=undoStack.pop();
+  render();save();
+  updateUndoButton();
+  toast("Действие отменено");
+}
+function updateUndoButton(){
+  const button=$("ideasUndoBtn");
+  if(button)button.hidden=!undoStack.length;
+}
+function indicator(state,textValue){if(state)state.textContent=textValue}
 function save(){
   clearTimeout(persistTimer);
   const state=$("ideasSaveState"); if(state)state.textContent="Сохранение…";
   persistTimer=setTimeout(()=>{
-    try{localStorage.setItem(loadedKey,JSON.stringify(board));if(state)state.textContent="Все изменения сохранены"}
-    catch(_){if(state)state.textContent="Не удалось сохранить"}
+    try{localStorage.setItem(loadedKey,JSON.stringify(board))}catch(_){indicator(state,"Не удалось сохранить");return}
+    syncToServer(state);
   },220);
+}
+function syncToServer(state){
+  clearTimeout(syncTimer);
+  syncTimer=setTimeout(async()=>{
+    try{
+      await api("/api/ideas","POST",board);
+      serverSynced=true;
+      indicator(state,"Все изменения сохранены в проект");
+    }catch(_){
+      indicator(state,"Сохранено локально — нет связи со студией");
+      if(serverSynced){serverSynced=false;syncToServer(state)}
+    }
+  },350);
 }
 function flushSave(){
   clearTimeout(persistTimer);
-  try{localStorage.setItem(loadedKey,JSON.stringify(board));const state=$("ideasSaveState");if(state)state.textContent="Все изменения сохранены"}
+  try{localStorage.setItem(loadedKey,JSON.stringify(board));const state=$("ideasSaveState");if(state)state.textContent="Все изменения сохранены в проект"}
   catch(_){const state=$("ideasSaveState");if(state)state.textContent="Не удалось сохранить"}
+  clearTimeout(syncTimer);
+  api("/api/ideas","POST",board).catch(()=>{ });
 }
 function load(){
   loadedKey=key();
   try{board=normalizeBoard(JSON.parse(localStorage.getItem(loadedKey)||"null"))}
   catch(_){board=clone(EMPTY)}
+}
+/* Серверная доска авторитетна: подгружаем её при первой загрузке вкладки.
+   Если в проекте доски ещё нет, а локальная есть — переносим её в .studio. */
+async function syncFromServer(){
+  const state=$("ideasSaveState");
+  try{
+    const remote=normalizeBoard(await api("/api/ideas","GET"));
+    if(!board.ideas.length&&remote.ideas.length){
+      board=remote;render();
+    }else if(!remote.ideas.length&&board.ideas.length){
+      await api("/api/ideas","POST",board);
+    }
+    serverSynced=true;
+    indicator(state,board.ideas.length?"Все изменения сохранены в проект":"Все изменения сохранены");
+  }catch(_){
+    serverSynced=false;
+    indicator(state,"Сохранено локально — нет связи со студией");
+  }
 }
 function $(id){return document.getElementById(id)}
 function id(){return `idea-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`}
@@ -156,8 +210,8 @@ function render(){
     syncScenario(idea,scenario);
     const json=boardEl.querySelector(`[data-idea-json="${idea.id}"]`);if(json)json.value=idea.jsonText;
   });
-  boardEl.querySelectorAll("[data-delete-idea]").forEach(el=>el.onclick=()=>{if(!confirm("Удалить идею вместе со всеми сценариями?"))return;board.ideas=board.ideas.filter(x=>x.id!==el.dataset.deleteIdea);if(board.activeId===el.dataset.deleteIdea)board.activeId=board.ideas[0]?.id||"";render();save()});
-  boardEl.querySelectorAll("[data-delete-scenario]").forEach(el=>el.onclick=()=>{const idea=find(el.closest("[data-idea]").dataset.idea);if(!idea)return;idea.scenarios=idea.scenarios.filter(x=>x.id!==el.dataset.deleteScenario);idea.payload=payloadFor(idea);idea.jsonText=JSON.stringify(idea.payload,null,2);render();save();toast("Сценарий удалён из ветки и JSON")});
+  boardEl.querySelectorAll("[data-delete-idea]").forEach(el=>el.onclick=()=>{if(!confirm("Удалить идею вместе со всеми сценариями?"))return;pushUndo();board.ideas=board.ideas.filter(x=>x.id!==el.dataset.deleteIdea);if(board.activeId===el.dataset.deleteIdea)board.activeId=board.ideas[0]?.id||"";render();save()});
+  boardEl.querySelectorAll("[data-delete-scenario]").forEach(el=>el.onclick=()=>{const idea=find(el.closest("[data-idea]").dataset.idea);if(!idea)return;pushUndo();idea.scenarios=idea.scenarios.filter(x=>x.id!==el.dataset.deleteScenario);idea.payload=payloadFor(idea);idea.jsonText=JSON.stringify(idea.payload,null,2);render();save();toast("Сценарий удалён из ветки и JSON")});
   boardEl.querySelectorAll("[data-to-plan]").forEach(el=>el.onclick=()=>sendToConstructor(el));
   boardEl.querySelectorAll("[data-generate-prompt]").forEach(el=>el.onclick=()=>generatePrompt(el.dataset.generatePrompt,el));
   boardEl.querySelectorAll("[data-copy-prompt]").forEach(el=>el.onclick=()=>copy(find(el.dataset.copyPrompt)?.prompt||""));
@@ -240,7 +294,7 @@ async function generatePrompt(ideaId,button){
 }
 function importJson(ideaId){
   const idea=find(ideaId);if(!idea)return;
-  try{const parsed=JSON.parse(idea.jsonText);const scenarios=normalizedScenarios(parsed);if(idea.scenarios.length&&!confirm("Заменить сценарии этой ветки? Текущие правки карточек будут перезаписаны."))return;idea.payload=Array.isArray(parsed)?{scenarios:parsed}:parsed;idea.scenarios=scenarios;idea.payload=payloadFor(idea);idea.jsonText=JSON.stringify(idea.payload,null,2);render();save();toast(`Добавлено сценариев: ${scenarios.length}`)}
+  try{const parsed=JSON.parse(idea.jsonText);const scenarios=normalizedScenarios(parsed);if(idea.scenarios.length&&!confirm("Заменить сценарии этой ветки? Текущие правки карточек будут перезаписаны."))return;pushUndo();idea.payload=Array.isArray(parsed)?{scenarios:parsed}:parsed;idea.scenarios=scenarios;idea.payload=payloadFor(idea);idea.jsonText=JSON.stringify(idea.payload,null,2);render();save();toast(`Добавлено сценариев: ${scenarios.length}`)}
   catch(error){toast("JSON не разобран: "+error.message)}
 }
 function copy(value){if(!value){toast("Сначала соберите промпт");return}if(navigator.clipboard?.writeText)navigator.clipboard.writeText(value).then(()=>toast("Промпт скопирован")).catch(()=>toast("Не удалось скопировать"));else{const el=document.createElement("textarea");el.value=value;document.body.appendChild(el);el.select();document.execCommand("copy");el.remove();toast("Промпт скопирован")}}
@@ -256,9 +310,19 @@ function exportBoard(){
 }
 async function importBoard(event){
   const input=event.currentTarget,file=input.files&&input.files[0];if(!file)return;
-  try{const incoming=normalizeBoard(JSON.parse(await file.text()));if(board.ideas.length&&!confirm("Заменить текущую доску идеями из файла? Текущие идеи будут перезаписаны."))return;board=incoming;render();save();toast(`Загружено идей: ${board.ideas.length}`)}
+  try{const incoming=normalizeBoard(JSON.parse(await file.text()));if(board.ideas.length&&!confirm("Заменить текущую доску идеями из файла? Текущие идеи будут перезаписаны."))return;pushUndo();board=incoming;render();save();toast(`Загружено идей: ${board.ideas.length}`)}
   catch(error){toast("Не удалось загрузить доску: "+error.message)}
   finally{input.value=""}
 }
-export function renderIdeas(){if(loadedKey!==key())load();render()}
-export function initIdeas(){load();bind();render();if(!lifecycleBound){window.addEventListener("pagehide",flushSave);lifecycleBound=true}}
+export function renderIdeas(){if(loadedKey!==key()){load();serverSynced=false}render();syncFromServer()}
+export function initIdeas(){
+  load();bind();render();
+  $("ideasUndoBtn")?.addEventListener("click",undoBoard);
+  document.addEventListener("keydown",ev=>{
+    if(S.tab!=="ideas"||!undoStack.length)return;
+    const tag=(document.activeElement?.tagName||"").toLowerCase();
+    if(tag==="input"||tag==="textarea"||document.activeElement?.isContentEditable)return;
+    if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==="z"&&!ev.shiftKey){ev.preventDefault();undoBoard()}
+  });
+  if(!lifecycleBound){window.addEventListener("pagehide",flushSave);lifecycleBound=true}
+}

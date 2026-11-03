@@ -25,6 +25,7 @@ export const S = {
   mapView: {x: 30, y: 30, k: 1},
   mapBoxes: {},
   mapPos: new Map(),
+  mapH: new Map(),
   justDraggedAt: 0,
   studioRevision: 0,
   liveFailures: 0,
@@ -167,15 +168,15 @@ function initEditorChoice(){
     schedulePersist();
   };
 }
-function currentPositions(){
-  const dump=map=>Object.fromEntries([...map.entries()]);
-  return{map:dump(S.mapPos)};
+function currentPositions(map=S.mapPos){
+  return{map:Object.fromEntries([...map.entries()])};
 }
 function uiSnapshot(){
   return{
     tab:S.tab,selectedNode:S.selectedNode,hideMeta:S.hideMeta,todoHighlight:S.todoHighlight,editor:S.editorId,mapMode:S.mapMode,inspectorOpen:S.inspectorOpen,inspectorWidth:S.inspectorWidth,
     views:{map:S.mapView},
     positions:currentPositions(),
+    nodeHeights:currentPositions(S.mapH),
   };
 }
 function persistNow(){
@@ -220,6 +221,10 @@ function restoreUiState(saved){
   };
   const positions=(saved.positions||{});
   restored(positions.map).forEach((v,k)=>S.mapPos.set(k,v));
+  for(const [key,value] of Object.entries(saved.nodeHeights||{})){
+    if(!Number.isFinite(value))continue;
+    S.mapH.set(key,Math.max(126,Math.min(460,Math.round(value))));
+  }
 }
 function initUiStorage(){
   try{

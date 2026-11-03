@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 import threading
 import time
@@ -18,31 +19,32 @@ from studio.agent import (
     load_brief,
     save_brief_sidecars,
 )
-from studio.agent.brief import load_rules, rules_override_path, standard_rules
-from studio.agent.decompose import (
-    decompose_override_path,
-    load_decompose_template,
-    standard_decompose_template,
-)
 from studio.agent import (
     save_brief as save_brief_file,
 )
 from studio.agent import (
     verify_brief as verify_brief_data,
 )
+from studio.agent.brief import load_rules, rules_override_path, standard_rules
+from studio.agent.decompose import (
+    decompose_override_path,
+    load_decompose_template,
+    standard_decompose_template,
+)
 from studio.creator import CreateError
 from studio.creator.plan import create_plan, delete_plan, preview_plan, update_plan
 from studio.env import read_env
 from studio.metadata import (
     MetadataError,
+    delete_domain_plan,
     delete_graph_node,
     metadata_path,
     read_metadata,
+    restore_graph_node,
+    save_domain_plan,
     save_graph_node,
     save_node_metadata,
     save_planned_change,
-    save_domain_plan,
-    delete_domain_plan,
 )
 from studio.metamodel import EDGE_KINDS, NODE_KINDS, Graph, Node
 from studio.scanner import scan
@@ -108,8 +110,14 @@ class ProjectState:
                 for node in graph.nodes:
                     change = planned_changes.get(node.id)
                     node.planned_change = dict(change) if isinstance(change, dict) else {}
-                graph.planned_domains = [dict(item) for item in planned_domains if isinstance(item, dict)]
-                graph.domain_changes = {str(key): dict(value) for key, value in domain_changes.items() if isinstance(value, dict)}
+                graph.planned_domains = [
+                    dict(item) for item in planned_domains if isinstance(item, dict)
+                ]
+                graph.domain_changes = {
+                    str(key): dict(value)
+                    for key, value in domain_changes.items()
+                    if isinstance(value, dict)
+                }
                 try:
                     store.write_graph(self.root, graph)
                 except OSError as exc:
@@ -210,13 +218,17 @@ class ProjectState:
             node_id = str(data.get("node_id") or "")
             node = self._resolve_node(node_id)
             if node.planned:
-                raise MetadataError("invalid_input", "Пометка правки доступна только фактическим узлам")
+                raise MetadataError(
+                    "invalid_input", "Пометка правки доступна только фактическим узлам"
+                )
             acceptance = data.get("acceptance") or []
             if isinstance(acceptance, str):
                 acceptance = [line.strip() for line in acceptance.splitlines() if line.strip()]
             if not isinstance(acceptance, list):
                 raise MetadataError("invalid_input", "Критерии должны быть списком строк")
-            result = save_planned_change(self.root, node_id, str(data.get("note") or ""), acceptance)
+            result = save_planned_change(
+                self.root, node_id, str(data.get("note") or ""), acceptance
+            )
             graph = self.rescan("planned_change")
             return {"graph": graph.model_dump(), "changed": result.changed}
 
@@ -401,10 +413,36 @@ class ProjectState:
                         changed = True
             result = delete_graph_node(self.root, node_id, removable)
             graph = self.rescan("graph_node_delete")
+            # Снапшот удалённой ветки для отмены: записи узлов и касающиеся их связи.
+            undo_nodes = {
+                item_id: record
+                for item_id, record in (metadata.nodes or {}).items()
+                if item_id in removable and isinstance(record, dict) and record.get("studio_owned")
+            }
+            undo_edges = [
+                edge
+                for edge in (metadata.edges or [])
+                if isinstance(edge, dict)
+                and (edge.get("from") in undo_nodes or edge.get("to") in undo_nodes)
+            ]
             return {
                 "graph": graph.model_dump(),
                 "changed": result.changed,
                 "removed": sorted(removable),
+                "undo": {"nodes": undo_nodes, "edges": undo_edges},
+            }
+
+    def restore_graph_node(self, data: dict) -> dict:
+        undo = data.get("undo") if isinstance(data, dict) else None
+        if not isinstance(undo, dict) or not isinstance(undo.get("nodes"), dict):
+            raise MetadataError("invalid_input", "Нужен снапшот undo с узлами")
+        with self.lock:
+            result = restore_graph_node(self.root, undo)
+            graph = self.rescan("graph_node_restore")
+            return {
+                "graph": graph.model_dump(),
+                "changed": result.changed,
+                "restored": sorted(undo.get("nodes", {})),
             }
 
     # ----------------------------------------------------------------- plans
@@ -478,6 +516,37 @@ class ProjectState:
         "rules": ".studio/prompts/rules.md",
         "decompose": ".studio/prompts/decompose-prompt.md",
     }
+
+    # ------------------------------------------------------------- идеи
+
+    def _ideas_path(self) -> Path:
+        return Path(self.root) / ".studio" / "ideas.json"
+
+    def load_ideas(self) -> dict:
+        """Доска идей проекта; файл может не существовать — доска пустая."""
+        try:
+            data = json.loads(self._ideas_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {"version": 1, "activeId": "", "ideas": []}
+        if not isinstance(data, dict) or not isinstance(data.get("ideas"), list):
+            return {"version": 1, "activeId": "", "ideas": []}
+        return data
+
+    def save_ideas(self, data: dict) -> dict:
+        if not isinstance(data, dict) or not isinstance(data.get("ideas"), list):
+            raise MetadataError("invalid_input", "Ожидалась доска идей с массивом ideas")
+        if len(data["ideas"]) > 500:
+            raise MetadataError("invalid_input", "Слишком много идей в доске (максимум 500)")
+        path = self._ideas_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+            newline="\n",
+        )
+        tmp.replace(path)
+        return {"ok": True, "count": len(data["ideas"])}
 
     def prompts_state(self) -> dict:
         root = Path(self.root)

@@ -293,6 +293,8 @@ def make_handler(ctx):
                 return self._json(state.verify_brief(target))
             if url.path == "/api/settings/prompts":
                 return self._json(state.prompts_state())
+            if url.path == "/api/ideas":
+                return self._json(state.load_ideas())
             return self._error(404, "not_found", "Не найдено")
 
         # --------------------------------------------------------------- POST
@@ -329,6 +331,10 @@ def make_handler(ctx):
                 return self._json(state.save_brief(data))
             if url.path == "/api/settings/prompts":
                 return self._json(state.save_prompt(data))
+            if url.path == "/api/ideas":
+                return self._json(state.save_ideas(data))
+            if url.path == "/api/metadata/graph-node/restore":
+                return self._json(state.restore_graph_node(data))
             if url.path == "/api/decompose/prompt":
                 return self._json(state.decompose_prompt(data))
             if url.path == "/api/decompose":

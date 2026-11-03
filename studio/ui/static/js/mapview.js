@@ -3,9 +3,25 @@ import {$,S,applyTransform,drawEdges,esc,KIND_NAMES,EDGE_COLORS,EDGE_NAMES,nodeM
 import {clearStage,measure,sizeStage} from "./edges.js";
 import {clampGroupDelta} from "./geometry.js";
 import {matchesAll} from "./search.js";
-import {renderInspector,CHILD_KINDS} from "./inspectorview.js";
+import {renderInspector} from "./inspectorview.js";
+import {CHILD_KINDS,relationFor} from "./relations.js";
 
-const W=210,H=126,GAP_Y=48,NEW_H=350,NEW_W=280;
+const W=210,H=126,GAP_Y=48,NEW_H=350,NEW_W=280,MIN_H=126,MAX_H=460,META_H=58;
+/* Высота карточки: заданная пользователем (ресайз за нижнюю кромку) > авто-рост
+   под видимые метаданные > базовая. Всё в границах [MIN_H, MAX_H]. */
+function nodeAutoHeight(n){
+  if(!n)return H;
+  if(n.pending)return NEW_H;
+  const custom=S.mapH.get(n.id);
+  if(Number.isFinite(custom))return Math.max(MIN_H,Math.min(MAX_H,custom));
+  if(!S.hideMeta){
+    const hasMeta=String(n.description||"").trim()
+      ||(Array.isArray(n.acceptance)&&n.acceptance.some(x=>String(x).trim()))
+      ||String(n.domain||"").trim();
+    if(hasMeta)return Math.min(MAX_H,H+META_H);
+  }
+  return H;
+}
 /* Неопределённый узел: один на канвасе, создаётся кнопкой ＋ и определяет
    будущего потомка (тип/название/задача/критерии) прямо на карте. */
 let pendingChild=null;
@@ -101,7 +117,7 @@ function visibleClass(node){
 }
 function positionGraph(nodes,edges){
   const byView=Object.fromEntries(nodes.map(n=>[n.viewId,n])),children=new Map(),parents=new Map();
-  const heightOf=id=>byView[id]?.pending?NEW_H:H;
+  const heightOf=id=>nodeAutoHeight(byView[id]);
   nodes.forEach(n=>{children.set(n.viewId,[]);parents.set(n.viewId,[])});
   edges.forEach(e=>{if(!byView[e.from_node]||!byView[e.to_node]||e.from_node===e.to_node)return;children.get(e.from_node).push(e.to_node);parents.get(e.to_node).push(e.from_node)});
   const positions=new Map(),widths=new Map();
@@ -177,7 +193,7 @@ function positionGraph(nodes,edges){
 function draw(){
   const stage=$("mapStage"),svg=$("mapEdges");if(!stage||!svg)return;
   clearStage(stage,svg);const graph=model(),{nodes,edges,selectedViews}=graph,{positions,widths,children}=positionGraph(nodes,edges),byView=Object.fromEntries(nodes.map(n=>[n.viewId,n]));
-  const heightOf=id=>byView[id]?.pending?NEW_H:H;
+  const heightOf=id=>nodeAutoHeight(byView[id]);
   if(S.selectedNode&&!selectedViews[S.selectedNode]){
     const previous=S.mapViewNodes?.[S.selectedNode],source=previous?.sourceDomain;
     if(source){const match=Object.values(selectedViews).find(n=>n.sourceDomain===source&&(S.mapMode==="plan"?n.planned:!n.planned));if(match)S.selectedNode=match.id}
@@ -202,7 +218,7 @@ function draw(){
   nodes.filter(n=>shown.has(n.viewId)).forEach(n=>{
     const p=positions.get(n.viewId)||{x:44,y:42};
     if(n.pending){
-      const card=document.createElement("article");card.className="card map-node pending-node";card.dataset.id=n.viewId;card.dataset.nodeId=n.id;card.style.left=`${p.x}px`;card.style.top=`${p.y}px`;card.style.width=`${NEW_W}px`;
+      const card=document.createElement("article");card.className="card map-node pending-node";card.dataset.id=n.viewId;card.dataset.nodeId=n.id;card.style.left=`${p.x}px`;card.style.top=`${p.y}px`;card.style.width=`${NEW_W}px`;card.style.height=`${NEW_H}px`;card.style.overflow="auto";
       const parent=S.byId[n.parentId],kinds=(parent&&CHILD_KINDS[parent.kind])||["nested"];
       card.innerHTML=`<div class="hd"><span class="grip" title="Перетащить узел">⠿</span><span class="chip">новый узел</span><span class="t">Неопределённый узел</span><button type="button" class="pending-close" aria-label="Отменить создание" title="Отменить создание (Esc)">×</button></div><form class="pending-form"><label>Тип узла<select name="kind">${kinds.map(k=>`<option value="${k}">${esc(KIND_NAMES[k]||k)}</option>`).join("")}</select></label><label>Название<input name="name" required maxlength="180" placeholder="Например: Проверить права доступа"></label><label>Задача<textarea name="description" rows="2" placeholder="Что должен делать узел"></textarea></label><label>Критерии приёмки<textarea name="acceptance" rows="2" placeholder="По одному на строку"></textarea></label><div class="pending-actions"><button type="submit" class="primary">Создать</button><button type="button" class="pending-cancel">Отмена</button></div></form>`;
       card.addEventListener("click",ev=>{if(ev.target.closest("button,.grip,input,select,textarea"))return;card.querySelector("input[name=name]")?.focus({preventScroll:true})});
@@ -211,7 +227,7 @@ function draw(){
       card.querySelector("form").addEventListener("submit",async ev=>{
         ev.preventDefault();
         const form=ev.currentTarget,v=new FormData(form),kind=String(v.get("kind")||""),parentKind=parent?.kind;
-        const relation=parentKind==="endpoint"&&kind==="scenario"?"dispatch":parentKind==="scenario"&&kind==="scenario"?"scenario_call":parentKind==="scenario"&&kind==="io"?"port_call":parentKind==="scenario"&&kind==="test"?"tests":parentKind==="io"&&kind==="model"?"table":"uses";
+        const relation=relationFor(parentKind,kind);
         const submitButton=form.querySelector('button[type=submit]');if(submitButton)submitButton.disabled=true;
         try{
           const d=await api("/api/metadata/graph-node","POST",{kind,name:v.get("name"),description:v.get("description"),acceptance:String(v.get("acceptance")||"").split(/\r?\n/).filter(Boolean),domain:parentKind==="endpoint"?parent.domain||"":"",parent_id:n.parentId,edge_kind:relation});
@@ -231,7 +247,7 @@ function draw(){
       },()=>{schedulePersist();draw()});
       return;
     }
-    const card=document.createElement("article");card.className=`card map-node k-${n.kind}${n.planned?" planned node--todo":""}${visibleClass(n)}${S.selectedNode===n.id?" sel":""}${n.synthetic?" synthetic":""}${highlightSet?(highlightSet.has(n.viewId)?" kin":" dim"):""}`;card.dataset.id=n.viewId;card.dataset.nodeId=n.id;card.style.left=`${p.x}px`;card.style.top=`${p.y}px`;card.style.width=`${widths.get(n.viewId)||W}px`;
+    const card=document.createElement("article");card.className=`card map-node k-${n.kind}${n.planned?" planned node--todo":""}${visibleClass(n)}${S.selectedNode===n.id?" sel":""}${n.synthetic?" synthetic":""}${highlightSet?(highlightSet.has(n.viewId)?" kin":" dim"):""}`;card.dataset.id=n.viewId;card.dataset.nodeId=n.id;card.style.left=`${p.x}px`;card.style.top=`${p.y}px`;card.style.width=`${widths.get(n.viewId)||W}px`;card.style.height=`${heightOf(n.viewId)}px`;
     const kind=n.kind==="method"?"HTTP-метод":n.kind==="domain"?"домен":n.kind==="change"?"план правки":KIND_NAMES[n.kind]||n.kind;
     const detail=n.kind==="endpoint"?`${methodOfEndpoint(n)} ${urlOfEndpoint(n)}\n${(n.details||{}).function_name||""}`:n.kind==="change"?S.byId[n.sourceNodeId]?.label||"фактический узел":n.synthetic?`${n.details?.count||0} узлов`:`${nodeMeta(n)||n.file_path+(n.line?":"+n.line:"")}`;
     const note=n.plannedChange?.note;
@@ -244,7 +260,7 @@ function draw(){
       if(acceptance.length)metaBits.push("✓ "+acceptance.join("  ✓ "));
       if(domain)metaBits.push("домен: "+domain);
     }
-    card.innerHTML=`<div class="hd"><span class="grip" title="Перетащить узел и потомков этой ветки">⠿</span><span class="chip">${esc(kind)}</span>${n.planned?'<span class="chip todo">план</span>':""}<span class="t">${esc(n.label)}</span>${!n.synthetic&&n.file_path?'<button class="open-editor" type="button" title="Открыть в редакторе">↗</button>':""}</div><div class="mt">${esc(detail)}</div>${metaBits.length?`<div class="map-meta">${esc(metaBits.join("\n"))}</div>`:""}${n.kind==="change"&&note&&!S.hideMeta?`<div class="planned-note">${esc(note)}</div>`:""}${n.kind!=="change"?'<button type="button" class="map-add-child" aria-label="Добавить потомка" title="Добавить потомка">＋</button>':""}`;
+    card.innerHTML=`<div class="hd"><span class="grip" title="Перетащить узел и потомков этой ветки">⠿</span><span class="chip">${esc(kind)}</span>${n.planned?'<span class="chip todo">план</span>':""}<span class="t">${esc(n.label)}</span>${!n.synthetic&&n.file_path?'<button class="open-editor" type="button" title="Открыть в редакторе">↗</button>':""}</div><div class="mt">${esc(detail)}</div>${metaBits.length?`<div class="map-meta">${esc(metaBits.join("\n"))}</div>`:""}${n.kind==="change"&&note&&!S.hideMeta?`<div class="planned-note">${esc(note)}</div>`:""}${n.kind!=="change"?'<button type="button" class="map-add-child" aria-label="Добавить потомка" title="Добавить потомка">＋</button>':""}<div class="node-vresize" title="Потянуть за край — высота узла; двойной клик — вернуть автоматически"></div>`;
     card.onclick=ev=>{if(ev.target.closest("button,.grip"))return;ev.stopPropagation();if(Date.now()-S.justDraggedAt<250)return;S.selectedNode=n.id;renderInspector();draw();schedulePersist()};
     card.tabIndex=0;card.setAttribute("role","button");card.setAttribute("aria-label",`${kind}: ${n.label}`);card.addEventListener("keydown",ev=>{if(ev.target!==card)return;if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();S.selectedNode=n.id;renderInspector();draw();schedulePersist()}});
     card.querySelector(".map-add-child")?.addEventListener("click",ev=>{
@@ -257,6 +273,27 @@ function draw(){
       document.querySelector(".pending-node input[name=name]")?.focus({preventScroll:true});
     });
     card.querySelector(".open-editor")?.addEventListener("click",ev=>{ev.stopPropagation();openEditorForNode(S.byId[n.id])});
+    card.querySelector(".node-vresize")?.addEventListener("pointerdown",ev=>{
+      ev.stopPropagation();ev.preventDefault();
+      const startY=ev.clientY,startH=heightOf(n.viewId);
+      const target=ev.currentTarget;
+      try{target.setPointerCapture(ev.pointerId)}catch(_){ }
+      card.classList.add("vresizing");
+      const onMove=me=>{
+        const h=Math.max(MIN_H,Math.min(MAX_H,Math.round(startH+me.clientY-startY)));
+        card.style.height=`${h}px`;S.mapH.set(n.id,h);S.justDraggedAt=Date.now();
+        const liveBoxes=measure(stage);S.mapBoxes=liveBoxes;drawEdges(svg,liveBoxes,edges.filter(e2=>shown.has(e2.from_node)&&shown.has(e2.to_node)));sizeStage(stage,svg);
+      };
+      const onUp=()=>{
+        target.removeEventListener("pointermove",onMove);target.removeEventListener("pointerup",onUp);target.removeEventListener("pointercancel",onUp);
+        card.classList.remove("vresizing");
+        if(startH!==heightOf(n.viewId)){schedulePersist();draw()}
+      };
+      target.addEventListener("pointermove",onMove);
+      target.addEventListener("pointerup",onUp);
+      target.addEventListener("pointercancel",onUp);
+    });
+    card.querySelector(".node-vresize")?.addEventListener("dblclick",ev=>{ev.stopPropagation();if(S.mapH.delete(n.id)){schedulePersist();draw();toast("Высота узла — автоматически")}});
     stage.appendChild(card);
     let currentDx=0,currentDy=0;
     enableNodeDrag(card,"map",n.viewId,p.x,p.y,S.mapView,(nx,ny)=>{
