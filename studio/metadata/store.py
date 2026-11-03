@@ -512,6 +512,16 @@ def save_graph_node(
             source_id, target_id = parent_id, node_id
             if kind == "test" and edge_kind == "tests":
                 source_id, target_id = node_id, parent_id
+            # Перенос узла под нового родителя: старое диспетчерское ребро убирается,
+            # чтобы сценарий не оказался в двух ветках одновременно.
+            metadata.edges = [
+                item for item in metadata.edges
+                if not (
+                    item.get("to") == target_id
+                    and item.get("kind") == "dispatch"
+                    and item.get("from") != source_id
+                )
+            ]
             edge = {"from": source_id, "to": target_id, "kind": edge_kind, "label": ""}
             metadata.edges = [
                 item for item in metadata.edges

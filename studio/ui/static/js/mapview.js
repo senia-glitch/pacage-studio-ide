@@ -1,5 +1,5 @@
 import {api} from "./api.js";
-import {$,S,applyTransform,drawEdges,esc,KIND_NAMES,EDGE_COLORS,EDGE_NAMES,nodeMeta,methodOfEndpoint,urlOfEndpoint,openEditorForNode,toast,schedulePersist,enableNodeDrag,applyGraph} from "./core.js";
+import {$,S,applyTransform,drawEdges,esc,KIND_NAMES,EDGE_COLORS,EDGE_NAMES,nodeMeta,methodOfEndpoint,urlOfEndpoint,openEditorForNode,toast,schedulePersist,enableNodeDrag,applyGraph,hooks,modal} from "./core.js";
 import {clearStage,measure,sizeStage} from "./edges.js";
 import {clampGroupDelta} from "./geometry.js";
 import {matchesAll} from "./search.js";
@@ -25,7 +25,62 @@ function nodeAutoHeight(n){
 /* Неопределённый узел: один на канвасе, создаётся кнопкой ＋ и определяет
    будущего потомка (тип/название/задача/критерии) прямо на карте. */
 let pendingChild=null;
+let staleLayoutPurged=false;
 function closePending(){pendingChild=null;for(const key of [...S.mapPos.keys()])if(String(key).startsWith("@new:"))S.mapPos.delete(key)}
+
+/* Перетащили эндпоинт на метод/домен — назначить эндпоинту этот домен.
+   Плановые узлы обновляются в плане, фактические — в metadata.json (код не меняется). */
+async function assignEndpointDomain(node,newDomain){
+  const endpointId=node.canonicalId||node.id;
+  try{
+    let d;
+    if(node.planned&&String(node.id).startsWith("studio:")){
+      d=await api("/api/metadata/graph-node","POST",{
+        node_id:endpointId,kind:"endpoint",
+        name:(node.details||{}).function_name||node.label,
+        description:node.description||"",
+        acceptance:node.acceptance||[],
+        domain:newDomain,
+        http_method:(node.details||{}).http_method||"",
+        path:(node.details||{}).path||"",
+      });
+    }else{
+      d=await api("/api/metadata/node","POST",{node_id:endpointId,domain:newDomain});
+    }
+    applyGraph(d.graph);
+    // Позиции копий ветки устарели — ветка аккуратно раскладывается под новым доменом.
+    const prefix="@branch:"+encodeURIComponent(endpointId)+":";
+    for(const key of [...S.mapPos.keys()])if(String(key).startsWith(prefix))S.mapPos.delete(key);
+    hooks.renderMap();
+    toast(newDomain?`Эндпоинт перенесён в домен «${newDomain}»`:"Домен убран — эндпоинт в «Без домена»");
+  }catch(error){toast("Не удалось назначить домен: "+error.message)}
+}
+async function attachScenarioToMethod(node,methodNode,choices){
+  if(!choices.length){toast("В этой группе нет эндпоинтов — прикреплять не к чему");return}
+  const attach=async endpointId=>{
+    try{
+      const d=await api("/api/metadata/graph-node","POST",{
+        node_id:node.id,kind:"scenario",name:node.label,
+        description:node.description||"",acceptance:node.acceptance||[],domain:node.domain||"",
+        parent_id:endpointId,edge_kind:"dispatch",
+      });
+      applyGraph(d.graph);
+      S.mapPos.delete(node.id);
+      hooks.renderMap();
+      toast(`Сценарий «${node.label}» прикреплён к ветке эндпоинта`);
+    }catch(error){window.__attachErr=String(error&&error.message||error);toast("Не удалось прикрепить сценарий: "+error.message)}
+  };
+  if(choices.length===1){await attach(choices[0].id);return}
+  const options=choices.map(choice=>({label:choice.label,action:()=>attach(choice.id)}));
+  options.push({label:"Отмена",action:()=>{}});
+  modal("К какому эндпоинту прикрепить сценарий?",`<p class="hint">У метода ${esc(methodNode.label)} несколько эндпоинтов — выберите ветку.</p>`,options);
+}
+function dropDomainOf(target){
+  if(!target)return null;
+  const name=target.kind==="method"?target.domain:target.label;
+  if(name==="Без домена")return"";
+  return name||null;
+}
 const parentOf=edge=>edge.kind==="tests"?edge.to_node:edge.from_node;
 const childOf=edge=>edge.kind==="tests"?edge.from_node:edge.to_node;
 function model(){
@@ -33,27 +88,47 @@ function model(){
   const canonicalById=Object.fromEntries(nodes.map(n=>[n.id,n]));
   const edges=(S.G.edges||[]).map(e=>({from_node:parentOf(e),to_node:childOf(e),kind:e.kind,label:e.label}));
   const effectiveDomains=n=>String(n.domain||"").split(",").map(value=>value.trim()).filter(Boolean).map(domain=>S.mapMode==="plan"&&S.G.domain_changes?.[domain]?.name||domain);
-  const methods=new Map();
+  // Карта доменов: домен — стартовая точка, под ним его HTTP-методы,
+  // под методами — эндпоинты этого метода и домена.
+  const domainEntries=new Map();
   for(const endpoint of nodes.filter(n=>n.kind==="endpoint")){
-    const method=methodOfEndpoint(endpoint)||"Метод не указан";if(!methods.has(method))methods.set(method,[]);methods.get(method).push(endpoint);
+    const method=methodOfEndpoint(endpoint)||"Метод не указан";
+    for(const d of (effectiveDomains(endpoint).length?effectiveDomains(endpoint):["Без домена"])){
+      const rename=Object.entries(S.G.domain_changes||{}).find(([oldName,v])=>v?.name===d);
+      const plannedDomain=(S.G.planned_domains||[]).find(item=>item.name===d);
+      const did=plannedDomain?`@domain-plan:${plannedDomain.id}`:`@domain:${d}`;
+      if(!domainEntries.has(did))domainEntries.set(did,{label:d,rename,plannedDomain,methods:new Map()});
+      const entry=domainEntries.get(did);
+      if(!entry.methods.has(method))entry.methods.set(method,[]);
+      entry.methods.get(method).push(endpoint);
+    }
   }
-  for(const [method,endpoints] of methods){
-    const mid=`@method:${method}`;nodes.push({id:mid,viewId:mid,kind:"method",label:method,synthetic:true,planned:false,details:{count:endpoints.length}});
-    const domains=new Map();for(const endpoint of endpoints){for(const d of (effectiveDomains(endpoint).length?effectiveDomains(endpoint):["Без домена"])){if(!domains.has(d))domains.set(d,[]);domains.get(d).push(endpoint)}}
-    for(const [domain,items] of domains){
-      const rename=Object.entries(S.G.domain_changes||{}).find(([old,v])=>v?.name===domain);
-      const plannedDomain=(S.G.planned_domains||[]).find(item=>item.name===domain);
-      const plannedGroup=!!rename||!!plannedDomain||items.every(n=>n.planned)&&items.length>0;
-      const did=plannedDomain?`@domain-plan:${plannedDomain.id}`:`@domain:${domain}`;
-      if(!canonicalById[did]&&!nodes.some(n=>n.id===did))nodes.push({id:did,viewId:did,kind:"domain",label:domain,synthetic:true,planned:plannedGroup,sourceDomain:rename?.[0]||(S.G.domain_changes?.[domain]?domain:""),domainPlanId:plannedDomain?.id||"",domainRecord:plannedDomain||null,details:{count:items.length}});
-      edges.push({from_node:mid,to_node:did,kind:"uses",label:"домен",planned:plannedGroup});
-      for(const item of items)edges.push({from_node:did,to_node:item.id,kind:"uses",label:"эндпоинт",planned:!!item.planned});
+  // Полка «Без домена» существует всегда — на неё можно вернуть эндпоинт.
+  if(!domainEntries.has("@domain:Без домена"))domainEntries.set("@domain:Без домена",{label:"Без домена",rename:null,plannedDomain:null,methods:new Map()});
+  for(const entry of domainEntries.values()){
+    const items=[...entry.methods.values()].flat();
+    entry.plannedGroup=!!entry.rename||!!entry.plannedDomain||(items.length>0&&items.every(n=>n.planned));
+  }
+  const domainKeys=[...domainEntries.keys()].sort((a,b)=>{
+    const la=domainEntries.get(a).label,lb=domainEntries.get(b).label;
+    return ((la==="Без домена")?1:0)-((lb==="Без домена")?1:0)||la.localeCompare(lb,"ru");
+  });
+  for(const did of domainKeys){
+    const entry=domainEntries.get(did);
+    nodes.push({id:did,viewId:did,kind:"domain",label:entry.label,synthetic:true,planned:entry.plannedGroup,sourceDomain:entry.rename?.[0]||(S.G.domain_changes?.[entry.label]?entry.label:""),domainPlanId:entry.plannedDomain?.id||"",domainRecord:entry.plannedDomain||null,details:{count:entry.methods.size}});
+    for(const method of [...entry.methods.keys()].sort((a,b)=>a.localeCompare(b,"ru"))){
+      const items=entry.methods.get(method);
+      const mid=`@method:${did}:${method}`;
+      nodes.push({id:mid,viewId:mid,kind:"method",label:method,synthetic:true,planned:false,domain:entry.label,details:{count:items.length}});
+      edges.push({from_node:did,to_node:mid,kind:"uses",label:"метод",planned:entry.plannedGroup});
+      for(const item of items)edges.push({from_node:mid,to_node:item.id,kind:"uses",label:"эндпоинт",planned:!!item.planned});
     }
     if(S.mapMode==="fact")for(const [source,change] of Object.entries(S.G.domain_changes||{})){
-      if(!domains.has(source))continue;
+      const sourceDid=`@domain:${source}`;
+      if(!domainEntries.has(sourceDid)||did!==sourceDid)continue;
       const id=`@domain-change:${source}`;
       nodes.push({id,viewId:id,kind:"domain",label:change.name||source,synthetic:true,planned:true,sourceDomain:source,details:{count:0}});
-      edges.push({from_node:mid,to_node:id,kind:"uses",label:"план переименования",planned:true});
+      edges.push({from_node:did,to_node:id,kind:"uses",label:"план переименования",planned:true});
     }
   }
   for(const d of S.G.planned_domains||[]){
@@ -116,6 +191,9 @@ function visibleClass(node){
   return "";
 }
 function positionGraph(nodes,edges){
+  // Иерархия карты изменилась (домен → метод → эндпоинт) — старые сохранённые
+  // позиции больше не соответствуют структуре: один раз за сессию сбрасываем.
+  if(!staleLayoutPurged){staleLayoutPurged=true;S.mapPos.clear()}
   const byView=Object.fromEntries(nodes.map(n=>[n.viewId,n])),children=new Map(),parents=new Map();
   const heightOf=id=>nodeAutoHeight(byView[id]);
   nodes.forEach(n=>{children.set(n.viewId,[]);parents.set(n.viewId,[])});
@@ -146,25 +224,58 @@ function positionGraph(nodes,edges){
   };
   const endpointBranches=new Map();
   for(const n of nodes)if(n.branchId){if(!endpointBranches.has(n.branchId))endpointBranches.set(n.branchId,[]);endpointBranches.get(n.branchId).push(n)}
+  // Кластеры по доменам: домен → его методы → ветки эндпоинтов этих методов.
   const clusters=[];
-  for(const [branchId,branchNodes] of endpointBranches){
-    const root=branchNodes.find(n=>n.kind==="endpoint");if(!root)continue;
-    const ids=branchNodes.map(n=>n.viewId),idSet=new Set(ids),treeEdges=new Map(ids.map(id=>[id,[]]));
-    edges.filter(e=>idSet.has(e.from_node)&&idSet.has(e.to_node)).forEach(e=>treeEdges.get(e.from_node).push(e.to_node));
-    clusters.push({root:root.viewId,ids,treeEdges,label:root.label,domain:String(root.domain||"")});
+  const assignedBranches=new Set();
+  // Основной домен эндпоинта — первый из его доменов; только он владеет веткой.
+  const primaryDomain=new Map();
+  for(const endpoint of nodes.filter(n=>n.kind==="endpoint")){
+    const domains=String(endpoint.domain||"").split(",").map(v=>v.trim()).filter(Boolean).map(d=>S.mapMode==="plan"&&S.G.domain_changes?.[d]?.name||d);
+    const d=domains[0]||"Без домена";
+    const plannedDomain=(S.G.planned_domains||[]).find(item=>item.name===d);
+    primaryDomain.set(endpoint.id,plannedDomain?`@domain-plan:${plannedDomain.id}`:`@domain:${d}`);
   }
-  clusters.sort((a,b)=>a.domain.localeCompare(b.domain,"ru")||a.label.localeCompare(b.label,"ru"));
-  let branchY=360,rowX=44,rowWidth=0,rowHeight=0;const maxRowWidth=1700;
+  for(const domain of nodes.filter(n=>n.kind==="domain")){
+    const ids=[domain.viewId],treeEdges=new Map(ids.map(id=>[id,[]]));
+    const branchIds=[];
+    for(const edge of edges){
+      if(edge.from_node!==domain.viewId)continue;
+      const target=byView[edge.to_node];
+      if(!target||ids.includes(edge.to_node))continue;
+      ids.push(edge.to_node);treeEdges.set(edge.to_node,[]);
+      treeEdges.get(domain.viewId).push(edge.to_node);
+      if(target.kind==="method"){
+        for(const child of edges.filter(e=>e.from_node===edge.to_node)){
+          const branchRoot=byView[child.to_node];
+          if(branchRoot?.branchId){
+            treeEdges.get(edge.to_node).push(child.to_node);
+            if(!branchIds.includes(branchRoot.branchId))branchIds.push(branchRoot.branchId);
+          }
+        }
+      }
+    }
+    for(const branchId of branchIds){
+      if(assignedBranches.has(branchId)||primaryDomain.get(branchId)!==domain.viewId)continue;
+      assignedBranches.add(branchId);
+      for(const n of endpointBranches.get(branchId)||[])if(!ids.includes(n.viewId)){ids.push(n.viewId);treeEdges.set(n.viewId,[])}
+    }
+    const idSet=new Set(ids);
+    edges.filter(e=>idSet.has(e.from_node)&&idSet.has(e.to_node)).forEach(e=>{
+      if(treeEdges.has(e.from_node)&&!treeEdges.get(e.from_node).includes(e.to_node))treeEdges.get(e.from_node).push(e.to_node);
+    });
+    clusters.push({root:domain.viewId,ids,treeEdges,label:domain.label,domain:String(domain.domain||domain.label)});
+  }
+  clusters.sort((a,b)=>{
+    const sa=a.label==="Без домена",sb=b.label==="Без домена";
+    return (sa?1:0)-(sb?1:0)||a.label.localeCompare(b.label,"ru");
+  });
+  let branchY=100,rowX=44,rowWidth=0,rowHeight=0;const maxRowWidth=1700;
   for(const cluster of clusters){
     const measured=layoutTree(cluster.root,cluster.ids,cluster.treeEdges,0,0);
     if(rowX>44&&rowWidth+measured.width>maxRowWidth){branchY+=rowHeight+110;rowX=44;rowWidth=0;rowHeight=0}
     layoutTree(cluster.root,cluster.ids,cluster.treeEdges,rowX,branchY);
     rowX+=measured.width+110;rowWidth+=measured.width+110;rowHeight=Math.max(rowHeight,measured.height);
   }
-  const methods=nodes.filter(n=>n.kind==="method").sort((a,b)=>a.label.localeCompare(b.label,"ru"));
-  methods.forEach((n,i)=>{widths.set(n.viewId,240);positions.set(n.viewId,{x:44+i*310,y:42})});
-  const domains=nodes.filter(n=>n.kind==="domain").sort((a,b)=>a.label.localeCompare(b.label,"ru"));
-  domains.forEach((n,i)=>{widths.set(n.viewId,230);positions.set(n.viewId,{x:44+i*300,y:190})});
   let orphanY=clusters.length?branchY+rowHeight+110:340,orphanX=44,orphanRowHeight=0;
   const orphanNodes=nodes.filter(n=>!n.branchId&&n.kind!=="method"&&n.kind!=="domain"),orphanIds=new Set(orphanNodes.map(n=>n.viewId)),orphanEdges=new Map(orphanNodes.map(n=>[n.viewId,[]]));
   edges.forEach(e=>{if(orphanIds.has(e.from_node)&&orphanIds.has(e.to_node))orphanEdges.get(e.from_node).push(e.to_node)});
@@ -183,8 +294,10 @@ function positionGraph(nodes,edges){
     if(saved)positions.set(n.viewId,{...saved});
   }
   const placed=[];
-  for(const n of [...nodes].sort((a,b)=>positions.get(a.viewId).y-positions.get(b.viewId).y||positions.get(a.viewId).x-positions.get(b.viewId).x)){
-    const p=positions.get(n.viewId),w=widths.get(n.viewId)||W,selfH=heightOf(n.viewId);
+  for(const n of [...nodes].sort((a,b)=>(positions.get(a.viewId)||{x:0,y:0}).y-(positions.get(b.viewId)||{x:0,y:0}).y||(positions.get(a.viewId)||{x:0}).x-(positions.get(b.viewId)||{x:0}).x)){
+    const p=positions.get(n.viewId);
+    if(!p){console.warn("mapview: узел без позиции пропущен",n.viewId);continue}
+    const w=widths.get(n.viewId)||W,selfH=heightOf(n.viewId);
     while(placed.some(q=>p.x<q.x+q.w+12&&p.x+w+12>q.x&&p.y<q.y+(q.h||H)+12&&p.y+selfH+12>q.y))p.y+=H+12;
     placed.push({x:p.x,y:p.y,w,h:selfH});
   }
@@ -192,7 +305,7 @@ function positionGraph(nodes,edges){
 }
 function draw(){
   const stage=$("mapStage"),svg=$("mapEdges");if(!stage||!svg)return;
-  clearStage(stage,svg);const graph=model(),{nodes,edges,selectedViews}=graph,{positions,widths,children}=positionGraph(nodes,edges),byView=Object.fromEntries(nodes.map(n=>[n.viewId,n]));
+  clearStage(stage,svg);const graph=model(),{nodes,edges,selectedViews}=graph,{positions,widths,children,parents}=positionGraph(nodes,edges),byView=Object.fromEntries(nodes.map(n=>[n.viewId,n]));
   const heightOf=id=>nodeAutoHeight(byView[id]);
   if(S.selectedNode&&!selectedViews[S.selectedNode]){
     const previous=S.mapViewNodes?.[S.selectedNode],source=previous?.sourceDomain;
@@ -210,6 +323,8 @@ function draw(){
       while(queue.length)for(const child of children.get(queue.shift())||[])if(!highlightSet.has(child)){highlightSet.add(child);queue.push(child)}
     }
   }
+  let dropTargetId=null,dropTargetEl=null;
+  const clearDropTarget=()=>{if(dropTargetEl){dropTargetEl.classList.remove("drop-target");dropTargetEl=null}dropTargetId=null};
   const filtered=nodes.filter(n=>!S.lastSearchQuery||matchesAll(S.lastSearchQuery,[n.label,n.domain,n.description,n.file_path,n.kind,nodeMeta(n),n.planned_change?.note,n.plannedChange?.note,...(n.planned_change?.acceptance||[]),...(n.plannedChange?.acceptance||[])]));
   const shown=new Set(filtered.map(n=>n.viewId));
   // Keep every ancestor so a search result stays inside its endpoint branch.
@@ -244,7 +359,9 @@ function draw(){
         const el=stage.querySelector(`[data-id="${CSS.escape(n.viewId)}"]`);
         if(el){el.style.left=`${p.x+delta.x}px`;el.style.top=`${p.y+delta.y}px`}S.mapPos.set(n.viewId,{x:p.x+delta.x,y:p.y+delta.y});S.justDraggedAt=Date.now();
         const liveBoxes=measure(stage);S.mapBoxes=liveBoxes;drawEdges(svg,liveBoxes,edges.filter(e=>shown.has(e.from_node)&&shown.has(e.to_node)));sizeStage(stage,svg);
-      },()=>{schedulePersist();draw()});
+      },()=>{schedulePersist();draw()},()=>{
+        S.mapPos.delete(n.viewId);draw();
+      });
       return;
     }
     const card=document.createElement("article");card.className=`card map-node k-${n.kind}${n.planned?" planned node--todo":""}${visibleClass(n)}${S.selectedNode===n.id?" sel":""}${n.synthetic?" synthetic":""}${highlightSet?(highlightSet.has(n.viewId)?" kin":" dim"):""}`;card.dataset.id=n.viewId;card.dataset.nodeId=n.id;card.style.left=`${p.x}px`;card.style.top=`${p.y}px`;card.style.width=`${widths.get(n.viewId)||W}px`;card.style.height=`${heightOf(n.viewId)}px`;
@@ -296,17 +413,79 @@ function draw(){
     card.querySelector(".node-vresize")?.addEventListener("dblclick",ev=>{ev.stopPropagation();if(S.mapH.delete(n.id)){schedulePersist();draw();toast("Высота узла — автоматически")}});
     stage.appendChild(card);
     let currentDx=0,currentDy=0;
+    const dragOriginals=new Map();
     enableNodeDrag(card,"map",n.viewId,p.x,p.y,S.mapView,(nx,ny)=>{
       const requestedDx=nx-p.x,requestedDy=ny-p.y,moving=new Set([n.viewId]),todo=[n.viewId];
       while(todo.length){for(const c of children.get(todo.pop())||[])if(!moving.has(c)){moving.add(c);todo.push(c)}}
+      // Перетаскивание эндпоинта: подсвечиваем карточку метода/домена под курсором.
+      let hoverId=null;
+      const canDropEndpoint=n.kind==="endpoint";
+      const isStudioScenarioCandidate=nn=>nn.kind==="scenario"&&nn.planned&&String(nn.id).startsWith("studio:")&&!nn.plan;
+      const parentIsEndpoint=(parents.get(n.viewId)||[]).some(pid=>byView[pid]?.kind==="endpoint");
+      const canDropScenario=isStudioScenarioCandidate(n)&&(!n.branchId||parentIsEndpoint);
+      if(canDropEndpoint||canDropScenario){
+        const cx=nx+(widths.get(n.viewId)||W)/2,cy=ny+heightOf(n.viewId)/2;
+        let hoverDist=150;
+        for(const other of nodes){
+          if(other===n)continue;
+          if(other.kind==="method"){
+            if(canDropEndpoint&&other.domain==="Без домена")continue;
+          }else if(other.kind==="domain"){
+            if(!canDropEndpoint)continue;
+          }else continue;
+          const box=S.mapBoxes[other.viewId];
+          if(!box)continue;
+          const dist=Math.hypot(cx-(box.x+box.w/2),cy-(box.y+box.h/2));
+          if(dist<hoverDist){hoverDist=dist;hoverId=other.viewId}
+        }
+      }
+      if(hoverId!==dropTargetId){
+        clearDropTarget();
+        dropTargetId=hoverId;
+        dropTargetEl=hoverId?stage.querySelector(`[data-id="${CSS.escape(hoverId)}"]`):null;
+        if(dropTargetEl)dropTargetEl.classList.add("drop-target");
+      }
       const movingRects=[...moving].map(id=>{const p0=positions.get(id);return{x:p0.x,y:p0.y,w:widths.get(id)||W,h:heightOf(id)}});
       const stationaryRects=nodes.filter(other=>!moving.has(other.viewId)).map(other=>{const p0=positions.get(other.viewId);return{x:p0.x,y:p0.y,w:widths.get(other.viewId)||W,h:heightOf(other.viewId)}});
       const delta=clampGroupDelta(movingRects,stationaryRects,{x:currentDx,y:currentDy},{x:requestedDx,y:requestedDy});
       currentDx=delta.x;currentDy=delta.y;
       const candidates=[...moving].map(id=>({id,x:(positions.get(id)?.x||0)+delta.x,y:(positions.get(id)?.y||0)+delta.y}));
-      candidates.forEach(a=>{const el=stage.querySelector(`[data-id="${CSS.escape(a.id)}"]`);if(el){el.style.left=`${a.x}px`;el.style.top=`${a.y}px`}S.mapPos.set(a.id,{x:a.x,y:a.y})});S.justDraggedAt=Date.now();
+      candidates.forEach(a=>{
+        if(!dragOriginals.has(a.id)){const p0=positions.get(a.id);dragOriginals.set(a.id,p0?{x:p0.x,y:p0.y}:null)}
+        const el=stage.querySelector(`[data-id="${CSS.escape(a.id)}"]`);if(el){el.style.left=`${a.x}px`;el.style.top=`${a.y}px`}S.mapPos.set(a.id,{x:a.x,y:a.y})
+      });S.justDraggedAt=Date.now();
       const liveBoxes=measure(stage);S.mapBoxes=liveBoxes;drawEdges(svg,liveBoxes,edges.filter(e=>shown.has(e.from_node)&&shown.has(e.to_node)));sizeStage(stage,svg);
-    },()=>{schedulePersist();draw()});
+    },(cancelled)=>{
+      if(cancelled){
+        for(const [id,orig] of dragOriginals){if(orig)S.mapPos.set(id,orig);else S.mapPos.delete(id)}
+        draw();
+        return;
+      }
+      const targetNode=dropTargetId?byView[dropTargetId]:null;
+      const newDomain=dropDomainOf(targetNode);
+      const isStudioScenario=n.kind==="scenario"&&n.planned&&String(n.id).startsWith("studio:")&&!n.plan;
+      const parentIsEndpoint=(parents.get(n.viewId)||[]).some(pid=>byView[pid]?.kind==="endpoint");
+      const canDropScenario=isStudioScenario&&(!n.branchId||parentIsEndpoint);
+      clearDropTarget();
+      if(n.kind==="endpoint"&&newDomain!==null){assignEndpointDomain(n,newDomain);return}
+      if(canDropScenario&&targetNode?.kind==="method"){
+        const currentParent=(parents.get(n.viewId)||[]).map(pid=>byView[pid]).find(t=>t&&t.kind==="endpoint");
+        const currentId=currentParent?(currentParent.canonicalId||currentParent.id):null;
+        const choices=[...new Set(edges.filter(e=>e.from_node===targetNode.id).map(e=>byView[e.to_node]).filter(t=>t&&t.branchId).map(t=>t.branchId))]
+          .filter(id=>id!==currentId)
+          .map(id=>{
+            const base=S.byId[id]?.label||id;
+            const kids=nodes.filter(nn=>nn.branchId===id&&nn.kind==="scenario").map(nn=>nn.label).slice(0,2).join(", ");
+            return {id,label:kids?`${base} · ${kids}`:base};
+          });
+        attachScenarioToMethod(n,targetNode,choices);
+        return;
+      }
+      schedulePersist();draw();
+    },()=>{
+      for(const [id,orig] of dragOriginals){if(orig)S.mapPos.set(id,orig);else S.mapPos.delete(id)}
+      draw();
+    });
   });
   const boxes=measure(stage);S.mapBoxes=boxes;
   const shownEdges=edges.filter(e=>shown.has(e.from_node)&&shown.has(e.to_node)).map(e=>({...e,todo:!!(byView[e.from_node]?.planned||byView[e.to_node]?.planned||e.planned)}));

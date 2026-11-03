@@ -139,8 +139,8 @@ const dragHooks={
   end:moved=>{S.dragging=false;if(moved)S.justDraggedAt=Date.now()},
   persist:schedulePersist,
 };
-function enableNodeDrag(card,scope,key,x,y,view,onMove,onEnd){
-  enableNodeDragImpl(card,view,onMove,onEnd,dragHooks);
+function enableNodeDrag(card,scope,key,x,y,view,onMove,onEnd,onCancel){
+  enableNodeDragImpl(card,view,onMove,onEnd,onCancel?{...dragHooks,cancel:onCancel}:dragHooks);
 }
 function drawEdges(svg,boxes,edges){
   drawEdgesImpl(svg,boxes,edges,EDGE_COLORS,EDGE_NAMES,esc);

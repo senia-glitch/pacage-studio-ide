@@ -74,3 +74,24 @@ def test_restore_пустого_снапшота_отклоняется(tmp_path
         pass
     else:
         raise AssertionError("ожидали MetadataError")
+
+
+def test_перезакрепление_сценария_заменяет_диспетчерское_ребро(tmp_path: Path):
+    state = _state(tmp_path)
+    endpoint_a = state.save_graph_node({"kind": "endpoint", "name": "ЭП-А", "description": "А"})["node_id"]
+    scenario = state.save_graph_node({"kind": "scenario", "name": "Сценарий", "description": "С"})["node_id"]
+    state.save_graph_node({
+        "node_id": scenario, "kind": "scenario", "name": "Сценарий", "description": "С",
+        "parent_id": endpoint_a, "edge_kind": "dispatch",
+    })
+    endpoint_b = state.save_graph_node({"kind": "endpoint", "name": "ЭП-Б", "description": "Б"})["node_id"]
+    state.save_graph_node({
+        "node_id": scenario, "kind": "scenario", "name": "Сценарий", "description": "С",
+        "parent_id": endpoint_b, "edge_kind": "dispatch",
+    })
+    dispatches = [
+        edge for edge in read_metadata(state.root).edges
+        if edge.get("to") == scenario and edge.get("kind") == "dispatch"
+    ]
+    assert len(dispatches) == 1
+    assert dispatches[0]["from"] == endpoint_b
