@@ -130,7 +130,9 @@ def test_only_и_scenario_суждают_область():
         map_mode="none",
         generated_at="2026-01-01 00:00 UTC",
     )
-    assert [task["anchor"] for task in only.tasks] == ["CancelOrder"]
+    # «ТЗ узла и потомков»: задачи — выбранный узел и его плановые потомки
+    anchors = [task["anchor"] for task in only.tasks]
+    assert set(anchors) == {"CancelOrder", "PlannedOrder"}
     _graph, scoped = _build(
         GOLDEN,
         scenario="cancel_order",
@@ -179,7 +181,7 @@ def test_порог_150_выбирает_related():
     assert brief.options.map_mode == "related"
 
 
-def test_большое_тз_предупреждает():
+def test_большое_тз_не_обрезается():
     graph = Graph(project_root="/tmp/project")
     graph.nodes = [
         Node(
@@ -193,7 +195,8 @@ def test_большое_тз_предупреждает():
         )
     ]
     brief = build_brief(graph, None, BriefOptions(map_mode="none"))
-    assert any("ТЗ большое" in warning for warning in brief.warnings)
+    assert brief.markdown.count("x") >= 70000
+    assert "усечено" not in brief.markdown
 
 
 def test_образец_приоритет_домен_каталог_id():
@@ -375,8 +378,10 @@ def test_cli_brief_stdout_only(demo: Path, capsys):
     out = capsys.readouterr().out
     tasks_section = out.split("## 4. Задачи")[1].split("## 5.")[0]
     headings = [line for line in tasks_section.splitlines() if line.startswith("### T")]
-    assert len(headings) == 1
-    assert "CancelOrder" in headings[0]
+    # «ТЗ узла и потомков»: узел и его плановый сценарий
+    assert len(headings) == 2
+    assert any("CancelOrder" in item for item in headings)
+    assert not any("NotifyScenario" in item for item in headings)
 
     assert main(["brief", "--project", str(demo), "--map", "full"]) == 0
     out = capsys.readouterr().out

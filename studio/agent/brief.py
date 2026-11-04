@@ -31,7 +31,6 @@ BRIEF_FILENAME = "agent-brief.md"
 BRIEFS_DIR = "briefs"
 LAST_BRIEF = "last-brief.json"
 STUDIO_DIR = ".studio"
-MAX_BRIEF_CHARS = 60_000
 SAMPLE_LINE_LIMIT = 40
 
 MAP_MODES = ("full", "related", "compact", "none")
@@ -707,8 +706,227 @@ def _other_nodes(graph: Graph, visible: set[str]) -> list[Node]:
     )
 
 
+def _subtree_scope(
+    graph: Graph, roots: set[str]
+) -> set[str]:
+    """Выбранный узел и его потомки: обход рёбер графа, как subtreeIds на карте."""
+    by_id = graph.by_id()
+    index = graph.index()
+    visible = {item for item in roots if item in by_id}
+    queue: deque[str] = deque(visible)
+    while queue:
+        current = queue.popleft()
+        for edge in index.out(current):
+            if edge.to_node in visible or edge.to_node not in by_id:
+                continue
+            visible.add(edge.to_node)
+            queue.append(edge.to_node)
+        for edge in index.incoming(current):
+            if edge.kind != "tests":
+                continue
+            if edge.from_node in visible or edge.from_node not in by_id:
+                continue
+            visible.add(edge.from_node)
+            queue.append(edge.from_node)
+    return visible
+
+
+def _planned_edits(
+    graph: Graph, branch_scope: set[str] | None
+) -> tuple[list[Node], dict, list]:
+    """Правки, переименования доменов и плановые домены; для узлового ТЗ — по области."""
+    change_nodes = [
+        node for node in graph.nodes
+        if node.planned_change
+        and (node.planned_change.get("note") or node.planned_change.get("acceptance"))
+    ]
+    domain_changes = graph.domain_changes or {}
+    planned_domains = graph.planned_domains or []
+    if branch_scope is None:
+        return change_nodes, dict(domain_changes), list(planned_domains)
+    by_id = graph.by_id()
+    domains: set[str] = set()
+    for node_id in branch_scope:
+        node = by_id.get(node_id)
+        if node is None:
+            continue
+        for item in str(node.domain or "").split(","):
+            item = item.strip()
+            if item:
+                domains.add(item)
+    change_nodes = [node for node in change_nodes if node.id in branch_scope]
+    domain_changes = {
+        source: change
+        for source, change in domain_changes.items()
+        if source in domains or (change or {}).get("name") in domains
+    }
+    planned_domains = [
+        state for state in planned_domains
+        if getattr(state, "name", "") in domains
+    ]
+    return change_nodes, domain_changes, planned_domains
+
+
+def _branch_map_body(
+    graph: Graph, roots: set[str], visible: set[str]
+) -> list[str]:
+    """Тело секции 5 для ТЗ узла и потомков: только выбранные ветки.
+
+    Заголовки — выбранные корни (эндпоинты группируются по домену и методу,
+    остальные узлы — самостоятельными ветками); потомки — строго из области.
+    Модели и неполные узлы — только из области; в тесты попадают лишь те,
+    что лежат в области или покрывают её узлы.
+    """
+    by_id = graph.by_id()
+    index = graph.index()
+    branch = [by_id[root] for root in sorted(roots) if root in by_id and root in visible]
+    endpoint_roots = sorted(
+        (node for node in branch if node.kind == "endpoint"),
+        key=lambda node: (
+            str(node.domain or "Без домена"),
+            str((node.details or {}).get("http_method") or ""),
+            _endpoint_url(node),
+            node.id,
+        ),
+    )
+    extra_roots = sorted(
+        (node for node in branch if node.kind != "endpoint"),
+        key=lambda node: (KIND_ORDER.get(node.kind, 99), node_anchor(node) or node.label, node.id),
+    )
+    lines: list[str] = []
+    if endpoint_roots or extra_roots:
+        lines.append("### 5.2 Дерево запроса: домен → метод → эндпоинт → сценарий → io → модель")
+        lines.append("")
+    if endpoint_roots:
+        domains: dict[str, list[Node]] = {}
+        for endpoint in endpoint_roots:
+            domains.setdefault(str(endpoint.domain or "Без домена"), []).append(endpoint)
+        for domain in sorted(domains, key=lambda item: (item == "Без домена", item)):
+            lines.append(f"#### Домен: {domain}")
+            methods: dict[str, list[Node]] = {}
+            for endpoint in domains[domain]:
+                methods.setdefault(
+                    str((endpoint.details or {}).get("http_method") or "").upper() or "БЕЗ МЕТОДА",
+                    [],
+                ).append(endpoint)
+            for method in sorted(methods):
+                lines.append(f"##### {method}")
+                for endpoint in methods[method]:
+                    lines.append(_map_line(endpoint))
+                    lines.extend(_branch_children(graph, index, endpoint.id, visible))
+        lines.append("")
+    for root in extra_roots:
+        lines.append(f"#### {_kind_name(root.kind)}: {node_anchor(root) or root.label}")
+        lines.extend(_branch_children(graph, index, root.id, visible))
+        lines.append("")
+    lines.append("### 5.3 Модели и таблицы")
+    lines.append("")
+    models = sorted(
+        (node for node in graph.nodes if node.kind == "model" and node.id in visible),
+        key=lambda node: str((node.details or {}).get("tablename") or node.id),
+    )
+    if not models:
+        lines.append("(моделей нет)")
+    for model in models:
+        details = model.details or {}
+        fields = details.get("fields") or []
+        rendered = ", ".join(
+            f"{item.get('name')}: {item.get('annotation')}"
+            + (f" = {item.get('default')}" if item.get("default") else "")
+            for item in fields
+        )
+        lines.append(
+            f"- `{details.get('tablename') or model.label}` — модель `{model.label}`, "
+            f"`{_where(model)}`" + (f": {rendered}" if rendered else "")
+        )
+    lines.append("")
+    lines.append("### 5.4 Тесты (что покрывают)")
+    lines.append("")
+    tests = sorted(
+        (
+            node for node in graph.nodes
+            if node.kind == "test"
+            and (
+                node.id in visible
+                or any(
+                    edge.to_node in visible
+                    for edge in index.out(node.id)
+                    if edge.kind == "tests"
+                )
+            )
+        ),
+        key=lambda node: (node.file_path, node.line, node.id),
+    )
+    if not tests:
+        lines.append("(тестов нет)")
+    for test in tests:
+        target_nodes = [
+            graph.by_id()[edge.to_node]
+            for edge in index.out(test.id)
+            if edge.kind == "tests" and edge.to_node in graph.by_id()
+        ]
+        covered = ", ".join(
+            node_anchor(node) or node.label for node in target_nodes
+        ) or "не связано"
+        lines.append(f"- `{node_anchor(test) or test.label}` (`{_where(test)}`) → {covered}")
+    lines.append("")
+    lines.append("### 5.5 Узлы вне путей запроса (неполные)")
+    lines.append("")
+    incomplete = sorted(
+        (
+            node for node in graph.nodes
+            if not node.complete and not node.planned and node.id in visible
+        ),
+        key=lambda node: (KIND_ORDER.get(node.kind, 99), node.id),
+    )
+    if not incomplete:
+        lines.append("(нет)")
+    for node in incomplete:
+        lines.append(_node_line(node))
+    lines.append("")
+    return lines
+
+
+def _branch_children(
+    graph: Graph,
+    index,
+    root_id: str,
+    visible: set[str],
+) -> list[str]:
+    """Потомки корня ветки с отступами; в обход берутся только узлы области."""
+    by_id = graph.by_id()
+    lines: list[str] = []
+    seen: set[str] = {root_id}
+    queue: deque[tuple[str, int]] = deque([(root_id, 0)])
+    while queue:
+        current, depth = queue.popleft()
+        if depth >= 5:
+            continue
+        for edge in index.out(current):
+            if edge.kind not in (
+                "dispatch",
+                "scenario_call",
+                "port_call",
+                "table",
+                "uses",
+            ):
+                continue
+            if edge.to_node in seen:
+                continue
+            target = by_id.get(edge.to_node)
+            if target is None:
+                continue
+            seen.add(target.id)
+            if target.id not in visible:
+                continue
+            lines.append("  " * (depth + 1) + _map_line(target))
+            queue.append((target.id, depth + 1))
+    return lines
+
+
 def _section_map(
-    graph: Graph, mode: str, task_ids: set[str]
+    graph: Graph, mode: str, task_ids: set[str],
+    branch_roots: set[str] | None = None, branch_visible: set[str] | None = None,
 ) -> list[str]:
     lines = ["## 5. Карта проекта", ""]
     lines.append("### 5.1 Условные обозначения")
@@ -719,6 +937,9 @@ def _section_map(
     lines.append("")
     if mode == "none":
         return []
+    if branch_roots is not None:
+        lines.extend(_branch_map_body(graph, branch_roots, branch_visible or set()))
+        return lines
     if mode == "compact":
         lines.append("### 5.2 Узлы (кратко)")
         lines.append("")
@@ -1187,17 +1408,22 @@ def _build_markdown(
     generated_at: str,
     brief_id: str,
     warnings: list[str],
+    branch_roots: set[str] | None = None,
+    branch_scope: set[str] | None = None,
 ) -> str:
     project_root = Path(graph.project_root)
     project_name = project_root.name or "проект"
     map_mode = options.map_mode or ("related" if len(graph.nodes) > 150 else "full")
     total_tasks = len(plans) + len(tasks)
     total_unready = len(unready_plans) + len(unready_nodes)
-    planned_edits = sum(
-        1 for node in graph.nodes
-        if node.planned_change
-        and (node.planned_change.get("note") or node.planned_change.get("acceptance"))
-    ) + len(graph.domain_changes or {}) + len(graph.planned_domains or [])
+    branch_change_nodes, branch_domain_changes, branch_planned_domains = _planned_edits(
+        graph, branch_scope
+    )
+    planned_edits = (
+        len(branch_change_nodes)
+        + len(branch_domain_changes)
+        + len(branch_planned_domains)
+    )
     lines = [f"# ТЗ для AI-агента: {project_name}", ""]
     lines.append(
         f"Сформировано: {generated_at} · studio {__version__} · brief {brief_id} · "
@@ -1293,7 +1519,15 @@ def _build_markdown(
                 warnings,
             )
             lines.extend(block.splitlines())
-    lines.extend(_section_map(graph, map_mode, {node.id for node in tasks}))
+    lines.extend(
+        _section_map(
+            graph,
+            map_mode,
+            {node.id for node in tasks},
+            branch_roots,
+            branch_scope,
+        )
+    )
     lines.append("## 6. Не готово к реализации")
     lines.append("")
     if not unready_plans and not unready_nodes:
@@ -1388,32 +1622,6 @@ def _make_brief_id(graph: Graph, options: BriefOptions, tasks: list[Node], plans
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
 
 
-def _truncate_markdown(body: str, marker: str, warnings: list[str]) -> str:
-    suffix = (
-        "\n\n> ТЗ усечено: достигнут лимит "
-        f"{MAX_BRIEF_CHARS} символов. Сузьте область (--only/--plan/--scenario) "
-        "или выберите более краткий режим карты.\n"
-    )
-    room = MAX_BRIEF_CHARS - len(marker) - len(suffix)
-    if room < 0:
-        room = 0
-    cut = body[:room]
-    # Не обрезаем посреди блока кода: отступаем к его началу.
-    for fence in ("```", "~~~"):
-        if cut.count(fence) % 2 == 1:
-            start = cut.rfind("\n" + fence)
-            cut = cut[:start] if start >= 0 else ""
-    newline = cut.rfind("\n")
-    if newline > 0:
-        cut = cut[:newline]
-    _warn(
-        warnings,
-        "ТЗ большое: сузьте область (--only/--plan/--scenario) или выберите "
-        "более краткий режим карты.",
-    )
-    return cut.rstrip() + suffix
-
-
 def build_brief(
     graph: Graph, sources: SourceSet | None, options: BriefOptions | None = None
 ) -> Brief:
@@ -1470,6 +1678,10 @@ def build_brief(
         selected_plans = list(all_plans)
 
     scope, scope_warning = _resolve_scope(graph, options.only, options.scenario)
+    branch_roots: set[str] | None = None
+    if options.only is not None and scope is not None:
+        branch_roots = set(scope)
+        scope = _subtree_scope(graph, branch_roots)
     planned = _planned_nodes(graph)
     if options.only is not None:
         selected_nodes = [node for node in planned if scope is None or node.id in scope]
@@ -1523,14 +1735,12 @@ def build_brief(
         generated_at,
         brief_id,
         warnings,
+        branch_roots=branch_roots,
+        branch_scope=scope if branch_roots is not None else None,
     )
-    change_nodes = [
-        node for node in graph.nodes
-        if node.planned_change
-        and (node.planned_change.get("note") or node.planned_change.get("acceptance"))
-    ]
-    domain_changes = graph.domain_changes or {}
-    planned_domains = graph.planned_domains or []
+    change_nodes, domain_changes, planned_domains = _planned_edits(
+        graph, scope if branch_roots is not None else None
+    )
     if change_nodes or domain_changes or planned_domains:
         body += "\n## Плановые правки фактической структуры\n\n"
         body += (
@@ -1612,8 +1822,6 @@ def build_brief(
     ]
     marker_payload = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     marker = f"\n<!-- studio-brief:v{BRIEF_VERSION} {marker_payload} -->\n"
-    if len(body) + len(marker) > MAX_BRIEF_CHARS:
-        body = _truncate_markdown(body, marker, warnings)
     markdown = body + marker
     stats = {
         "tasks": len(ordered_plans) + len(ordered_nodes),
@@ -1750,7 +1958,6 @@ def load_brief(project_root: Path, target: str | Path | None = None) -> dict:
 __all__ = [
     "BRIEF_FILENAME",
     "BRIEF_VERSION",
-    "MAX_BRIEF_CHARS",
     "MAP_MODES",
     "Brief",
     "BriefError",

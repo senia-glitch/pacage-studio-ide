@@ -25,6 +25,7 @@ export const S = {
   treeMode: "all",
   treeCollapsed: new Set(),
   treeCollapsedInit: false,
+  treeFreeInit: false,
   hideMeta: false,
   todoHighlight: false,
   mapView: {x: 30, y: 30, k: 1},
@@ -182,7 +183,7 @@ function uiSnapshot(){
     views:{map:S.mapView},
     positions:currentPositions(),
     nodeHeights:currentPositions(S.mapH),
-    tree:{open:S.treeOpen,width:Math.round(S.treeWidth),mode:S.treeMode,collapsed:[...S.treeCollapsed],init:S.treeCollapsedInit},
+    tree:{open:S.treeOpen,width:Math.round(S.treeWidth),mode:S.treeMode,collapsed:[...S.treeCollapsed],init:S.treeCollapsedInit,freeInit:S.treeFreeInit},
   };
 }
 function persistNow(){
@@ -236,6 +237,7 @@ function restoreUiState(saved){
     if(typeof tree.open==="boolean")S.treeOpen=tree.open;
     if(Number.isFinite(tree.width))S.treeWidth=Math.max(220,Math.min(520,tree.width));
     if(tree.mode==="all"||tree.mode==="fact"||tree.mode==="plan")S.treeMode=tree.mode;
+    if(typeof tree.freeInit==="boolean")S.treeFreeInit=tree.freeInit;
     if(Array.isArray(tree.collapsed)){
       for(const id of tree.collapsed)if(String(id))S.treeCollapsed.add(String(id));
       S.treeCollapsedInit=!!tree.init;

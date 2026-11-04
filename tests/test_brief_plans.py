@@ -8,7 +8,6 @@ import shutil
 from pathlib import Path
 
 from studio.agent import BriefOptions, build_brief, load_brief
-from studio.agent import brief as brief_module
 from studio.cli import main
 from studio.creator.plan import create_plan, update_plan
 from studio.env import read_env
@@ -121,14 +120,16 @@ def test_два_плана_и_старый_узел_вместе(tmp_path: Path)
     assert brief.tasks[0]["type"] == "plan"
 
 
-def test_усечение_по_лимиту(monkeypatch):
-    monkeypatch.setattr(brief_module, "MAX_BRIEF_CHARS", 1000)
-    warnings: list[str] = []
-    marker = "\n<!-- studio-brief:v2 {} -->\n"
-    body = brief_module._truncate_markdown("x" * 5000, marker, warnings)
-    assert "усечено" in body
-    assert len(body) + len(marker) <= 1000
-    assert any("ТЗ большое" in warning for warning in warnings)
+def test_большое_тз_не_обрезается(tmp_path: Path):
+    root = _project(tmp_path)
+    create_plan(
+        {**PLAN, "description": "имя задачи " * 12000},
+        read_env(root),
+    )
+    _graph, brief = _plan_brief(root, map_mode="none")
+    assert "усечено" not in brief.markdown
+    # содержимое огромной задачи присутствует целиком
+    assert brief.markdown.count("имя задачи") >= 12000
 
 
 def test_детерминизм_двух_сборок(tmp_path: Path):

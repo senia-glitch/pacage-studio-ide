@@ -95,15 +95,20 @@ function treeData(){
     const did=`@domain-plan:${d.id}`;
     if(!domainEntries.has(did)){synth.set(did,{id:did,kind:"domain",label:d.name,synthetic:true,planned:true,domainPlanId:d.id});subtreeKids.set(did,[])}
   }
+  // Узлы вне доменной структуры (нет родителя и это не эндпоинт) — один
+  // сворачиваемый раздел «Свободные узлы» в конце дерева.
+  const freeRoots=nodes.filter(n=>!hasParent.has(n.id)&&n.kind!=="endpoint").map(n=>n.id);
+  const freeSection=freeRoots.length?{id:"@free:",kind:"free",label:"Свободные узлы",synthetic:true,section:true}:null;
+  if(freeSection){synth.set(freeSection.id,freeSection);subtreeKids.set(freeSection.id,freeRoots)}
   const labelOf=id=>byId.get(id)||synth.get(id)||{id,kind:"",label:id};
   const byLabel=(a,b)=>String(labelOf(a).label||"").localeCompare(String(labelOf(b).label||""),"ru");
   for(const list of childMap.values())list.sort(byLabel);
   for(const list of subtreeKids.values())list.sort(byLabel);
   const kidsOf=id=>synth.has(id)?(subtreeKids.get(id)||[]):(childMap.get(id)||[]);
   /* Узел режима: само значение совпадает с выбранным режимом панели.
-     Каркасные синтетические узлы (домены, HTTP-методы) сами узлами режима
-     не считаются; плановые пометки (@change, переименования, плановые
-     домены) относятся к «план». */
+     Каркасные синтетические узлы (домены, HTTP-методы, раздел свободных
+     узлов) сами узлами режима не считаются; плановые пометки (@change,
+     переименования, плановые домены) относятся к «план». */
   const selfMatch=node=>{
     if(S.treeMode==="all")return true;
     const id=typeof node.id==="string"?node.id:"";
@@ -112,6 +117,7 @@ function treeData(){
       // каркас; плановый домен (переименование или новый) — часть «плана»
       return S.treeMode==="plan"&&node.planned===true;
     }
+    if(id.startsWith("@free:"))return false;
     if(marker)return S.treeMode==="plan";
     return S.treeMode==="fact"?!node.planned:!!node.planned;
   };
@@ -124,10 +130,10 @@ function treeData(){
     wanted.set(id,found);
     return found;
   };
-  // Корни: домены, затем отдельно стоящие плановые домены, затем узлы без родителя.
+  // Корни: домены, отдельно стоящие плановые домены, затем раздел «Свободные узлы».
   const roots=[...domainKeys];
   for(const d of S.G.planned_domains||[]){const did=`@domain-plan:${d.id}`;if(!domainEntries.has(did))roots.push(did)}
-  for(const n of nodes)if(!hasParent.has(n.id)&&n.kind!=="endpoint")roots.push(n.id);
+  if(freeSection)roots.push(freeSection.id);
   const rows=[];
   const walk=(id,depth,stack)=>{
     rows.push({id,depth,node:labelOf(id),kids:kidsOf(id)});
@@ -213,18 +219,28 @@ function ensureInitCollapsed(){
   for(const n of nodes)if(n.kind==="endpoint")S.treeCollapsed.add(n.id);
   schedulePersist();
 }
+/* Раздел «Свободные узлы» сворачивается по умолчанию; однажды увиденный
+   пользователем флаг запоминается, чтобы его выбор разворота сохранялся. */
+function ensureFreeSectionDefault(){
+  if(S.treeFreeInit)return;
+  S.treeFreeInit=true;
+  if(!S.treeCollapsed.has("@free:"))S.treeCollapsed.add("@free:");
+  schedulePersist();
+}
 function renderTree(){
   const body=$("treeBody");
   if(!body||!S.G)return;
   const keep=body.scrollTop;
   ensureInitCollapsed();
   const rows=treeData();
+  if(rows.some(row=>row.node.section))ensureFreeSectionDefault();
   const html=rows.map(row=>{
     const node=row.node,collapsed=S.treeCollapsed.has(row.id),leaf=!row.kids.length;
     const expanded=leaf?"":` aria-expanded="${collapsed?"false":"true"}"`;
-    return `<div class="tree-row${row.id===S.selectedNode?" sel":""}" role="treeitem" data-id="${esc(row.id)}" tabindex="0"${expanded} style="padding-left:${8+row.depth*13}px">`
-      +`<button type="button" class="tree-twist${leaf?" leaf":""}" tabindex="-1" title="${collapsed?"Развернуть потомков":"Свернуть потомков"}">${collapsed?"▸":"▾"}</button>`
-      +`<span class="tree-chip">${esc(kindLabel(node))}</span>`
+    const rowCls=node.section?" tree-section":"";
+    return `<div class="tree-row${rowCls}${row.id===S.selectedNode?" sel":""}" role="treeitem" data-id="${esc(row.id)}" tabindex="0"${expanded} style="padding-left:${8+row.depth*13}px">`
+      +`<button type="button" class="tree-twist${leaf?" leaf":""}" tabindex="-1" title="${collapsed?"Развернуть":"Свернуть"}">${collapsed?"▸":"▾"}</button>`
+      +(node.section?"":`<span class="tree-chip">${esc(kindLabel(node))}</span>`)
       +(node.planned?'<span class="chip todo">план</span>':"")
       +`<span class="t" title="${esc(node.label||"")}">${esc(node.label||"")}</span></div>`;
   });
@@ -263,6 +279,13 @@ function initTreeModes(){
 function initTree(){
   applyPanelState();
   initTreeModes();
+  $("treeFoldAll")?.addEventListener("click",()=>{
+    let folded=false;
+    for(const row of treeData())
+      if(row.depth>0&&row.kids.length&&!row.node.section&&!S.treeCollapsed.has(row.id)){S.treeCollapsed.add(row.id);folded=true}
+    if(!folded)return;
+    schedulePersist();renderTree();
+  });
   $("treeCollapse")?.addEventListener("click",()=>{S.treeOpen=false;applyPanelState();schedulePersist()});
   $("treeTab")?.addEventListener("click",()=>{S.treeOpen=true;applyPanelState();schedulePersist()});
   const resize=$("treeResize");
@@ -283,14 +306,17 @@ function initTree(){
       if(!rowEl)return;
       const id=rowEl.dataset.id;
       if(!id)return;
-      if(ev.target.closest(".tree-twist")&&!ev.target.closest(".tree-twist").classList.contains("leaf")){toggleCollapsed(id);return}
+      const twist=ev.target.closest(".tree-twist");
+      if(rowEl.classList.contains("tree-section")||(twist&&!twist.classList.contains("leaf"))){toggleCollapsed(id);return}
       openNode(id);
     });
     body.addEventListener("keydown",ev=>{
       if((ev.key!=="Enter"&&ev.key!==" ")||ev.target!==ev.target.closest?.(".tree-row"))return;
       ev.preventDefault();
       const id=ev.target.dataset.id;
-      if(id)openNode(id);
+      if(!id)return;
+      if(ev.target.classList.contains("tree-section"))toggleCollapsed(id);
+      else openNode(id);
     });
   }
   const canvas=$("mapCanvas");

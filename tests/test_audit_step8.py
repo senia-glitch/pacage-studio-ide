@@ -11,7 +11,7 @@ import pytest
 
 from studio._atomic import atomic_write
 from studio.agent import BriefError, BriefOptions, build_brief, save_brief
-from studio.agent.brief import MAX_BRIEF_CHARS, _truncate_markdown, redact_sample
+from studio.agent.brief import redact_sample
 from studio.agent.verify import verify_task
 from studio.creator.plan import _rollback, create_plan
 from studio.env import read_env
@@ -519,14 +519,10 @@ def test_тз_без_обратных_слэшей_и_абсолютных_пу�
     assert str(demo) not in brief.markdown
 
 
-def test_усечение_не_рвёт_блок_кода():
-    body = "начало\n" * 20000 + "```python\n" + "x = 1\n" * 3000 + "```\nконец\n"
-    warnings: list[str] = []
-    result = _truncate_markdown(body, "M" * 100, warnings)
-    assert result.count("```") % 2 == 0
-    assert "ТЗ усечено" in result
-    assert len(result) <= MAX_BRIEF_CHARS
-    assert warnings
+def test_тз_не_обрезается_и_маленькое_без_предупреждений(demo: Path):
+    _graph, brief = _brief(demo)
+    assert "усечено" not in brief.markdown
+    assert not any("ТЗ большое" in warning for warning in brief.warnings)
 
 
 # ------------------------------------------------------- 13. save_brief path
