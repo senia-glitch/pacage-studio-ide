@@ -73,6 +73,73 @@ ${task}
 """
 
 
+_PROMPT_IMPROVE_TEMPLATE = """# Роль
+Ты помогаешь развивать существующий проект на стеке
+fastbase / core-package / event-infra / pacage-studio:
+придумываешь НОВЫЕ бизнес-сценарии — следующие фичи системы.
+Ты НЕ пишешь код. Ты только обсуждаешь декомпозицию и в конце отдаёшь JSON.
+
+## Стек (не выдумывай пакетов и библиотек сверх этого)
+- fastbase      — HTTP-транспорт: APIRouter, middleware, конверт ошибок.
+                  Роуты в пакете `${routes_package}` под префиксом `${api_prefix}`.
+- core-package  — бизнес-логика в сценариях `@register_scenario`.
+                  Пакет со сценариями: `${core_discover}`.
+- event-infra   — PostgreSQL: пулы, CRUD через `self._db.<method>`, миграции.
+                  Модели: `${models}`.
+- pacage-studio — этот инструмент: карта кода, планы, ТЗ, проверка.
+
+Правила слоёв:
+- endpoint (fastbase) -> scenario (core) -> io (self._db.method) -> model (event-infra)
+- один HTTP-эндпоинт = одна цепочка
+- io — только через self._db.<method> внутри execute()
+- модель — SQLModel с __tablename__
+
+## Система уже существует — это точка отсчёта, её не повторять
+Эндпоинты: ${endpoints}
+Сценарии:  ${scenarios}
+Модели:    ${models_list}
+Планы:     ${plans}
+
+## Правила декомпозиции (режим развития)
+1. Сначала задай не более 5 уточняющих вопросов, если задача
+   неоднозначна. Финальный JSON — только после подтверждения.
+2. Придумывай ТОЛЬКО новые возможности: сценарии не должны дублировать
+   существующие эндпоинты и цепочки — они расширяют систему
+   (новые операции над существующими сущностями, недостающие шаги
+   существующих процессов, связки между доменами, новые роли и отчёты).
+3. Опираться на существующие модели и домены можно и нужно —
+   это развитие, а не переписывание.
+4. Один HTTP-эндпоинт = одна цепочка. Не дроби «слой = сценарий».
+5. Поля моделей и SQL не выдумывай — их определит AI-агент
+   на этапе `studio brief`.
+6. Если сценарий не трогает БД — uses_db: false.
+
+## Формат финального ответа
+Когда пользователь подтвердил декомпозицию — отдай ОДИН JSON-блок:
+
+```json
+{"scenarios": [{
+  "title": "…",
+  "slug": "…",
+  "description": "…",
+  "acceptance": ["…"],
+  "domain": "…",
+  "http_method": "post",
+  "path": "/…",
+  "uses_db": true,
+  "with_test": true
+}]}
+```
+
+Все поля обязательны, кроме slug (если пусто — выведется из title).
+http_method — один из: get, post, put, patch, delete, "".
+В финальном сообщении — только JSON-блок, без комментариев.
+
+## Задача пользователя
+${task}
+"""
+
+
 def _models_value(env: ProjectEnv) -> str:
     """Модели: STUDIO_MODELS, либо имена файлов, иначе `models.py`."""
     if env.models_spec:
@@ -146,7 +213,7 @@ def _plan_lines(graph: Graph) -> list[str]:
     return out
 
 
-def build_decompose_prompt(graph: Graph, env: ProjectEnv, task: str) -> str:
+def build_decompose_prompt(graph: Graph, env: ProjectEnv, task: str, mode: str = "new") -> str:
     """Собрать Markdown-промпт декомпозиции по графу, окружению и задаче."""
     replacements = {
         "${routes_package}": env.routes_package,
@@ -159,22 +226,27 @@ def build_decompose_prompt(graph: Graph, env: ProjectEnv, task: str) -> str:
         "${plans}": _facts_block(_plan_lines(graph)),
         "${task}": task,
     }
-    text = load_decompose_template(Path(graph.project_root))
+    text = load_decompose_template(Path(graph.project_root), mode)
     for placeholder, value in replacements.items():
         text = text.replace(placeholder, value)
     return text
 
 
-def decompose_override_path(project_root: Path | None) -> Path | None:
-    """Файл переопределения шаблона промпта внутри проекта (.studio/prompts/decompose-prompt.md)."""
+def decompose_override_path(project_root: Path | None, mode: str = "new") -> Path | None:
+    """Файл переопределения шаблона промпта внутри проекта (.studio/prompts/…)."""
     if project_root is None:
         return None
-    return Path(project_root) / ".studio" / "prompts" / "decompose-prompt.md"
+    name = "decompose-improve.md" if mode == "improve" else "decompose-prompt.md"
+    return Path(project_root) / ".studio" / "prompts" / name
 
 
-def load_decompose_template(project_root: Path | None = None) -> str:
+def standard_decompose_template(mode: str = "new") -> str:
+    return _PROMPT_IMPROVE_TEMPLATE if mode == "improve" else _PROMPT_TEMPLATE
+
+
+def load_decompose_template(project_root: Path | None = None, mode: str = "new") -> str:
     """Шаблон промпта декомпозиции: переопределение проекта, иначе шаблон пакета."""
-    override = decompose_override_path(project_root)
+    override = decompose_override_path(project_root, mode)
     if override is not None:
         try:
             text = override.read_text(encoding="utf-8")
@@ -182,11 +254,7 @@ def load_decompose_template(project_root: Path | None = None) -> str:
                 return text
         except (OSError, UnicodeDecodeError):
             pass
-    return _PROMPT_TEMPLATE
-
-
-def standard_decompose_template() -> str:
-    return _PROMPT_TEMPLATE
+    return standard_decompose_template(mode)
 
 
 __all__ = ["build_decompose_prompt"]

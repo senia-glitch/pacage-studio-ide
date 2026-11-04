@@ -154,7 +154,7 @@ def test_decompose_prompt_метод(demo: Path, monkeypatch) -> None:
     state = ProjectState(demo)
     state.graph = Graph(version=7)
     state.ensure_graph = lambda: state.graph
-    monkeypatch.setattr(state_mod, "build_decompose_prompt", lambda graph, env, task: "P:" + task)
+    monkeypatch.setattr(state_mod, "build_decompose_prompt", lambda graph, env, task, mode="new": "P:" + task)
     assert state.decompose_prompt({"task": "  x  "}) == {"prompt": "P:x"}
     with pytest.raises(MetadataError) as exc:
         state.decompose_prompt({"task": "  "})

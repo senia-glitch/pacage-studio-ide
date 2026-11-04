@@ -333,6 +333,8 @@ def make_handler(ctx):
                 return self._json(state.save_prompt(data))
             if url.path == "/api/ideas":
                 return self._json(state.save_ideas(data))
+            if url.path == "/api/sync/prompt":
+                return self._json(state.sync_prompt(data))
             if url.path == "/api/metadata/graph-node/restore":
                 return self._json(state.restore_graph_node(data))
             if url.path == "/api/decompose/prompt":

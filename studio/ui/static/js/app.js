@@ -9,6 +9,7 @@ import {openDiagnostics, updateDiagBadge} from "./diagnosticsview.js";
 import {renderInspector} from "./inspectorview.js";
 import {renderMap} from "./mapview.js";
 import {initIdeas, renderIdeas} from "./ideaview.js";
+import {initSync} from "./syncview.js";
 import {renderSettings} from "./settingsview.js";
 import {bindViewport, fitView} from "./viewport.js";
 
@@ -34,6 +35,7 @@ async function boot(){
   }catch(_){ }
   initUiStorage();
   initIdeas();
+  initSync();
   initEditorChoice();
   document.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
   bindViewport("mapCanvas",S.mapView,()=>applyTransform("mapView",S.mapView));

@@ -68,7 +68,7 @@ async function attachScenarioToMethod(node,methodNode,choices){
       S.mapPos.delete(node.id);
       hooks.renderMap();
       toast(`Сценарий «${node.label}» прикреплён к ветке эндпоинта`);
-    }catch(error){window.__attachErr=String(error&&error.message||error);toast("Не удалось прикрепить сценарий: "+error.message)}
+    }catch(error){toast("Не удалось прикрепить сценарий: "+error.message)}
   };
   if(choices.length===1){await attach(choices[0].id);return}
   const options=choices.map(choice=>({label:choice.label,action:()=>attach(choice.id)}));
@@ -90,6 +90,7 @@ function model(){
   const effectiveDomains=n=>String(n.domain||"").split(",").map(value=>value.trim()).filter(Boolean).map(domain=>S.mapMode==="plan"&&S.G.domain_changes?.[domain]?.name||domain);
   // Карта доменов: домен — стартовая точка, под ним его HTTP-методы,
   // под методами — эндпоинты этого метода и домена.
+  const rawNodeCount=nodes.length;
   const domainEntries=new Map();
   for(const endpoint of nodes.filter(n=>n.kind==="endpoint")){
     const method=methodOfEndpoint(endpoint)||"Метод не указан";
@@ -182,6 +183,7 @@ function model(){
       viewEdges.push({from_node:parentEntry.viewId,to_node:newViewId,kind:"uses",label:"",planned:true});
     }
   }
+  window.__modelDbg={raw:rawNodeCount,viewNodes:viewNodes.length,viewEdges:viewEdges.length,domains:domainKeys.map(k=>domainEntries.get(k).label+"|"+(domainEntries.get(k).methods.size)+"м")};
   return {nodes:viewNodes,edges:viewEdges,selectedViews};
 }
 function visibleClass(node){

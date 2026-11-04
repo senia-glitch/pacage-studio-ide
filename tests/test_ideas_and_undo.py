@@ -95,3 +95,23 @@ def test_перезакрепление_сценария_заменяет_дис
     ]
     assert len(dispatches) == 1
     assert dispatches[0]["from"] == endpoint_b
+
+
+def test_режим_развития_даёт_другой_промпт(tmp_path: Path):
+    state = _state(tmp_path)
+    new = state.decompose_prompt({"task": "Придумай фичу"})["prompt"]
+    improve = state.decompose_prompt({"task": "Придумай фичу", "mode": "improve"})["prompt"]
+    assert "разбить задачу" in new
+    assert "развивать существующий проект" in improve
+    assert new != improve
+
+
+def test_синхронизация_области_и_плановые_исключены(tmp_path: Path):
+    state = _state(tmp_path)
+    state.save_graph_node({"kind": "endpoint", "name": "Плановый ЭП", "description": "План"})["node_id"]
+    all_prompt = state.sync_prompt({"scope": "all"})["markdown"]
+    assert "Плановый ЭП" not in all_prompt
+    assert "Сценарий создания заказа" in all_prompt
+    unready = state.sync_prompt({"scope": "unready"})["markdown"]
+    assert "Сценарий создания заказа" not in unready
+    assert "В выбранной области нет узлов" in unready or "таблица" not in unready

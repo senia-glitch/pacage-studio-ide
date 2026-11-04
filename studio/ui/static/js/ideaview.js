@@ -7,6 +7,7 @@ let board = EMPTY;
 let persistTimer = null;
 let loadedKey = "";
 let lifecycleBound = false;
+let promptMode = "new";
 /* Отмена действий: снапшоты доски перед деструктивными операциями. */
 const undoStack = [];
 let syncTimer = null;
@@ -79,6 +80,7 @@ function load(){
   loadedKey=key();
   try{board=normalizeBoard(JSON.parse(localStorage.getItem(loadedKey)||"null"))}
   catch(_){board=clone(EMPTY)}
+  try{promptMode=localStorage.getItem(loadedKey+":promptMode")==="improve"?"improve":"new"}catch(_){promptMode="new"}
 }
 /* Серверная доска авторитетна: подгружаем её при первой загрузке вкладки.
    Если в проекте доски ещё нет, а локальная есть — переносим её в .studio. */
@@ -182,7 +184,7 @@ function card(idea){
       <div class="node-kicker"><span class="node-dot"></span> ИДЕЯ <span class="node-state">Корень ветки</span><button type="button" class="icon-button danger" data-delete-idea="${esc(idea.id)}" title="Удалить идею">×</button></div>
       <input class="idea-title" data-idea-title="${esc(idea.id)}" value="${esc(idea.title)}" aria-label="Название идеи">
       <label class="idea-field-label">ЗАДАЧА / ИДЕЯ<textarea data-idea-description="${esc(idea.id)}" rows="4" placeholder="Какую потребность или проблему нужно решить?">${esc(idea.description)}</textarea></label>
-      <div class="idea-node-actions"><button type="button" class="primary" data-generate-prompt="${esc(idea.id)}">✦ Собрать промпт</button><button type="button" data-copy-prompt="${esc(idea.id)}" ${promptIsFresh?"":"disabled"}>Копировать</button><span class="prompt-freshness ${promptIsFresh?"fresh":idea.prompt?"stale":""}" data-prompt-state="${esc(idea.id)}">${promptIsFresh?"Актуален":idea.prompt?"Устарел":""}</span></div>
+      <div class="idea-node-actions"><select class="prompt-mode" data-prompt-mode="${esc(idea.id)}" title="Режим сборки промпта"><option value="new"${promptMode==="new"?" selected":""}>Новая система</option><option value="improve"${promptMode==="improve"?" selected":""}>Развитие системы</option></select><button type="button" class="primary" data-generate-prompt="${esc(idea.id)}">✦ Собрать промпт</button><button type="button" data-copy-prompt="${esc(idea.id)}" ${promptIsFresh?"":"disabled"}>Копировать</button><span class="prompt-freshness ${promptIsFresh?"fresh":idea.prompt?"stale":""}" data-prompt-state="${esc(idea.id)}">${promptIsFresh?"Актуален":idea.prompt?"Устарел":""}</span></div>
       <details class="idea-prompt-details"><summary>Промпт для LLM</summary><textarea data-idea-prompt="${esc(idea.id)}" rows="7" readonly placeholder="Соберите промпт на основе идеи">${esc(idea.prompt)}</textarea></details>
       <div class="idea-json-head"><label class="idea-field-label">ОТВЕТ LLM · JSON</label><button type="button" class="text-button" data-import-json="${esc(idea.id)}">Разобрать сценарии ↓</button></div>
       <textarea class="idea-json" data-idea-json="${esc(idea.id)}" rows="7" placeholder='Вставьте JSON с массивом "scenarios"'>${esc(idea.jsonText)}</textarea>
@@ -213,6 +215,7 @@ function render(){
   boardEl.querySelectorAll("[data-delete-idea]").forEach(el=>el.onclick=()=>{if(!confirm("Удалить идею вместе со всеми сценариями?"))return;pushUndo();board.ideas=board.ideas.filter(x=>x.id!==el.dataset.deleteIdea);if(board.activeId===el.dataset.deleteIdea)board.activeId=board.ideas[0]?.id||"";render();save()});
   boardEl.querySelectorAll("[data-delete-scenario]").forEach(el=>el.onclick=()=>{const idea=find(el.closest("[data-idea]").dataset.idea);if(!idea)return;pushUndo();idea.scenarios=idea.scenarios.filter(x=>x.id!==el.dataset.deleteScenario);idea.payload=payloadFor(idea);idea.jsonText=JSON.stringify(idea.payload,null,2);render();save();toast("Сценарий удалён из ветки и JSON")});
   boardEl.querySelectorAll("[data-to-plan]").forEach(el=>el.onclick=()=>sendToConstructor(el));
+  boardEl.querySelectorAll("[data-prompt-mode]").forEach(el=>el.onchange=()=>{promptMode=el.value;try{localStorage.setItem(loadedKey+":promptMode",promptMode)}catch(_){}});
   boardEl.querySelectorAll("[data-generate-prompt]").forEach(el=>el.onclick=()=>generatePrompt(el.dataset.generatePrompt,el));
   boardEl.querySelectorAll("[data-copy-prompt]").forEach(el=>el.onclick=()=>copy(find(el.dataset.copyPrompt)?.prompt||""));
   boardEl.querySelectorAll("[data-import-json]").forEach(el=>el.onclick=()=>importJson(el.dataset.importJson));
@@ -289,7 +292,7 @@ function updateRail(){const list=$("ideaList");if(!list)return;list.querySelecto
 async function generatePrompt(ideaId,button){
   const idea=find(ideaId);if(!idea)return;if(!idea.description.trim()){toast("Сначала опишите идею");return}
   button.disabled=true;button.textContent="Собираю…";
-  try{const data=await api("/api/decompose/prompt","POST",{task:`${idea.title}\n\n${idea.description}`});idea.prompt=data.prompt||"";idea.promptBasis=promptBasis(idea);render();save();toast("Промпт готов")}
+  try{const data=await api("/api/decompose/prompt","POST",{task:`${idea.title}\n\n${idea.description}`,mode:promptMode});idea.prompt=data.prompt||"";idea.promptBasis=promptBasis(idea);render();save();toast("Промпт готов")}
   catch(error){toast("Не удалось собрать промпт: "+error.message);button.disabled=false;button.textContent="✦ Собрать промпт"}
 }
 function importJson(ideaId){

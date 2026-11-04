@@ -508,6 +508,10 @@ body[data-active-tab="ideas"] .header-canvas .zoom-tools { display: none; }
 .prompt-editor textarea:focus { border-color:#4a7dab; outline:none; }
 .prompt-actions { display:flex; align-items:center; gap:9px; }
 .prompt-actions [data-role="saved"] { color:#8fd6a5; }
+
+.prompt-mode { padding:3px 6px; border:1px solid #343943; border-radius:6px; background:#10151b; color:#c9d6e2; font-size:10.5px; }
+.idea-node-actions select.prompt-mode { margin-right:6px; }
+.sync-dialog-note { color:#9fadb9; }
 .planned-note { color:#ebcc68; }
 .mapbar .map-mode-caption { font-weight:650; color:#d5deea; }
 .ideas-toolbar h2 { margin:4px 0 3px; color:#edf3fa; font-size:20px; font-weight:650; letter-spacing:-.025em; }

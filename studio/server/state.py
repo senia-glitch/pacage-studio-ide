@@ -31,6 +31,7 @@ from studio.agent.decompose import (
     load_decompose_template,
     standard_decompose_template,
 )
+from studio.agent.sync import build_sync_prompt
 from studio.creator import CreateError
 from studio.creator.plan import create_plan, delete_plan, preview_plan, update_plan
 from studio.env import read_env
@@ -506,15 +507,17 @@ class ProjectState:
             task = raw.strip() if isinstance(raw, str) else ""
             if not task:
                 raise MetadataError("invalid_input", "Нужен текст задачи")
+            mode = "improve" if data.get("mode") == "improve" else "new"
             env = read_env(self.root)
             self.ensure_graph()
-            return {"prompt": build_decompose_prompt(self.graph, env, task)}
+            return {"prompt": build_decompose_prompt(self.graph, env, task, mode)}
 
     # -------------------------------------------------- шаблонные промпты
 
     _PROMPT_PATHS = {
         "rules": ".studio/prompts/rules.md",
         "decompose": ".studio/prompts/decompose-prompt.md",
+        "decompose-improve": ".studio/prompts/decompose-improve.md",
     }
 
     # ------------------------------------------------------------- идеи
@@ -548,14 +551,29 @@ class ProjectState:
         tmp.replace(path)
         return {"ok": True, "count": len(data["ideas"])}
 
+    # ------------------------------------------------- синхронизация описаний
+
+    def sync_prompt(self, data: dict) -> dict:
+        with self.lock:
+            graph = self.ensure_graph()
+            scope = str(data.get("scope") or "all")
+            domain = str(data.get("domain") or "")
+            markdown = build_sync_prompt(graph, scope, domain)
+            return {"markdown": markdown}
+
     def prompts_state(self) -> dict:
         root = Path(self.root)
         states = {
             "rules": (load_rules(root), standard_rules(), rules_override_path(root)),
             "decompose": (
-                load_decompose_template(root),
-                standard_decompose_template(),
-                decompose_override_path(root),
+                load_decompose_template(root, "new"),
+                standard_decompose_template("new"),
+                decompose_override_path(root, "new"),
+            ),
+            "decompose-improve": (
+                load_decompose_template(root, "improve"),
+                standard_decompose_template("improve"),
+                decompose_override_path(root, "improve"),
             ),
         }
         return {
