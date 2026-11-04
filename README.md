@@ -10,6 +10,30 @@ endpoint (fastbase) → scenario (core-package) → io → model (event-infra)
 Существующий код не изменяется. Описания, критерии, домены, связи и планируемые узлы живут в
 `.studio/metadata.json`; сканер только читает проект.
 
+## Установка полного стека
+
+Четыре пакета стека: `pacage-studio` (этот инструмент), `fastbase` (HTTP-транспорт),
+`core-package` (бизнес-сценарии), `event-infra` (PostgreSQL + SQLModel).
+
+```powershell
+python -m pip install "core-package @ git+https://github.com/senia-glitch/core-package.git"
+python -m pip install "event-infra @ git+https://github.com/senia-glitch/event-infra.git"
+python -m pip install "fastbase[full] @ git+https://github.com/senia-glitch/fastapi-transport.git"
+python -m pip install "pacage-studio @ git+https://github.com/senia-glitch/pacage-studio-ide.git"
+```
+
+`fastbase` также ставится одной командой из студии — `studio install-full`.
+
+## Инициализация проекта
+
+В корне проекта — файл `.env.fastbase` (ключи: `FAT_ROUTES_PACKAGE`,
+`FAT_CORE_DISCOVER`, `FAT_API_PREFIX`, `STUDIO_MODELS`), затем:
+
+```powershell
+studio doctor     # проверка источников и окружения
+studio            # автоскан + интерфейс в браузере
+```
+
 ## Команды
 
 ```bash
