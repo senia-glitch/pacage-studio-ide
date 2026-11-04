@@ -127,6 +127,107 @@ def test_дубль_якоря_жёлтый(tmp_path: Path):
     assert all(any(note["code"] == "W_DUP_ANCHOR" for note in node.notes) for node in nodes)
 
 
+def test_bind_параметры_не_считаются_таблицами(tmp_path: Path):
+    _base(tmp_path)
+    _write(
+        tmp_path,
+        "models.py",
+        "from sqlmodel import SQLModel\n\n"
+        "class Lesson(SQLModel, table=True):\n    __tablename__='lessons'\n",
+    )
+    _write(
+        tmp_path,
+        "app/scenarios/s.py",
+        "from core import BaseScenario, register_scenario\n\n"
+        '@register_scenario("s")\n'
+        "class S(BaseScenario):\n"
+        "    async def execute(self):\n"
+        "        await self._db.query(\n"
+        "            'SELECT * FROM lessons WHERE t >= :from AND t < :to'\n"
+        "        )\n",
+    )
+    graph = scan(tmp_path)
+    io = next(node for node in graph.nodes if node.kind == "io")
+    assert io.details["tables"] == ["lessons"]
+    assert not any(note["code"] == "W_TABLE_UNKNOWN" for note in io.notes)
+    assert not any(item.code == "W_TABLE_UNKNOWN" for item in graph.diagnostics)
+
+
+def test_общий_nested_элемент_не_дубль(tmp_path: Path):
+    _write(tmp_path, "app/utils/money.py", "def calc_total(x):\n    return x\n")
+    _write(
+        tmp_path,
+        "app/scenarios/share.py",
+        "from core import BaseScenario, register_scenario\n"
+        "from app.utils.money import calc_total\n\n\n"
+        "def _decide(x):\n"
+        "    return calc_total(x)\n\n\n"
+        '@register_scenario("s")\n'
+        "class S(BaseScenario):\n"
+        "    async def execute(self):\n"
+        "        await self._helper()\n"
+        "        _decide(1)\n"
+        "        calc_total(2)\n\n"
+        "    async def _helper(self):\n"
+        "        pass\n\n\n"
+        '@register_scenario("s2")\n'
+        "class S2(BaseScenario):\n"
+        "    async def execute(self):\n"
+        "        await self._helper2()\n"
+        "        _decide(1)\n"
+        "        calc_total(2)\n\n"
+        "    async def _helper2(self):\n"
+        "        pass\n",
+    )
+    graph = scan(tmp_path)
+    nested = [node for node in graph.nodes if node.kind == "nested"]
+    # 3 роли (method, function, module) × 2 родителя: один физический
+    # элемент кода (функция _decide, импорт app.utils.money) даёт по узлу
+    # на родителя с одним якорем и позицией — но это не дубль кода.
+    assert len(nested) == 6
+    assert not any(item.code == "W_DUP_ANCHOR" for item in graph.diagnostics)
+
+
+def test_одноимённые_эндпоинты_разных_роутеров_не_дубль(tmp_path: Path):
+    _write(
+        tmp_path,
+        "app/api/v1/routes/student.py",
+        "from fastapi import APIRouter\n"
+        "router = APIRouter(prefix='/student')\n\n\n"
+        '@router.get("/a")\n'
+        "async def get_my_lessons():\n"
+        "    return 1\n",
+    )
+    _write(
+        tmp_path,
+        "app/api/v1/routes/tutor.py",
+        "from fastapi import APIRouter\n"
+        "router = APIRouter(prefix='/tutor')\n\n\n"
+        '@router.get("/a")\n'
+        "async def get_my_lessons():\n"
+        "    return 1\n",
+    )
+    graph = scan(tmp_path)
+    endpoints = [node for node in graph.nodes if node.kind == "endpoint"]
+    assert len(endpoints) == 2
+    assert not any(item.code == "W_DUP_ANCHOR" for item in graph.diagnostics)
+
+
+def test_одноимённые_эндпоинты_одного_маршрута_дубль(tmp_path: Path):
+    for name in ("a", "b"):
+        _write(
+            tmp_path,
+            f"app/api/v1/routes/{name}.py",
+            "from fastapi import APIRouter\n"
+            "router = APIRouter()\n\n\n"
+            '@router.get("/a")\n'
+            "async def get_my_lessons():\n"
+            "    return 1\n",
+        )
+    graph = scan(tmp_path)
+    assert any(item.code == "W_DUP_ANCHOR" for item in graph.diagnostics)
+
+
 def test_неразрешённый_импорт_жёлтый(tmp_path: Path):
     _base(tmp_path)
     _write(

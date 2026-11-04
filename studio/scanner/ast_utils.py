@@ -28,6 +28,17 @@ _STRUCTURED_SQL_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# Именованные bind-параметры: :name и %(name)s (стили SQLAlchemy/psycopg2).
+# Вырезаются перед поиском таблиц: иначе имя параметра, совпавшее с
+# ключевым словом (:from, :join, %(to)s...), сработает как FROM/JOIN и
+# «съест» следующее слово — обычно AND — как имя таблицы.
+_BIND_PARAM_RE = re.compile(
+    r""": [A-Za-z_][A-Za-z0-9_]*
+        | %\([^)]*\)s
+    """,
+    re.VERBOSE,
+)
+
 
 @dataclass
 class IOCall:
@@ -277,6 +288,7 @@ def extract_tables_from_sql(sql: str | None) -> list[str]:
     if not sql:
         return []
     text = strip_sql_comments(sql)
+    text = _BIND_PARAM_RE.sub(" ", text)
     out: list[str] = []
     for match in _STRUCTURED_SQL_RE.finditer(text):
         table = match.group(2)

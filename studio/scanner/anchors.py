@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from itertools import combinations
 
 from studio.diagnostics import Sink, mark_node
-from studio.metamodel import Graph, GraphBuilder, node_anchor
+from studio.metamodel import Graph, GraphBuilder, Node, node_anchor
 
 
 class AnchorResolver:
@@ -74,8 +75,17 @@ def resolve_anchor_text(
     return AnchorResolver(graph).resolve(text, prefer_file)
 
 
+def _endpoint_route_key(node: Node) -> tuple[str, str]:
+    """Маршрут эндпоинта: (url_path, http_method)."""
+    details = node.details or {}
+    return (
+        str(details.get("url_path") or ""),
+        str(details.get("http_method") or ""),
+    )
+
+
 def add_duplicate_anchor_diagnostics(builder: GraphBuilder, sink: Sink) -> None:
-    by_anchor: dict[str, list] = defaultdict(list)
+    by_anchor: dict[str, list[Node]] = defaultdict(list)
     for node in builder._nodes.values():
         anchor = node_anchor(node)
         if anchor:
@@ -83,15 +93,33 @@ def add_duplicate_anchor_diagnostics(builder: GraphBuilder, sink: Sink) -> None:
     for anchor, nodes in sorted(by_anchor.items()):
         if len(nodes) < 2:
             continue
-        first = nodes[0]
-        for node in nodes[1:]:
+        # Nested-узлы создаются по одному на каждого родителя: один
+        # физический элемент кода (функция того же файла или импорт одного
+        # модуля, используемые из разных сценариев) даёт несколько узлов
+        # с одним и тем же якорем и позицией file:line. Это не дубль.
+        by_location: dict[tuple[str, int], list[Node]] = defaultdict(list)
+        for node in nodes:
+            by_location[(node.file_path, node.line)].append(node)
+        locations = sorted(by_location)
+        if len(locations) < 2:
+            continue
+        for left, right in combinations(locations, 2):
+            a, b = by_location[left], by_location[right]
+            if (
+                a[0].kind == "endpoint"
+                and b[0].kind == "endpoint"
+                and _endpoint_route_key(a[0]) != _endpoint_route_key(b[0])
+            ):
+                # Одноимённые обработчики в разных роутерах ведут на разные
+                # URL и разным сценариям — различимы и не являются дублем.
+                continue
             message = (
                 f"Якорь {anchor!r} есть у двух узлов: "
-                f"{first.file_path}:{first.line} и {node.file_path}:{node.line}"
+                f"{a[0].file_path}:{a[0].line} и {b[0].file_path}:{b[0].line}"
             )
             hint = "Связи из metadata.json требуют path::anchor для однозначности."
-            mark_node(first, sink, "W_DUP_ANCHOR", message, hint=hint)
-            mark_node(node, sink, "W_DUP_ANCHOR", message, hint=hint)
+            for node in (*a, *b):
+                mark_node(node, sink, "W_DUP_ANCHOR", message, hint=hint)
 
 
 __all__ = [

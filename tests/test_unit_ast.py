@@ -119,6 +119,15 @@ def test_sql_and_class_helpers() -> None:
         'SELECT * FROM "users" JOIN public.orders ON 1 UPDATE logs INTO out DELETE FROM old'
     ) == ["users", "orders", "logs", "out", "old"]
     assert ast_utils.extract_tables_from_sql("SELECT 1") == []
+    assert ast_utils.extract_tables_from_sql(
+        "SELECT * FROM lessons WHERE t >= :from AND t < :to"
+    ) == ["lessons"]
+    assert ast_utils.extract_tables_from_sql(
+        "UPDATE lessons SET x = :to WHERE id = :id AND k = %(limit)s"
+    ) == ["lessons"]
+    assert ast_utils.extract_tables_from_sql(
+        "DELETE FROM lessons WHERE t >= :from AND t < :to"
+    ) == ["lessons"]
     tree = _parse("def f(): pass\nclass C(Base, pkg.Other):\n    x: int\n")
     assert ast_utils.find_top_level_function(tree, "f") is not None
     assert ast_utils.find_top_level_function(tree, "g") is None
