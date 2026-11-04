@@ -120,6 +120,10 @@ def load_source(root: Path, path: Path) -> SourceFile:
 
     text = decoded.replace("\r\n", "\n").replace("\r", "\n")
     lines = text.splitlines()
+    # Отпечаток должен быть одинаков и в LF-, и в CRLF-чекаутах: git на
+    # Windows может отдать одни и те же файлы с разными переводами строк,
+    # а хэш по сырым байтам сделал бы значения отпечатков зависимыми от ОС.
+    sha1 = hashlib.sha1(text.encode("utf-8")).hexdigest()
 
     try:
         tree = ast.parse(text, filename=str(path))

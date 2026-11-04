@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import runpy
 from pathlib import Path
@@ -167,6 +168,15 @@ def test_source_bom_crlf_and_quarantine(tmp_path: Path) -> None:
     assert src.error is None
     assert src.text == "x = 1\ny = 2\n"
     assert src.tree is not None and src.sha1
+    # Отпечаток по нормализованному тексту, не по сырым байтам — иначе он
+    # зависит от того, отдал ли git файлы с CRLF (Windows-чекаут назыв).
+    assert src.sha1 == hashlib.sha1(b"x = 1\ny = 2\n").hexdigest()
+    tail = tmp_path / "tail.py"
+    tail.write_bytes(b"z = 1\n")
+    lf_sha1 = load_source(tmp_path, tail).sha1
+    tail.write_bytes(b"z = 1\r\n")
+    crlf_sha1 = load_source(tmp_path, tail).sha1
+    assert lf_sha1 == crlf_sha1
     bad = tmp_path / "bad.py"
     bad.write_bytes(b"\xff\xfe")
     assert load_source(tmp_path, bad).error.code == "E_ENCODING"
