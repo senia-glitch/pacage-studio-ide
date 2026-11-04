@@ -20,6 +20,11 @@ export const S = {
   mapViewNodes: {},
   inspectorOpen: true,
   inspectorWidth: 340,
+  treeOpen: true,
+  treeWidth: 280,
+  treeMode: "all",
+  treeCollapsed: new Set(),
+  treeCollapsedInit: false,
   hideMeta: false,
   todoHighlight: false,
   mapView: {x: 30, y: 30, k: 1},
@@ -177,6 +182,7 @@ function uiSnapshot(){
     views:{map:S.mapView},
     positions:currentPositions(),
     nodeHeights:currentPositions(S.mapH),
+    tree:{open:S.treeOpen,width:Math.round(S.treeWidth),mode:S.treeMode,collapsed:[...S.treeCollapsed],init:S.treeCollapsedInit},
   };
 }
 function persistNow(){
@@ -224,6 +230,16 @@ function restoreUiState(saved){
   for(const [key,value] of Object.entries(saved.nodeHeights||{})){
     if(!Number.isFinite(value))continue;
     S.mapH.set(key,Math.max(126,Math.min(460,Math.round(value))));
+  }
+  const tree=saved.tree&&typeof saved.tree==="object"?saved.tree:null;
+  if(tree){
+    if(typeof tree.open==="boolean")S.treeOpen=tree.open;
+    if(Number.isFinite(tree.width))S.treeWidth=Math.max(220,Math.min(520,tree.width));
+    if(tree.mode==="all"||tree.mode==="fact"||tree.mode==="plan")S.treeMode=tree.mode;
+    if(Array.isArray(tree.collapsed)){
+      for(const id of tree.collapsed)if(String(id))S.treeCollapsed.add(String(id));
+      S.treeCollapsedInit=!!tree.init;
+    }
   }
 }
 function initUiStorage(){

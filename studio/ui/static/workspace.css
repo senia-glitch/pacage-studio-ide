@@ -536,3 +536,116 @@ body[data-active-tab="ideas"] .map-mode, body[data-active-tab="ideas"] .header-c
   .map-workspace #inspector { max-height:40vh; border-top:1px solid #28313c; }
   .inspector-hidden .map-workspace { grid-template-rows:minmax(0,1fr) 0; }
 }
+
+/* ---------- Карта: панель «Структура» слева ---------- */
+:root { --tree-width: 280px; }
+.map-center {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-columns: var(--tree-width) 7px minmax(0,1fr);
+  grid-template-rows: minmax(0,1fr);
+}
+/* Явные колонки: скрытие панели (display:none) не должно сдвигать канвас. */
+.map-center > #treePanel { grid-column: 1; }
+.map-center > #treeResize { grid-column: 2; }
+.map-center > #mapCanvas { grid-column: 3; }
+#treePanel { display: flex; min-width: 0; min-height: 0; flex-direction: column; background: #151b23; border-right: 1px solid #28313c; }
+#treeHead {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #28313c;
+}
+#treeHead b { color: #d5deea; font-size: 12px; }
+#treeCollapse { min-width: 26px; padding: 2px 7px; }
+.tree-modes {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  margin: 6px 8px 2px;
+  padding: 2px;
+  border: 1px solid #343943;
+  border-radius: 7px;
+  background: #171b21;
+}
+.tree-modes button { flex: 1 1 auto; min-height: 0; padding: 3px 0; border: 0; border-radius: 5px; background: transparent; color: #a8b6c5; font-size: 10px; }
+.tree-modes button:hover { border: 0; background: #232d3a; color: #d3dde8; }
+.tree-modes button.on { background: #34465a; color: #e4edf6; }
+#treeBody { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 6px 3px 12px; }
+#treeBody:focus { outline: none; }
+#treeBody:focus-visible { outline: 2px solid #84c1ff; outline-offset: -2px; }
+#treeFoot { flex: 0 0 auto; padding: 8px 10px; border-top: 1px solid #28313c; color: #708197; font-size: 10px; }
+.tree-empty { padding: 10px 8px; }
+.tree-row {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 5px;
+  padding-right: 6px;
+  border-radius: 7px;
+  cursor: pointer;
+  color: #dfe7ee;
+  font-size: 11.5px;
+  user-select: none;
+}
+.tree-row:hover { background: #212c39; }
+.tree-row.sel { outline: 2px solid #9a70ff; outline-offset: -2px; }
+.tree-row:focus-visible, .tree-twist:focus-visible { outline: 2px solid #84c1ff; outline-offset: -2px; }
+.tree-twist {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  min-height: 20px;
+  padding: 0;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #8fa3b8;
+  font-size: 10px;
+  line-height: 20px;
+}
+.tree-twist:hover { border: 0; background: #2b3846; color: #cfe3f3; }
+.tree-twist.leaf { visibility: hidden; pointer-events: none; }
+.tree-chip {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #34404c;
+  color: #d2dbe5;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+.tree-row .chip.todo { flex: 0 0 auto; padding: 1px 4px; font-size: 8.5px; }
+.tree-row .t { overflow: hidden; flex: 1 1 auto; text-overflow: ellipsis; white-space: nowrap; }
+.tree-row.faded { opacity: .35; filter: saturate(.5); }
+.tree-resize { cursor: col-resize; background: #202630; border-left: 1px solid #303844; border-right: 1px solid #11151b; }
+.tree-resize:hover, body.resizing-tree .tree-resize { background: #3f92d1; }
+body.resizing-tree { cursor: col-resize; user-select: none; }
+#treeTab {
+  position: absolute;
+  top: 12px;
+  left: 0;
+  z-index: 9;
+  display: none;
+  min-height: 0;
+  padding: 9px 7px;
+  border: 1px solid #2d3a48;
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  background: #1a222c;
+  color: #a8b6c5;
+  font-size: 10.5px;
+  letter-spacing: .04em;
+}
+#treeTab:hover { border-color: #6688aa; background: #263444; color: #e4edf6; }
+body.tree-hidden #treeTab { display: block; }
+body.tree-hidden #treePanel, body.tree-hidden .tree-resize { display: none; }
+body.tree-hidden .map-center { grid-template-columns: 0 0 minmax(0,1fr); }

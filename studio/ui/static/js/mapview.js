@@ -489,10 +489,11 @@ function draw(){
       draw();
     });
   });
-  const boxes=measure(stage);S.mapBoxes=boxes;
+  const boxes=measure(stage);S.mapBoxes=boxes;S.mapChildren=children;
   const shownEdges=edges.filter(e=>shown.has(e.from_node)&&shown.has(e.to_node)).map(e=>({...e,todo:!!(byView[e.from_node]?.planned||byView[e.to_node]?.planned||e.planned)}));
   drawEdges(svg,boxes,shownEdges);sizeStage(stage,svg);applyTransform("mapView",S.mapView);
   const mode=$("mapModeCaption");if(mode)mode.textContent=S.mapMode==="fact"?"Фактическая структура проекта":"Планируемая структура и изменения";
+  hooks.renderTree?.();
 }
 function renderMap(){draw()}
 document.addEventListener("keydown",ev=>{

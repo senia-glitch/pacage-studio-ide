@@ -12,8 +12,10 @@ import {initIdeas, renderIdeas} from "./ideaview.js";
 import {initSync} from "./syncview.js";
 import {renderSettings} from "./settingsview.js";
 import {bindViewport, fitView} from "./viewport.js";
+import {initTree, renderTree} from "./treeview.js";
 
 hooks.renderMap = renderMap;
+hooks.renderTree = renderTree;
 hooks.renderIdeas = renderIdeas;
 hooks.renderSettings = renderSettings;
 hooks.renderInspector = renderInspector;
@@ -37,6 +39,7 @@ async function boot(){
   initIdeas();
   initSync();
   initEditorChoice();
+  initTree();
   document.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
   bindViewport("mapCanvas",S.mapView,()=>applyTransform("mapView",S.mapView));
   $("mapCanvas").addEventListener("click",ev=>{
