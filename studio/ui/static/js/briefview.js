@@ -1,4 +1,5 @@
 import {api} from "./api.js";
+import {createSyncAcceptPane} from "./syncapply.js";
 import {
   briefRequest, defaultMapMode, plannedNodes, plannedStats, planStates, shortPrompt,
   statusText, subtreeIds, verifyLabel,
@@ -108,26 +109,54 @@ async function openBriefDialog(options={}){
             </select>
           </label>
           <label class="hint"><input type="checkbox" id="briefEmpty"> включать без описания</label>
+          <div class="brief-sections">
+            <span class="hint">Разделы:</span>
+            <label class="hint"><input type="checkbox" class="brief-section" value="map" checked> карта</label>
+            <label class="hint"><input type="checkbox" class="brief-section" value="unready" checked> не готово</label>
+            <label class="hint"><input type="checkbox" class="brief-section" value="diagnostics" checked> предупреждения</label>
+            <label class="hint"><input type="checkbox" class="brief-section" value="anchors" checked> формат якорей</label>
+            <span class="hint">Задачи, правила и формат отчёта входят всегда.</span>
+          </div>
           <div class="hint">Планы: ${plans.length} · старые планируемые узлы: ${nodes.length} · отмечены готовые.</div>
         </div>
         <div id="briefPlans">${(()=>{const visible=subtree?plans.filter(plan=>scopePlans.includes(plan.slug)):plans;return visible.length?visible.map(plan=>briefPlanChoice(plan,selectedPlans)).join(""):(subtree?'<p class="hint">В ветке нет планов.</p>':'<p class="hint">Планов нет. Создайте сценарий в конструкторе.</p>')})()}</div>
         <div id="briefNodes">${nodes.length?nodes.map(node=>briefNodeChoice(node,selected)).join(""):(subtree?'<p class="hint">В ветке нет отдельных плановых узлов — задачи берутся из планов.</p>':'<p class="hint">Старых планируемых узлов нет.</p>')}</div>
       </div>
       <div class="brief-preview">
-        <div class="brief-stats" id="briefStats">Подготовка…</div>
-        <pre id="briefPreview">Собираю ТЗ…</pre>
-        <div class="hint">ТЗ содержит фрагменты вашего кода и описания. Перед отправкой во внешний AI-сервис это решает пользователь.</div>
-        <div class="brief-actions">
-          <button type="button" id="briefCopy">Скопировать ТЗ</button>
-          <button type="button" id="briefPrompt">Скопировать короткий промпт</button>
-          <button type="button" id="briefDownload">Скачать .md</button>
-          <button type="button" class="primary" id="briefSave">Сохранить в проект</button>
-          <button type="button" id="briefClose">Закрыть</button>
+        <div class="sync-steps" role="tablist">
+          <button type="button" class="on" data-step="doc" role="tab">ТЗ</button>
+          <button type="button" data-step="accept" role="tab">Принять отчёт агента</button>
         </div>
+        <div class="sync-step" id="briefStepDoc">
+          <div class="brief-stats" id="briefStats">Подготовка…</div>
+          <textarea id="briefPreview" class="brief-edit" spellcheck="false" placeholder="Собираю ТЗ…"></textarea>
+          <div class="hint">Текст можно править: «Скопировать», «Скачать» и «Сохранить в проект» берут ваш вариант (служебный маркер в конце должен остаться). ТЗ содержит фрагменты вашего кода и описания — перед отправкой во внешний AI-сервис это решает пользователь.</div>
+          <div class="brief-actions">
+            <button type="button" id="briefCopy">Скопировать ТЗ</button>
+            <button type="button" id="briefPrompt">Скопировать короткий промпт</button>
+            <button type="button" id="briefDownload">Скачать .md</button>
+            <button type="button" class="primary" id="briefSave">Сохранить в проект</button>
+          </div>
+        </div>
+        <div class="sync-step" id="briefStepAccept" hidden></div>
+        <div class="brief-actions"><button type="button" id="briefClose">Закрыть</button></div>
       </div>
     </div></div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener("click",ev=>{if(ev.target===overlay)overlay.remove()});
+  const acceptHost=overlay.querySelector("#briefStepAccept");
+  acceptHost.appendChild(createSyncAcceptPane({
+    endpoint:"/api/sync/apply",
+    intro:"Вставьте итоговый JSON-отчёт агента по этому ТЗ (подойдёт и весь ответ с блоком json). Студия сверит записи с кодом и покажет отличия; описания и критерии реализованных узлов пишутся только отмеченные и только по кнопке «Применить». Статус выполнения по-прежнему определяет studio verify.",
+    onApplied:()=>{refreshBriefStatus()}
+  }));
+  overlay.querySelectorAll(".sync-steps button").forEach(button=>{
+    button.onclick=()=>{
+      overlay.querySelectorAll(".sync-steps button").forEach(b=>b.classList.toggle("on",b===button));
+      overlay.querySelector("#briefStepDoc").hidden=button.dataset.step!=="doc";
+      acceptHost.hidden=button.dataset.step!=="accept";
+    };
+  });
   const mapSelect=overlay.querySelector("#briefMap");
   mapSelect.value=S.briefLast&&S.briefLast.options&&S.briefLast.options.map||mapMode;
   const emptyBox=overlay.querySelector("#briefEmpty");
@@ -137,13 +166,17 @@ async function openBriefDialog(options={}){
   const statsBox=overlay.querySelector("#briefStats");
   S.briefPreview=preview;
   let currentMarkdown="";
+  let dirty=false;
+  preview.addEventListener("input",()=>{dirty=true});
+  const currentText=()=>preview.value||currentMarkdown;
   let currentPath=".studio/agent-brief.md";
   let generateToken=0;
   let saving=false;
   const collect=()=>{
     const chosen=[...overlay.querySelectorAll('#briefNodes input[data-bid]:checked')].map(input=>input.dataset.bid);
     const chosenPlans=[...overlay.querySelectorAll('#briefPlans input[data-plan]:checked')].map(input=>input.dataset.plan);
-    return briefRequest({selected:chosen,plans:chosenPlans,map:mapSelect.value,includeEmpty:includeEmptyValue});
+    const sections=[...overlay.querySelectorAll(".brief-section:checked")].map(input=>input.value);
+    return briefRequest({selected:chosen,plans:chosenPlans,map:mapSelect.value,includeEmpty:includeEmptyValue,sections});
   };
   const generate=async()=>{
     const token=++generateToken;
@@ -153,7 +186,8 @@ async function openBriefDialog(options={}){
       if(token!==generateToken)return;
       currentMarkdown=data.markdown||"";
       S.briefLast=data;
-      preview.textContent=currentMarkdown;
+      preview.value=currentMarkdown;
+      dirty=false;
       const stats=data.stats||{};
       statsBox.textContent=`Задач: ${stats.tasks||0} · не готово: ${stats.unready||0} · ${stats.chars||0} символов (~${stats.approx_tokens||0} токенов)`+
         ((data.warnings||[]).length?` · предупреждений: ${data.warnings.length}`:"");
@@ -171,6 +205,20 @@ async function openBriefDialog(options={}){
     }
   };
   const scheduleGenerate=()=>{clearTimeout(overlay._timer);overlay._timer=setTimeout(generate,220)};
+  // правки текста не теряем молча: смена параметров при несохранённых правках спрашивает подтверждение
+  const guardChange=(input)=>{
+    let previous=input.value;
+    input.addEventListener("change",ev=>{
+      if(dirty&&!window.confirm("Ваши правки в тексте ТЗ будут заменены. Продолжить?")){
+        ev.stopImmediatePropagation();
+        if(input.type==="checkbox")input.checked=!input.checked;else input.value=previous;
+        return;
+      }
+      previous=input.value;
+    },true);
+  };
+  overlay.querySelectorAll(".brief-section").forEach(input=>{input.onchange=scheduleGenerate});
+  overlay.querySelectorAll('.brief-section,#briefNodes input[data-bid],#briefPlans input[data-plan],#briefMap,#briefEmpty').forEach(guardChange);
   overlay.querySelectorAll('#briefNodes input[data-bid],#briefPlans input[data-plan]').forEach(input=>input.onchange=scheduleGenerate);
   mapSelect.onchange=scheduleGenerate;
   emptyBox.onchange=()=>{
@@ -205,10 +253,10 @@ async function openBriefDialog(options={}){
     try{document.execCommand("copy");toast(message)}catch(_){toast("Не удалось скопировать")}
     area.remove();
   };
-  overlay.querySelector("#briefCopy").onclick=()=>copyText(currentMarkdown||preview.textContent,"ТЗ скопировано");
+  overlay.querySelector("#briefCopy").onclick=()=>copyText(currentText(),"ТЗ скопировано");
   overlay.querySelector("#briefPrompt").onclick=()=>copyText(shortPrompt(currentPath),"Промпт скопирован");
   overlay.querySelector("#briefDownload").onclick=()=>{
-    const blob=new Blob([currentMarkdown||preview.textContent],{type:"text/markdown;charset=utf-8"});
+    const blob=new Blob([currentText()],{type:"text/markdown;charset=utf-8"});
     const link=document.createElement("a");
     link.href=URL.createObjectURL(blob);link.download="agent-brief.md";document.body.appendChild(link);link.click();link.remove();
     setTimeout(()=>URL.revokeObjectURL(link.href),1000);
@@ -219,7 +267,9 @@ async function openBriefDialog(options={}){
     const button=overlay.querySelector("#briefSave");
     if(button)button.disabled=true;
     try{
-      const data=await api("/api/brief/save","POST",collect());
+      const request=collect();
+      if(dirty)request.markdown=preview.value;
+      const data=await api("/api/brief/save","POST",request);
       currentPath=data.path||currentPath;
       toast("ТЗ сохранено: "+currentPath);
       if(data.brief_id){

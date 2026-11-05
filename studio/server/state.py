@@ -8,6 +8,7 @@ import secrets
 import threading
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 
 from studio import log as slog
@@ -31,10 +32,18 @@ from studio.agent.decompose import (
     load_decompose_template,
     standard_decompose_template,
 )
-from studio.agent.sync import build_sync_prompt
+from studio.agent.report import build_report, save_report
+from studio.agent.sync import build_sync_prompt, check_sync_response
+from studio.agent.sync_json import (
+    SyncJsonError,
+    check_undo_entries,
+    extract_json,
+    same_state,
+)
 from studio.creator import CreateError
 from studio.creator.plan import create_plan, delete_plan, preview_plan, update_plan
 from studio.env import read_env
+from studio.frontend.brief import front_prompt_state
 from studio.metadata import (
     MetadataError,
     delete_domain_plan,
@@ -518,6 +527,8 @@ class ProjectState:
         "rules": ".studio/prompts/rules.md",
         "decompose": ".studio/prompts/decompose-prompt.md",
         "decompose-improve": ".studio/prompts/decompose-improve.md",
+        "frontend-brief": ".studio/prompts/frontend-brief.md",
+        "frontend-report": ".studio/prompts/frontend-report.md",
     }
 
     # ------------------------------------------------------------- идеи
@@ -561,6 +572,88 @@ class ProjectState:
             markdown = build_sync_prompt(graph, scope, domain)
             return {"markdown": markdown}
 
+    def report(self, data: dict) -> dict:
+        """Отчёт по бэкенду по выбранным разделам; markdown сохраняется в .studio/report.md."""
+        with self.lock:
+            graph = self.ensure_graph()
+            try:
+                result = build_report(graph, data.get("sections"))
+            except ValueError as exc:
+                raise MetadataError("invalid_input", str(exc)) from exc
+            try:
+                result["path"] = save_report(self.root, result["markdown"])
+            except OSError as exc:
+                raise MetadataError("not_writable", str(exc)) from exc
+            return result
+
+    def sync_apply(self, data: dict) -> dict:
+        """Принять JSON-ответ агента: проверка + отличия; запись только при apply=true."""
+        with self.lock:
+            graph = self.ensure_graph()
+            try:
+                report = check_sync_response(graph, extract_json(data.get("json")))
+            except SyncJsonError as exc:
+                raise MetadataError("invalid_input", str(exc)) from exc
+            report["applied"] = 0
+            report["undo"] = []
+            if data.get("apply") is not True:
+                return report
+            chosen = data.get("ids")
+            allowed = {str(item) for item in chosen} if isinstance(chosen, list) else None
+            by_id = graph.by_id()
+            for row in report["rows"]:
+                if row["status"] != "change" or (allowed is not None and row["id"] not in allowed):
+                    continue
+                node = by_id[row["id"]]
+                save_node_metadata(
+                    self.root,
+                    node,
+                    row["after"]["description"],
+                    row["after"]["acceptance"],
+                    node.domain or "",
+                )
+                row["status"] = "applied"
+                report["applied"] += 1
+                report["undo"].append(
+                    {"id": row["id"], "before": row["before"], "after": row["after"]}
+                )
+            if report["applied"]:
+                report["graph"] = self.rescan("sync").model_dump()
+            return report
+
+    def sync_undo(self, data: dict) -> dict:
+        """Вернуть описания, записанные «Применить». Узел, который успели
+        изменить после применения, не трогается — он попадает в skipped."""
+        with self.lock:
+            graph = self.ensure_graph()
+            try:
+                entries = check_undo_entries(data.get("undo"))
+            except SyncJsonError as exc:
+                raise MetadataError("invalid_input", str(exc)) from exc
+            by_id = graph.by_id()
+            restored, skipped = 0, []
+            for entry in entries:
+                node = by_id.get(entry["id"])
+                if node is None or node.planned:
+                    skipped.append(entry["id"])
+                    continue
+                current = {"description": node.description, "acceptance": node.acceptance}
+                if not same_state(current, entry["after"]):
+                    skipped.append(entry["id"])
+                    continue
+                save_node_metadata(
+                    self.root,
+                    node,
+                    entry["before"]["description"],
+                    entry["before"]["acceptance"],
+                    node.domain or "",
+                )
+                restored += 1
+            result = {"restored": restored, "skipped": skipped}
+            if restored:
+                result["graph"] = self.rescan("sync-undo").model_dump()
+            return result
+
     def prompts_state(self) -> dict:
         root = Path(self.root)
         states = {
@@ -575,6 +668,8 @@ class ProjectState:
                 standard_decompose_template("improve"),
                 decompose_override_path(root, "improve"),
             ),
+            "frontend-brief": front_prompt_state(root, "frontend-brief"),
+            "frontend-report": front_prompt_state(root, "frontend-report"),
         }
         return {
             kind: {
@@ -652,12 +747,16 @@ class ProjectState:
             if isinstance(raw_plans, str):
                 raw_plans = [raw_plans]
             plans = tuple(str(item) for item in raw_plans if str(item).strip())
+        raw_sections = data.get("sections")
+        if raw_sections is not None and not isinstance(raw_sections, (list, tuple)):
+            raise MetadataError("invalid_input", "Разделы нужно передать списком")
         return BriefOptions(
             map_mode=str(data.get("map") or ""),
             only=only,
             plans=plans,
             scenario=str(data.get("scenario") or ""),
             include_empty=bool(data.get("include_empty")),
+            sections=None if raw_sections is None else tuple(str(i) for i in raw_sections),
         )
 
     def _collect_brief(self, data: dict):
@@ -691,12 +790,28 @@ class ProjectState:
     def save_brief(self, data: dict) -> dict:
         with self.lock:
             brief = self._collect_brief(data)
+            edited = data.get("markdown")
+            if edited is not None:
+                brief = self._with_edited_markdown(brief, edited)
             path = save_brief_file(self.root, brief)
             return {
                 "path": path.as_posix(),
                 "brief_id": brief.brief_id,
                 "stats": brief.stats,
             }
+
+    @staticmethod
+    def _with_edited_markdown(brief, edited):
+        """Текст ТЗ с правками пользователя; служебный маркер должен остаться на месте."""
+        if not isinstance(edited, str) or not edited.strip():
+            raise MetadataError("invalid_input", "Текст ТЗ пуст")
+        if "<!-- studio-brief:" not in edited or brief.brief_id not in edited:
+            raise MetadataError(
+                "invalid_input",
+                "В тексте пропал служебный маркер ТЗ (<!-- studio-brief: … -->) — без него "
+                "studio verify не найдёт задачи. Верните маркер или сохраните без правок.",
+            )
+        return replace(brief, markdown=edited.rstrip() + "\n")
 
     def verify_brief(self, target: str | None) -> dict:
         with self.lock:

@@ -10,15 +10,18 @@ import {renderInspector} from "./inspectorview.js";
 import {renderMap} from "./mapview.js";
 import {initIdeas, renderIdeas} from "./ideaview.js";
 import {initSync} from "./syncview.js";
+import {initReport} from "./reportview.js";
 import {renderSettings} from "./settingsview.js";
 import {bindViewport, fitView} from "./viewport.js";
 import {initTree, renderTree} from "./treeview.js";
+import {initFrontend, renderFrontend} from "./frontendview.js";
 
 hooks.renderMap = renderMap;
 hooks.renderTree = renderTree;
 hooks.renderIdeas = renderIdeas;
 hooks.renderSettings = renderSettings;
 hooks.renderInspector = renderInspector;
+hooks.renderFrontend = renderFrontend;
 hooks.updateBriefBadge = updateBriefBadge;
 hooks.scheduleBriefStatus = scheduleBriefStatus;
 hooks.updateDiagBadge = updateDiagBadge;
@@ -38,8 +41,10 @@ async function boot(){
   initUiStorage();
   initIdeas();
   initSync();
+  initReport();
   initEditorChoice();
   initTree();
+  initFrontend();
   document.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
   bindViewport("mapCanvas",S.mapView,()=>applyTransform("mapView",S.mapView));
   $("mapCanvas").addEventListener("click",ev=>{
@@ -88,7 +93,7 @@ async function boot(){
   updateDiagBadge();
   updateBriefBadge();
   refreshBriefStatus();
-  setLive(false);
+  setLive(true); // граф только что загружен — студия на связи; обрыв покажет startLive()
   startLive();
   window.addEventListener("beforeunload",()=>persistNow());
   document.addEventListener("click",schedulePersist);

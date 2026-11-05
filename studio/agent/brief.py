@@ -11,11 +11,12 @@ import hashlib
 import json
 import re
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from studio import __version__
 from studio._atomic import atomic_write
+from studio.agent.sync_json import BRIEF_REPORT_BACKEND_LINES
 from studio.metamodel import (
     FLOW_EDGE_KINDS,
     Graph,
@@ -23,10 +24,12 @@ from studio.metamodel import (
     node_anchor,
 )
 from studio.scanner.anchors import AnchorResolver
+from studio.sections import pick_sections
 from studio.source import SourceSet
 
 BRIEF_VERSION = 2
-RULES_VERSION = "1"
+RULES_VERSION = "2"
+BRIEF_SECTIONS = ("map", "unready", "diagnostics", "anchors")
 BRIEF_FILENAME = "agent-brief.md"
 BRIEFS_DIR = "briefs"
 LAST_BRIEF = "last-brief.json"
@@ -89,6 +92,9 @@ class BriefOptions:
     scenario: str = ""
     include_empty: bool = False
     generated_at: str = ""
+    # Необязательные разделы ТЗ; None — все. «Что нужно сделать», правила, задачи
+    # и формат отчёта входят всегда.
+    sections: tuple[str, ...] | None = None
 
 
 @dataclass
@@ -117,6 +123,9 @@ class Brief:
                 "plans": list(self.options.plans or ()),
                 "scenario": self.options.scenario,
                 "include_empty": self.options.include_empty,
+                "sections": None
+                if self.options.sections is None
+                else list(self.options.sections),
             },
             "tasks": list(self.tasks),
             "unready": list(self.unready),
@@ -1350,7 +1359,8 @@ def _render_plan_task(
     lines.extend(sample_lines)
     lines.append("- Решения за тобой:")
     lines.append(
-        "  - имена io-методов и модели, поля модели, SQL; запиши принятые решения в отчёт."
+        "  - имена io-методов и модели, поля модели, SQL; "
+        "запиши принятые решения в `report.decisions` итогового JSON."
     )
     lines.append(
         "- Проверка (studio verify): слои цепочки, связи origin=code "
@@ -1519,41 +1529,46 @@ def _build_markdown(
                 warnings,
             )
             lines.extend(block.splitlines())
-    lines.extend(
-        _section_map(
-            graph,
-            map_mode,
-            {node.id for node in tasks},
-            branch_roots,
-            branch_scope,
+    wanted = set(BRIEF_SECTIONS if options.sections is None else options.sections)
+    if "map" in wanted:
+        lines.extend(
+            _section_map(
+                graph,
+                map_mode,
+                {node.id for node in tasks},
+                branch_roots,
+                branch_scope,
+            )
         )
-    )
-    lines.append("## 6. Не готово к реализации")
-    lines.append("")
-    if not unready_plans and not unready_nodes:
-        lines.append("(нет)")
+    if "unready" in wanted:
+        lines.append("## 6. Не готово к реализации")
         lines.append("")
-    else:
-        for state in unready_plans:
-            lines.append(
-                f"- план «{state.title or state.slug}» ({state.slug}) — "
-                "`.studio/metadata.json`: добавьте описание в студии"
-            )
-        for node in unready_nodes:
-            lines.append(
-                f"- `{_kind_name(node.kind)}` `{node_anchor(node) or node.label}` — "
-                f"`{node.file_path}`: добавьте описание в студии"
-            )
+        if not unready_plans and not unready_nodes:
+            lines.append("(нет)")
+            lines.append("")
+        else:
+            for state in unready_plans:
+                lines.append(
+                    f"- план «{state.title or state.slug}» ({state.slug}) — "
+                    "`.studio/metadata.json`: добавьте описание в студии"
+                )
+            for node in unready_nodes:
+                lines.append(
+                    f"- `{_kind_name(node.kind)}` `{node_anchor(node) or node.label}` — "
+                    f"`{node.file_path}`: добавьте описание в студии"
+                )
+            lines.append("")
+    if "diagnostics" in wanted:
+        lines.extend(_diagnostics_section(graph, warnings))
+    if "anchors" in wanted:
+        lines.append("## 8. Формат якорей и связей")
         lines.append("")
-    lines.extend(_diagnostics_section(graph, warnings))
-    lines.append("## 8. Формат якорей и связей")
-    lines.append("")
-    try:
-        rules_path = Path(__file__).resolve().parent.parent / "metadata" / "rules.md"
-        lines.append(rules_path.read_text(encoding="utf-8").rstrip())
-    except (OSError, UnicodeDecodeError):
-        lines.append("Файл правил метаданных не найден.")
-    lines.append("")
+        try:
+            rules_path = Path(__file__).resolve().parent.parent / "metadata" / "rules.md"
+            lines.append(rules_path.read_text(encoding="utf-8").rstrip())
+        except (OSError, UnicodeDecodeError):
+            lines.append("Файл правил метаданных не найден.")
+        lines.append("")
     lines.append("## 9. Отчёт и проверка")
     lines.append("")
     lines.append("После работы выполните:")
@@ -1561,10 +1576,7 @@ def _build_markdown(
     lines.append("- `studio verify <этот файл>` — проверить, что задачи выполнены;")
     lines.append("- `studio doctor --strict` — проверить проект целиком.")
     lines.append("")
-    lines.append(
-        "Итоговый отчёт: статус и `path:line` по каждой задаче; изменения вне целевых "
-        "файлов; запущенные тесты и результат; допущения и вопросы; вывод `studio verify`."
-    )
+    lines.extend(BRIEF_REPORT_BACKEND_LINES)
     lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -1606,6 +1618,7 @@ def _make_brief_id(graph: Graph, options: BriefOptions, tasks: list[Node], plans
             "plans": sorted(options.plans or ()),
             "scenario": options.scenario,
             "include_empty": options.include_empty,
+            "sections": None if options.sections is None else sorted(options.sections),
             "tasks": _fingerprint_tasks(tasks),
             "plan_tasks": _fingerprint_plans(plans),
             "planned_changes": [
@@ -1633,33 +1646,26 @@ def build_brief(
         options = BriefOptions(**raw_options)
     options = options or BriefOptions()
     if isinstance(options.only, str):
-        options = BriefOptions(
-            map_mode=options.map_mode,
-            only=(options.only,),
-            plans=options.plans,
-            scenario=options.scenario,
-            include_empty=options.include_empty,
-            generated_at=options.generated_at,
-        )
+        options = replace(options, only=(options.only,))
     if isinstance(options.plans, str):
-        options = BriefOptions(
-            map_mode=options.map_mode,
-            only=options.only,
-            plans=(options.plans,),
-            scenario=options.scenario,
-            include_empty=options.include_empty,
-            generated_at=options.generated_at,
-        )
+        options = replace(options, plans=(options.plans,))
+    if isinstance(options.sections, str):
+        options = replace(options, sections=(options.sections,))
     sources = sources or SourceSet(root=Path(graph.project_root))
     if options.map_mode and options.map_mode not in MAP_MODES:
         raise BriefError("invalid_input", f"Неизвестный режим карты: {options.map_mode}")
-    options = BriefOptions(
+    try:
+        sections = (
+            None
+            if options.sections is None
+            else tuple(sorted(pick_sections(options.sections, BRIEF_SECTIONS, "ТЗ")))
+        )
+    except ValueError as exc:
+        raise BriefError("invalid_input", str(exc)) from exc
+    options = replace(
+        options,
         map_mode=options.map_mode or ("related" if len(graph.nodes) > 150 else "full"),
-        only=options.only,
-        plans=options.plans,
-        scenario=options.scenario,
-        include_empty=options.include_empty,
-        generated_at=options.generated_at,
+        sections=sections,
     )
 
     all_plans = _plan_states(graph)

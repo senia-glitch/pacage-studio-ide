@@ -29,6 +29,12 @@ endpoint → scenario → io → model
 7. **UI** (`studio/ui/static/js/`) — карта, сценарий, инспектор, создание,
    диагностика, ТЗ; состояние — в localStorage.
 8. **Сервер** (`studio/server/`) — stdlib HTTP, токен, live-обновление.
+9. **Фронтенд** (`studio/frontend/`) — сканер `frontend/` (слои, DAG, нарушения),
+   метаданные `.studio/frontend.json`, ТЗ, отчёт и синхронизация описаний.
+10. **Отчёт по бэкенду** (`studio/agent/report.py`) — сводка, структура,
+    покрытие, планы, модели и диагностика по графу; `studio report`, `/api/report`.
+11. **JSON-ответ синхронизации** (`studio/agent/sync_json.py`) — разбор и проверка
+    ответа агента; запись только по явному «Применить».
 
 ## Граф
 

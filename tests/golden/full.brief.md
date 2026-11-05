@@ -1,6 +1,6 @@
 # ТЗ для AI-агента: full
 
-Сформировано: <дата> · studio <версия> · brief <brief> · отпечаток кода d6e73dcacc0e · правила v1
+Сформировано: <дата> · studio <версия> · brief <brief> · отпечаток кода d6e73dcacc0e · правила v2
 Область: все узлы · Карта: full · Задач: 3 · Плановых правок: 0 · Не готово: 1
 
 ## 1. Что нужно сделать
@@ -26,21 +26,21 @@
 5. Имя класса/функции — дословно якорь из задачи (регистр и написание).
 6. Связи из карточки («Связи») должны появиться в коде так, как это сделано в образце (вызов сценария через `run("…")`, вызов метода порта, обращение к модели). Не создавай связей, которых нет в задаче.
 7. Каждый критерий приёмки — пункт чек-листа. Для каждого напиши тест в `tests/` по образцу существующих; имя теста содержит имя узла (иначе студия не свяжет тест с узлом). Запусти тесты проекта.
-8. Вне целевых файлов меняй только минимально необходимое для подключения (импорт, регистрация роутера/модели, миграция — если проект так устроен). Каждое такое изменение указать в отчёте.
+8. Вне целевых файлов меняй только минимально необходимое для подключения (импорт, регистрация роутера/модели, миграция — если проект так устроен). Каждое такое изменение указать в `report.outside_changes` итогового JSON.
 9. Не добавлять зависимости; не трогать `.env*`, `.studio/`, конфигурацию; не делать git commit/push; не удалять файлы, кроме замены файла-скелета.
-10. Если данных не хватает или описание противоречит коду — не угадывай: сделай безопасный минимум и запиши вопрос в отчёт.
+10. Если данных не хватает или описание противоречит коду — не угадывай: сделай безопасный минимум и запиши вопрос в `report.questions` итогового JSON.
 11. Не доверяй карте в файлах из раздела «Предупреждения по коду» и узлам с жёлтой пометкой.
 12. Не выводи в отчёт и не копируй в код значения секретов и содержимое `.env*`.
 13. После работы выполни `studio verify <этот файл>` и `studio doctor --strict`, исправь расхождения.
-14. Итоговый отчёт: (а) по каждой задаче — статус и `path:line`; (б) изменения вне целевых файлов; (в) какие тесты запущены и результат; (г) допущения и вопросы; (д) вывод `studio verify`.
+14. Итоговый отчёт — ОДИН JSON-блок строго по формату из раздела «Отчёт и проверка»: `updates` (фактические описание и критерии каждого реализованного узла), `not_synced` (что не сделано и почему) и `report` (изменения вне целевых файлов, тесты и результат, решения, допущения и вопросы). Статус задач определяет `studio verify`, а не отчёт.
 
 ## Работа по цепочке
 
 15. Описание относится ко всему сценарию: сам выведи, что делает каждый слой цепочки.
-16. Предлагаемые имена используй, если они не конфликтуют; иначе выбери близкие и укажи это в отчёте.
+16. Предлагаемые имена используй, если они не конфликтуют; иначе выбери близкие и укажи это в `report.decisions`.
 17. Делай тонкий endpoint (валидация и вызов сценария), логику — в сценарии, а доступ к БД — только через порт.
 18. Не создавай слоёв и файлов сверх цепочки.
-19. В отчёте дай таблицу «слой → фактическое имя → path:line», принятые решения и вопросы; если описания не хватает — сделай минимум и задай вопрос, не угадывай.
+19. В `updates` дай по каждому слою цепочки фактическое описание и критерии (`plan` + `layer`), в `report.decisions` — принятые решения, в `report.questions` — вопросы; если описания не хватает — сделай минимум и задай вопрос, не угадывай.
 
 ## 3. Правила этого проекта
 
@@ -215,6 +215,31 @@
 - `studio verify <этот файл>` — проверить, что задачи выполнены;
 - `studio doctor --strict` — проверить проект целиком.
 
-Итоговый отчёт: статус и `path:line` по каждой задаче; изменения вне целевых файлов; запущенные тесты и результат; допущения и вопросы; вывод `studio verify`.
+Итоговый отчёт — ОДИН JSON-блок, после него ничего. Студия сверит его с кодом
+и по кнопке «Применить» запишет описания и критерии в метаданные:
+
+```json
+{
+  "updates": [
+    {"plan": "<slug плана>", "layer": "endpoint | scenario | io | model",
+     "description": "<что узел делает фактически>", "acceptance": ["<критерий>"]},
+    {"id": "<якорь узла>", "description": "…", "acceptance": ["…"]}
+  ],
+  "not_synced": [{"plan": "<slug>", "layer": "<слой>", "reason": "<почему не сделано>"}],
+  "report": {
+    "outside_changes": ["<путь: что изменено вне целевых файлов>"],
+    "tests": "<какие тесты запущены и результат>",
+    "questions": ["<допущение или вопрос>"],
+    "decisions": ["<принятое решение: имена, поля, SQL>"]
+  }
+}
+```
+
+- Задача-план: `plan` + `layer`; для слоя с несколькими узлами (например io) — `id` узла.
+- Задача-узел: `id` — якорь из задачи. Слой `test` в `updates` не указывается.
+- Статус «выполнено» определяет студия (`studio verify`): запись для узла, которого нет
+  в коде, будет отклонена. Не сделанное перечисли в `not_synced`.
+- `report` только показывается пользователю; в метаданные пишутся лишь
+  `description` и `acceptance`.
 
 <!-- studio-brief:v2 {"version":2,"brief_id":"<brief>","fingerprint":"<отпечаток>","generated_at":"<дата>","options":{"map":"full","only":[],"plans":[],"scenario":"","include_empty":false},"tasks":[{"number":1,"id":"model:models_planned.py:PlannedOrder","kind":"model","anchor":"PlannedOrder","target_file":"models_planned.py","plan_file":"models_planned.py","description":"Модель планируемых заказов: таблица planned_orders.","acceptance":["Таблица planned_orders доступна в сценарии CancelOrder"],"description_hash":"c20ccb33298503e9e0f4b58d8c3aa0369845a138","acceptance_hash":"2a384bf0896276ca8e61cdbbbf7bb959fe914865","empty_description":false,"expected_edges":[],"sample":{"file":"models.py","line":17,"end_line":21},"reuse":[]},{"number":2,"id":"scenario:app/scenarios/cancel_order.py:CancelOrder","kind":"scenario","anchor":"CancelOrder","target_file":"app/scenarios/cancel_order.py","plan_file":"app/scenarios/cancel_order.py","description":"Отменяет заказ и освобождает место. Связь с моделью planned_orders.","acceptance":["Заказ помечен как отменённый","Освобождено место на складе"],"description_hash":"798d8915fcea6f651611a2dec461e118d4b83303","acceptance_hash":"9c7aebf51dd1b1a085685de00b83093a74a42734","empty_description":false,"expected_edges":[{"from_anchor":"cancel_order","from_kind":"endpoint","to_anchor":"CancelOrder","to_kind":"scenario","from_id":"endpoint:app/api/v1/routes/cancel_order.py:cancel_order","to_id":"scenario:app/scenarios/cancel_order.py:CancelOrder","kind":"dispatch"}],"sample":{"file":"app/scenarios/users.py","line":17,"end_line":19},"reuse":[{"file":"app/api/v1/routes/users.py","line":16,"label":"_helper(...)"},{"file":"app/scenarios/users.py","line":9,"label":"self._load()"}]},{"number":3,"id":"endpoint:app/api/v1/routes/cancel_order.py:cancel_order","kind":"endpoint","anchor":"cancel_order","target_file":"app/api/v1/routes/cancel_order.py","plan_file":"app/api/v1/routes/cancel_order.py","description":"Отменяет заказ по идентификатору.","acceptance":["POST /api/v1/users/cancel возвращает 200"],"description_hash":"1bac24111a3e189bf541d9a1352c83055e9da9a9","acceptance_hash":"74e1cc17203cf4d5b069b121134b4b55e9d6eac5","empty_description":false,"expected_edges":[{"from_anchor":"cancel_order","from_kind":"endpoint","to_anchor":"CancelOrder","to_kind":"scenario","from_id":"endpoint:app/api/v1/routes/cancel_order.py:cancel_order","to_id":"scenario:app/scenarios/cancel_order.py:CancelOrder","kind":"dispatch"}],"sample":{"file":"app/api/v1/routes/users.py","line":11,"end_line":13},"reuse":[{"file":"app/api/v1/routes/users.py","line":16,"label":"_helper(...)"}]}],"unready":[{"id":"scenario:app/scenarios/notify.py:NotifyScenario","kind":"scenario","anchor":"NotifyScenario","file":"app/scenarios/notify.py","missing":["описание"]}],"planned_changes":[],"domain_changes":{},"planned_domains":[]} -->

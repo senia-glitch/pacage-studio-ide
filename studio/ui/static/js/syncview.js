@@ -1,5 +1,6 @@
 import {api} from "./api.js";
 import {$, esc, S, toast} from "./core.js";
+import {createSyncAcceptPane, promptTotal} from "./syncapply.js";
 
 let open = false;
 
@@ -10,7 +11,7 @@ async function generate(state, scope, domain) {
     const data = await api("/api/sync/prompt", "POST", {scope, domain});
     state.markdown = data.markdown || "";
     preview.textContent = state.markdown;
-    stats.textContent = `Узлов в области: ${(state.markdown.match(/^\| /gm) || []).length}`;
+    stats.textContent = `Узлов в области: ${promptTotal(state.markdown)}`;
   } catch (e) {
     preview.textContent = "Ошибка: " + e.message;
   }
@@ -42,24 +43,42 @@ function openSyncDialog() {
             <select id="syncDomain">${domains.map(d => `<option>${esc(d)}</option>`).join("")}</select>
           </label>
         </div>
-        <p class="hint">Промпт для AI-агента с доступом к папке проекта: агент прочитает реальный
-        код узлов и приведёт их <b>описания и критерии</b> в metadata.json к фактическому поведению.
-        Плановые узлы (их ещё нет в коде) в промпт не попадают. Домены и связи агент не меняет.</p>
-        <div class="hint">После работы агента студия подхватит изменения сама (live-обновление).</div>
+        <p class="hint">Шаг 1. Промпт для AI-агента с доступом к папке проекта: агент прочитает реальный
+        код узлов и вернёт <b>описания и критерии</b> одним JSON-блоком. Файлы агент не правит.
+        Плановые узлы (их ещё нет в коде) в промпт не попадают.</p>
+        <p class="hint">Шаг 2. Вставьте JSON-ответ агента на вкладке «Принять ответ»: студия покажет отличия,
+        и вы сами решите, что записать в metadata.json. Домены и связи ответом не меняются.</p>
       </div>
       <div class="brief-preview">
-        <div class="brief-stats" id="syncStats">Подготовка…</div>
-        <pre id="syncPreview">Собираю промпт…</pre>
-        <div class="hint">Промпт содержит узлы проекта. Перед отправкой во внешний AI-сервис это решает пользователь.</div>
-        <div class="brief-actions">
-          <button type="button" id="syncCopy">Скопировать промпт</button>
-          <button type="button" id="syncDownload">Скачать .md</button>
-          <button type="button" class="primary" id="syncClose">Закрыть</button>
+        <div class="sync-steps" role="tablist">
+          <button type="button" class="on" data-step="prompt" role="tab">1. Промпт</button>
+          <button type="button" data-step="accept" role="tab">2. Принять ответ</button>
         </div>
+        <div class="sync-step" id="syncStepPrompt">
+          <div class="brief-stats" id="syncStats">Подготовка…</div>
+          <pre id="syncPreview">Собираю промпт…</pre>
+          <div class="hint">Промпт содержит узлы проекта. Перед отправкой во внешний AI-сервис это решает пользователь.</div>
+          <div class="brief-actions">
+            <button type="button" id="syncCopy">Скопировать промпт</button>
+            <button type="button" id="syncDownload">Скачать .md</button>
+          </div>
+        </div>
+        <div class="sync-step" id="syncStepAccept" hidden></div>
+        <div class="brief-actions"><button type="button" class="primary" id="syncClose">Закрыть</button></div>
       </div>
     </div></div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener("click", ev => { if (ev.target === overlay) { overlay.remove(); open = false; } });
+
+  const acceptHost = overlay.querySelector("#syncStepAccept");
+  acceptHost.appendChild(createSyncAcceptPane({endpoint: "/api/sync/apply"}));
+  overlay.querySelectorAll(".sync-steps button").forEach(button => {
+    button.onclick = () => {
+      overlay.querySelectorAll(".sync-steps button").forEach(b => b.classList.toggle("on", b === button));
+      overlay.querySelector("#syncStepPrompt").hidden = button.dataset.step !== "prompt";
+      acceptHost.hidden = button.dataset.step !== "accept";
+    };
+  });
 
   const scopeSelect = overlay.querySelector("#syncScope");
   const domainWrap = overlay.querySelector("#syncDomainWrap");

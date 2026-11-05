@@ -109,3 +109,10 @@ test("поддерево узла — цикл не зацикливает об�
   };
   assert.deepEqual([...subtreeIds(g, "A")].sort(), ["A", "B"]);
 });
+
+test("разделы ТЗ передаются только когда выбраны", () => {
+  const base = {selected: [], plans: [], map: "full", includeEmpty: false};
+  assert.equal("sections" in briefRequest(base), false);
+  assert.deepEqual(briefRequest({...base, sections: ["map", "anchors"]}).sections, ["map", "anchors"]);
+  assert.deepEqual(briefRequest({...base, sections: []}).sections, []);
+});

@@ -129,6 +129,7 @@ async function setTab(name){
   const search=$("searchBox");if(search){search.placeholder=name==="ideas"?"Поиск по идеям и сценариям":"Поиск — метод, URL, имя, домен";search.setAttribute("aria-label",name==="ideas"?"Поиск по идеям и сценариям":"Поиск по проекту")}
   if(name==="map"){hooks.renderMap();hooks.renderInspector()}
   else if(name==="settings"){if(hooks.renderSettings)hooks.renderSettings()}
+  else if(name==="frontend"){hooks.renderFrontend&&hooks.renderFrontend()}
   else hooks.renderIdeas();
   schedulePersist();
   return true;
@@ -196,7 +197,7 @@ function schedulePersist(){
 }
 function restoreUiState(saved){
   if(!saved)return;
-  if(["map","ideas"].includes(saved.tab))S.tab=saved.tab;else S.tab="map";
+  if(["map","ideas","frontend"].includes(saved.tab))S.tab=saved.tab;else S.tab="map";
   if(saved.mapMode==="fact"||saved.mapMode==="plan")S.mapMode=saved.mapMode;
   if(typeof saved.inspectorOpen==="boolean")S.inspectorOpen=saved.inspectorOpen;
   if(Number.isFinite(saved.inspectorWidth))S.inspectorWidth=Math.max(280,Math.min(520,saved.inspectorWidth));
@@ -262,6 +263,7 @@ function setLive(online){
 }
 function rerenderActive(){
   if(S.tab==="map"){hooks.renderMap();hooks.renderInspector()}
+  else if(S.tab==="frontend"){hooks.renderFrontend&&hooks.renderFrontend()}
   else hooks.renderIdeas();
   hooks.updateDiagBadge();
 }

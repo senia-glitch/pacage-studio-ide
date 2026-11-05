@@ -24,3 +24,8 @@ studio.log
 # golden fixtures
 !tests/golden/**/.studio/
 !tests/golden/**/.studio/**
+
+# Локальная демонстрация и черновики
+_make_demo.py
+studio-demo/
+text.py

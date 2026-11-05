@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import os
 import urllib.parse
@@ -13,7 +14,13 @@ from pathlib import Path
 from studio import log as slog
 from studio._constants import MAX_HTTP_BODY
 from studio.agent import BriefError, BriefNotFound
+from studio.agent.sync_json import check_undo_entries, extract_json, same_state
 from studio.creator import CreateError
+from studio.frontend import brief as front_brief
+from studio.frontend import graph as front_graph
+from studio.frontend import meta as front_meta
+from studio.frontend import scan_frontend
+from studio.frontend import sync as front_sync
 from studio.metadata import MetadataError
 from studio.server.security import (
     CSP,
@@ -257,12 +264,11 @@ def make_handler(ctx):
                     body = candidate.read_bytes()
                 except OSError:
                     return self._error(404, "not_found", "Файл не найден")
-                return self._send_bytes(
-                    body,
-                    200,
-                    content_type(candidate),
-                    {"Cache-Control": "no-cache", "Content-Security-Policy": CSP},
-                )
+                cache_headers = {
+                    "Cache-Control": "no-store, no-cache, must-revalidate",
+                    "Content-Security-Policy": CSP,
+                }
+                return self._send_bytes(body, 200, content_type(candidate), cache_headers)
             if url.path == "/api/graph":
                 graph = state.ensure_graph()
                 etag = f'"{state.revision}"'
@@ -287,6 +293,10 @@ def make_handler(ctx):
                 except ValueError:
                     rev = 0
                 return self._json({"revision": state.wait_for_change(rev)})
+            if url.path == "/api/frontend":
+                return self._json(scan_frontend(state.root))
+            if url.path == "/api/frontend/graph":
+                return self._json(front_graph.build_front_graph(state.root))
             if url.path == "/api/verify":
                 query = urllib.parse.parse_qs(url.query)
                 target = (query.get("brief") or [None])[0]
@@ -335,15 +345,167 @@ def make_handler(ctx):
                 return self._json(state.save_ideas(data))
             if url.path == "/api/sync/prompt":
                 return self._json(state.sync_prompt(data))
+            if url.path == "/api/report":
+                return self._json(state.report(data))
+            if url.path == "/api/sync/apply":
+                return self._json(state.sync_apply(data))
+            if url.path == "/api/sync/undo":
+                return self._json(state.sync_undo(data))
             if url.path == "/api/metadata/graph-node/restore":
                 return self._json(state.restore_graph_node(data))
             if url.path == "/api/decompose/prompt":
                 return self._json(state.decompose_prompt(data))
             if url.path == "/api/decompose":
                 return self._json(state.decompose_apply(data))
+            if url.path == "/api/frontend/meta":
+                return self._json(frontend_meta_op(state.root, data))
+            if url.path == "/api/frontend/brief":
+                return self._json(frontend_brief_op(state.root, data))
+            if url.path == "/api/frontend/sync":
+                return self._json(frontend_sync_op(state.root, data))
+            if url.path == "/api/frontend/sync/apply":
+                return self._json(frontend_sync_apply_op(state.root, data))
+            if url.path == "/api/frontend/sync/undo":
+                return self._json(frontend_sync_undo_op(state.root, data))
+            if url.path == "/api/frontend/report":
+                return self._json(front_report_op(state.root, data))
             return self._error(404, "not_found", "Не найдено")
 
     return Handler
+
+
+_META_OPS = {
+    "save_page": front_meta.save_page_meta,
+    "save_block": front_meta.save_block_meta,
+    "save_rule": front_meta.save_rule,
+    "save_delete_note": front_meta.save_delete_note,
+    "delete_planned": front_meta.delete_planned,
+    "restore_planned": front_meta.restore_planned,
+    "save_domain": front_meta.save_domain,
+    "move_block": front_meta.move_block,
+}
+
+
+def _front_errors(func):
+    """Понятные ошибки ввода фронтенд-операций (ValueError) → 400, а не 500."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except ValueError as exc:
+            raise MetadataError("invalid_input", str(exc)) from exc
+
+    return wrapper
+
+
+@_front_errors
+def frontend_meta_op(root: Path, data: dict) -> dict:
+    """Диспетчер операций метаданных фронтенда; ответ = meta + граф."""
+    action = str(data.get("action") or "")
+    op = _META_OPS.get(action)
+    if op is None:
+        raise ValueError(f"Неизвестная операция фронтенда: {action}")
+    payload = {key: value for key, value in data.items() if key != "action"}
+    op(root, payload)
+    return {
+        "meta": front_meta.load_meta(root),
+        "graph": front_graph.build_front_graph(root),
+    }
+
+
+@_front_errors
+def frontend_brief_op(root: Path, data: dict) -> dict:
+    """ТЗ фронтенда по области; markdown сохраняется в .studio."""
+    scope = str(data.get("scope") or "all")
+    node_id = data.get("nodeId") or None
+    return front_brief.brief_frontend(
+        root,
+        scope=scope,
+        node_id=str(node_id) if node_id else None,
+        sections=data.get("sections"),
+    )
+
+
+@_front_errors
+def frontend_sync_op(root: Path, data: dict) -> dict:
+    """Промпт синхронизации описаний фронтенда с кодом."""
+    markdown = front_sync.build_front_sync_prompt(
+        front_graph.build_front_graph(root),
+        scope=str(data.get("scope") or "all"),
+        domain=str(data.get("domain") or ""),
+        page_id=str(data.get("pageId") or ""),
+    )
+    return {"markdown": markdown}
+
+
+@_front_errors
+def front_report_op(root: Path, data: dict | None = None) -> dict:
+    return front_brief.report_frontend(root, sections=(data or {}).get("sections"))
+
+
+@_front_errors
+def frontend_sync_apply_op(root: Path, data: dict) -> dict:
+    """JSON-ответ агента по описаниям фронтенда: проверка, отличия, запись при apply=true."""
+    graph = front_graph.build_front_graph(root)
+    payload = extract_json(data.get("json"))
+    report, block_pages = front_sync.check_front_sync_response(graph, payload)
+    report["applied"] = 0
+    report["undo"] = []
+    if data.get("apply") is not True:
+        return report
+    chosen = data.get("ids")
+    allowed = {str(item) for item in chosen} if isinstance(chosen, list) else None
+    for row in report["rows"]:
+        if row["status"] != "change" or (allowed is not None and row["id"] not in allowed):
+            continue
+        payload = {
+            "id": row["id"],
+            "description": row["after"]["description"],
+            "acceptance": row["after"]["acceptance"],
+        }
+        if row["id"] in block_pages:
+            front_meta.save_block_meta(root, {**payload, "pageId": block_pages[row["id"]]})
+        else:
+            front_meta.save_page_meta(root, payload)
+        row["status"] = "applied"
+        report["applied"] += 1
+        report["undo"].append({"id": row["id"], "before": row["before"], "after": row["after"]})
+    if report["applied"]:
+        report["meta"] = front_meta.load_meta(root)
+        report["graph"] = front_graph.build_front_graph(root)
+    return report
+
+
+def _write_front_state(root: Path, node_id: str, block_pages: dict, state: dict) -> None:
+    payload = {"id": node_id, **state}
+    if node_id in block_pages:
+        front_meta.save_block_meta(root, {**payload, "pageId": block_pages[node_id]})
+    else:
+        front_meta.save_page_meta(root, payload)
+
+
+@_front_errors
+def frontend_sync_undo_op(root: Path, data: dict) -> dict:
+    """Вернуть описания страниц и блоков, записанные «Применить».
+
+    Узлы, изменённые после применения, пропускаются (skipped).
+    """
+    entries = check_undo_entries(data.get("undo"))
+    known, block_pages = front_sync.sync_known_nodes(front_graph.build_front_graph(root))
+    restored, skipped = 0, []
+    for entry in entries:
+        info = known.get(entry["id"])
+        if info is None or not same_state(info, entry["after"]):
+            skipped.append(entry["id"])
+            continue
+        _write_front_state(root, entry["id"], block_pages, entry["before"])
+        restored += 1
+    result: dict = {"restored": restored, "skipped": skipped}
+    if restored:
+        result["meta"] = front_meta.load_meta(root)
+        result["graph"] = front_graph.build_front_graph(root)
+    return result
 
 
 def _try_bind(host: str, port: int, handler) -> ThreadingHTTPServer | None:

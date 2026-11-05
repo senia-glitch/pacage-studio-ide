@@ -55,7 +55,7 @@ export function subtreeIds(graph, rootId) {
   return ids;
 }
 
-export function briefRequest({selected, plans, map, includeEmpty, scenario}) {
+export function briefRequest({selected, plans, map, includeEmpty, scenario, sections}) {
   const payload = {
     only: Array.isArray(selected) ? selected : [...(selected || [])],
     plans: Array.isArray(plans) ? plans : [...(plans || [])],
@@ -63,6 +63,7 @@ export function briefRequest({selected, plans, map, includeEmpty, scenario}) {
     include_empty: !!includeEmpty,
   };
   if (scenario) payload.scenario = scenario;
+  if (Array.isArray(sections)) payload.sections = sections;
   return payload;
 }
 

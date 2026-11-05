@@ -24,7 +24,9 @@ from studio.agent import (
     save_brief_sidecars,
     verify_brief,
 )
+from studio.agent.report import build_report, save_report
 from studio.env import read_env
+from studio.frontend.brief import report_frontend
 from studio.scanner import scan
 from studio.server import PortInUse, serve
 from studio.source import load_sources, module_files, tests_files
@@ -220,12 +222,14 @@ def cmd_list(args) -> int:
 def _brief_options(args) -> BriefOptions:
     raw_only = getattr(args, "only", None)
     raw_plans = getattr(args, "plan", None)
+    raw_sections = getattr(args, "section", None)
     return BriefOptions(
         map_mode=str(getattr(args, "map", "") or ""),
         only=tuple(str(item) for item in raw_only) if raw_only else None,
         plans=tuple(str(item) for item in raw_plans) if raw_plans else None,
         scenario=str(getattr(args, "scenario", "") or ""),
         include_empty=bool(getattr(args, "include_empty", False)),
+        sections=tuple(str(item) for item in raw_sections) if raw_sections else None,
     )
 
 
@@ -311,6 +315,40 @@ def cmd_brief(args) -> int:
             f"  не готово: {item['kind']} {item['anchor']} — {item['file']}: "
             + ", ".join(item["missing"])
         )
+    return 0
+
+
+def cmd_report(args) -> int:
+    """Отчёт по проекту: бэкенд (по графу) или фронтенд (по frontend/)."""
+    root, _explicit = _find_root(args.project)
+    slog.start_run(root, "report")
+    sections = list(args.section) or None
+    try:
+        if args.part == "frontend":
+            result = report_frontend(root, sections=sections)
+        else:
+            result = build_report(scan(root), sections=sections)
+            result["path"] = save_report(root, result["markdown"])
+    except ValueError as exc:
+        raise CliError(str(exc), 2) from exc
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "root": root.as_posix(),
+                    "part": args.part,
+                    "path": result["path"],
+                    "markdown": result["markdown"],
+                    "data": result["data"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    elif args.stdout:
+        print(result["markdown"], end="")
+    else:
+        print(f"Отчёт сохранён: {result['path']}")
     return 0
 
 
@@ -504,9 +542,12 @@ def cmd_help(_args) -> int:
     print("  scan  [--project .] [--json]       код → .studio/graph.json")
     print("  list  [--project .] [--json]       сценарии в терминале")
     print("  brief [--out PATH | --stdout] [--plan SLUG ...] [--only A ...]")
-    print("        [--scenario NAME] [--map full|related|compact|none] [--include-empty] [--json]")
+    print("        [--scenario NAME] [--map full|related|compact|none] [--include-empty]")
+    print("        [--section map|unready|diagnostics|anchors ...] [--json]")
     print("                                       ТЗ для AI-агента")
     print("  verify [BRIEF] [--json]            проверить выполнение ТЗ")
+    print("  report [--part backend|frontend] [--section S ...] [--stdout | --json]")
+    print("                                       отчёт по проекту")
     print("  doctor [--project .] [--json] [--strict]  диагностика одной командой")
     print("  install-full [--project .]         установить/обновить fastbase[full]")
     print("  help                               этот экран")
@@ -557,8 +598,25 @@ def build_parser() -> argparse.ArgumentParser:
     brief_p.add_argument("--scenario", default="", metavar="NAME")
     brief_p.add_argument("--map", choices=["full", "related", "compact", "none"], default="")
     brief_p.add_argument("--include-empty", action="store_true")
+    brief_p.add_argument(
+        "--section", action="append", default=[], metavar="NAME",
+        help="необязательный раздел ТЗ: map, unready, diagnostics, anchors "
+        "(можно повторять); без флага — все",
+    )
     brief_p.add_argument("--json", action="store_true")
     brief_p.set_defaults(f=cmd_brief)
+
+    report_p = sub.add_parser("report", help="отчёт по проекту")
+    _add_project(report_p)
+    report_p.add_argument("--part", choices=["backend", "frontend"], default="backend")
+    report_p.add_argument(
+        "--section", action="append", default=[], metavar="NAME",
+        help="раздел отчёта (можно повторять); без флага — все",
+    )
+    report_out = report_p.add_mutually_exclusive_group()
+    report_out.add_argument("--stdout", action="store_true", help="печатать отчёт в stdout")
+    report_out.add_argument("--json", action="store_true")
+    report_p.set_defaults(f=cmd_report)
 
     verify_p = sub.add_parser("verify", help="проверить выполнение ТЗ")
     _add_project(verify_p)
