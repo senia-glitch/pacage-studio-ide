@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import secrets
@@ -46,7 +47,7 @@ from studio.agent.sync_json import (
 from studio.creator import CreateError
 from studio.creator.plan import create_plan, delete_plan, preview_plan, update_plan
 from studio.env import read_env
-from studio.frontend.brief import front_prompt_state
+from studio.frontend.brief import FRONT_BRIEF_FILENAME, front_prompt_state, load_front_brief
 from studio.frontend.links import check_links
 from studio.metadata import (
     MetadataError,
@@ -315,6 +316,15 @@ class ProjectState:
                         "invalid_input",
                         "Редактировать можно только узлы, созданные в графе",
                     )
+                if (
+                    data.get("_actor") == "agent"
+                    and (existing.details or {}).get("created_by") != "agent"
+                ):
+                    raise MetadataError(
+                        "mode_forbidden",
+                        "Узел создан человеком: агент может добавлять к нему дочерние узлы, "
+                        "но не менять его",
+                    )
             if existing is not None and not parent_id:
                 incoming = next((edge for edge in graph.edges if edge.to_node == node_id), None)
                 if incoming is not None:
@@ -432,6 +442,17 @@ class ProjectState:
                     ):
                         removable.add(child.id)
                         changed = True
+            if data.get("_actor") == "agent":
+                foreign = [
+                    item
+                    for item in removable
+                    if (graph.by_id()[item].details or {}).get("created_by") != "agent"
+                ]
+                if foreign:
+                    raise MetadataError(
+                        "mode_forbidden",
+                        "Агент удаляет только то, что создал сам; в этой ветке есть узлы человека",
+                    )
             result = delete_graph_node(self.root, node_id, removable)
             graph = self.rescan("graph_node_delete")
             # Снапшот удалённой ветки для отмены: записи узлов и касающиеся их связи.
@@ -595,6 +616,23 @@ class ProjectState:
                 )
                 error.details = {"board": current}
                 raise error
+            if actor == "agent":
+                incoming = {
+                    str(item.get("id")): item for item in data["ideas"] if isinstance(item, dict)
+                }
+                for old in current.get("ideas") or []:
+                    if not isinstance(old, dict) or old.get("created_by"):
+                        continue
+                    new = incoming.get(str(old.get("id")))
+                    same = new is not None and {
+                        k: v for k, v in new.items() if k != "created_by"
+                    } == {k: v for k, v in old.items() if k != "created_by"}
+                    if not same:
+                        raise MetadataError(
+                            "mode_forbidden",
+                            f"Идея «{old.get('title') or old.get('id')}» создана человеком: агент "
+                            "не может её удалить или изменить — отправьте её без изменений",
+                        )
             known = {
                 str(item.get("id")): item
                 for item in current.get("ideas") or []
@@ -652,6 +690,18 @@ class ProjectState:
         """Сверить объявленные вызовы фронтенда (calls) с эндпоинтами бэкенда."""
         return check_links(front, self.ensure_graph(), read_env(self.root).api_prefix)
 
+    def _briefs_status(self) -> dict:
+        """Сколько задач в сохранённых ТЗ бэкенда и фронтенда (None — ТЗ нет)."""
+        status: dict = {"backend": None, "frontend": None}
+        with contextlib.suppress(BriefNotFound):
+            status["backend"] = len(self.saved_brief().get("tasks") or [])
+        path = Path(self.root) / ".studio" / FRONT_BRIEF_FILENAME
+        if path.is_file():
+            with contextlib.suppress(FileNotFoundError):
+                brief = load_front_brief(self.root, path.as_posix())
+                status["frontend"] = len(brief.get("tasks") or [])
+        return status
+
     def mode_token(self, mode: str) -> str:
         return access.derive_token(self.token, mode)
 
@@ -664,6 +714,7 @@ class ProjectState:
             "mode": mode,
             "project_root": str(self.root),
             "revision": self.revision,
+            "guide": "/api/agent/guide",
             "rules": [
                 "Запросы идут с заголовком X-Studio-Token и Content-Type: application/json.",
                 "Токен и адрес даёт пользователь; не сохраняйте их в файлах проекта.",
@@ -674,6 +725,7 @@ class ProjectState:
         if mode == access.FULL:
             info["tokens"] = {m: self.mode_token(m) for m in access.AGENT_MODES}
             info["routes"] = {m: access.routes_for(m) for m in access.AGENT_MODES}
+            info["briefs"] = self._briefs_status()
             return info
         info["routes"] = access.routes_for(mode)
         if mode == access.PLAN:

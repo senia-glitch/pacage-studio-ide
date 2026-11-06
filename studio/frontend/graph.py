@@ -74,6 +74,7 @@ def build_front_graph(project_root: str | Path) -> dict:
             "acceptance": [],
             "deletion": None,
             "calls": [],
+            "created_by": "",
             "blocks": [
                 {
                     "id": f"block:{fact['folder']}:{component['name']}",
@@ -85,6 +86,7 @@ def build_front_graph(project_root: str | Path) -> dict:
                     "acceptance": [],
                     "deletion": None,
                     "calls": [],
+                    "created_by": "",
                     "rules": [],
                 }
                 for component in fact.get("components") or []

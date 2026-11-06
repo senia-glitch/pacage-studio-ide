@@ -1,6 +1,7 @@
 import {api} from "./api.js";
 import {S, esc, setTab, schedulePersist, toast, applyGraph, hooks, modal} from "./core.js";
 import {storageKey} from "./storage.js";
+import {id, text, strings, blockFrom, pageFrom, pagesFrom, pageSource, plural, railCounts, railLabel} from "./ideamodel.js";
 
 const EMPTY = {version: 1, activeId: "", ideas: []};
 let board = EMPTY;
@@ -139,8 +140,6 @@ async function syncFromServer(){
   }
 }
 function $(id){return document.getElementById(id)}
-function id(){return `idea-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`}
-function text(v){return typeof v==="string"?v:""}
 function scenarioName(item,index){return text(item.title||item.name||item.slug)||`Сценарий ${index+1}`}
 function normalizedScenarios(value){
   const list=Array.isArray(value)?value:(value&&Array.isArray(value.scenarios)?value.scenarios:null);
@@ -151,22 +150,7 @@ function normalizedScenarios(value){
     return {id:id(),source:item,title:scenarioName(item,index),description:text(item.description),acceptance:Array.isArray(item.acceptance)?item.acceptance.map(String):[],domain:text(item.domain)};
   });
 }
-function strings(value){return Array.isArray(value)?value.map(x=>String(x).trim()).filter(Boolean):[]}
 function uid(){return (globalThis.crypto&&crypto.randomUUID)?crypto.randomUUID():`${Date.now().toString(16)}-${Math.random().toString(16).slice(2,10)}`}
-function blockFrom(raw,index){
-  const b=raw&&typeof raw==="object"&&!Array.isArray(raw)?raw:{};
-  return {id:text(b.id)||id(),name:text(b.name||b.title)||`Блок ${index+1}`,description:text(b.description),acceptance:strings(b.acceptance),calls:strings(b.calls),mapBlockId:text(b.mapBlockId)};
-}
-function pageFrom(raw,index){
-  const source=raw.source&&typeof raw.source==="object"&&!Array.isArray(raw.source)?raw.source:{...raw};
-  return {id:text(raw.id)||id(),source,title:text(raw.title||raw.name)||`Страница ${index+1}`,name:text(raw.name),description:text(raw.description),acceptance:strings(raw.acceptance),domain:text(raw.domain),route:text(raw.route),calls:strings(raw.calls),blocks:(Array.isArray(raw.blocks)?raw.blocks:[]).map(blockFrom),mapPageId:text(raw.mapPageId)};
-}
-function pagesFrom(list){
-  return (Array.isArray(list)?list:[]).filter(item=>item&&typeof item==="object"&&!Array.isArray(item)).map(pageFrom);
-}
-function pageSource(page){
-  return {...page.source,title:page.title,name:page.name,description:page.description,acceptance:page.acceptance,domain:page.domain,route:page.route,calls:page.calls,blocks:page.blocks.map(b=>({name:b.name,description:b.description,acceptance:b.acceptance,calls:b.calls}))};
-}
 function syncPage(idea,page){
   page.source=pageSource(page);
   idea.payload=payloadFor(idea);idea.jsonText=JSON.stringify(idea.payload,null,2);save();
@@ -341,12 +325,6 @@ function render(){
   boardEl.querySelectorAll("[data-import-json]").forEach(el=>el.onclick=()=>importJson(el.dataset.importJson));
   boardEl.querySelectorAll("[data-add-first]").forEach(el=>el.onclick=addIdea);
   list.querySelectorAll("[data-focus-idea]").forEach(el=>el.onclick=()=>{board.activeId=el.dataset.focusIdea;render();save()});
-}
-function plural(n,one,few,many){const a=n%10,b=n%100;return a===1&&b!==11?one:(a>=2&&a<=4&&(b<10||b>=20)?few:many)}
-function railLabel(idea){return railCounts(idea)+(idea.created_by==="agent"?" · от агента":"")}
-function railCounts(idea){
-  const s=idea.scenarios.length,p=idea.pages.length;
-  return `${s} ${plural(s,"сценарий","сценария","сценариев")}`+(p?` · ${p} ${plural(p,"страница","страницы","страниц")}`:"");
 }
 function find(ideaId){return board.ideas.find(x=>x.id===ideaId)}
 function updatePromptState(idea){

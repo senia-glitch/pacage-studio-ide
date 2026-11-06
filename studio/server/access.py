@@ -37,6 +37,7 @@ _GET_READ = frozenset(
         "/api/frontend/brief/last",
         "/api/frontend/verify",
         "/api/agent/reports",
+        "/api/agent/guide",
     }
 )
 # POST, которые ничего не меняют в плане и коде проекта (отчёты, промпты,
@@ -53,6 +54,7 @@ _POST_SAFE = frozenset(
         "/api/sync/apply",
         "/api/frontend/sync/apply",
         "/api/agent/report",
+        "/api/decompose/parse",
     }
 )
 # Запись плана: только режим планирования. Файлы кода эти маршруты не пишут.
@@ -61,10 +63,6 @@ _POST_PLAN = frozenset(
         "/api/ideas",
         "/api/metadata/graph-node",
         "/api/metadata/graph-node/delete",
-        "/api/metadata/graph-node/restore",
-        "/api/metadata/planned-change",
-        "/api/metadata/domain-plan",
-        "/api/metadata/domain-plan/delete",
         "/api/frontend/meta",
     }
 )
@@ -89,6 +87,10 @@ ROUTE_DOCS: dict[tuple[str, str], str] = {
     ("GET", "/api/frontend/brief/last"): "Последнее ТЗ фронтенда, собранное в окне «⇄ ТЗ…»: "
     "{markdown, brief_id, tasks[]}.",
     ("GET", "/api/frontend/verify"): "?brief=last|путь — проверка выполнения ТЗ фронтенда по коду.",
+    ("GET", "/api/agent/guide"): "Руководство агента (markdown): подключение, режимы, "
+    "порядок работы, форматы.",
+    ("POST", "/api/decompose/parse"): "{text} — проверить JSON ответа по идее "
+    "(scenarios, pages): вернёт разобранное и предупреждения; ничего не записывает.",
     ("GET", "/api/agent/reports"): "Ваши отчёты и решения пользователя: [{id, part, status, "
     "counts}] (pending, accepted, rejected).",
     ("POST", "/api/agent/report"): "{part: backend|frontend, json} — отправить итоговый "
@@ -107,34 +109,10 @@ ROUTE_DOCS: dict[tuple[str, str], str] = {
     "(страницы фронтенда с blocks и calls).",
     ("POST", "/api/metadata/graph-node"): "Создать/изменить плановый узел бэкенда.",
     ("POST", "/api/metadata/graph-node/delete"): "Удалить плановый узел.",
-    ("POST", "/api/metadata/graph-node/restore"): "Вернуть удалённый плановый узел.",
-    ("POST", "/api/metadata/planned-change"): "Записать плановую правку факт-узла.",
-    ("POST", "/api/metadata/domain-plan"): "Сохранить плановый домен.",
-    ("POST", "/api/metadata/domain-plan/delete"): "Удалить плановый домен.",
     ("POST", "/api/frontend/meta"): "{action, …} — плановые страницы (page-plan:…), "
     "блоки (block-plan:…), правила, домены; calls — список вызываемых эндпоинтов "
     "(«GET /path»); существующие страницы и блоки агенту закрыты.",
 }
-
-
-def frontend_meta_violation(data: dict) -> str:
-    """Причина отказа для агента в /api/frontend/meta или пустая строка.
-
-    Агент правит только плановые страницы и блоки; описания существующих узлов
-    принимает пользователь (синхронизация или инспектор).
-    """
-    action = str(data.get("action") or "")
-    if action == "save_page" and not str(data.get("id") or "").startswith("page-plan:"):
-        return (
-            "Агент правит только плановые страницы (page-plan:…); описания существующих "
-            "страниц принимает пользователь"
-        )
-    if action == "save_block" and not str(data.get("id") or "").startswith("block-plan:"):
-        return (
-            "Агент правит только плановые блоки (block-plan:…); описания существующих "
-            "блоков принимает пользователь"
-        )
-    return ""
 
 
 def derive_token(root_token: str, mode: str) -> str:
@@ -186,7 +164,6 @@ __all__ = [
     "IMPLEMENT",
     "PLAN",
     "derive_token",
-    "frontend_meta_violation",
     "route_allowed",
     "routes_for",
     "token_mode",

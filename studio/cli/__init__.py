@@ -554,6 +554,38 @@ def cmd_dev(args) -> int:
     return 0
 
 
+def cmd_skill(args) -> int:
+    """Руководство для AI-агента: печать или установка в проект (скилл, AGENTS.md)."""
+    from studio import __version__
+    from studio.agent import guide
+
+    if args.target == "stdout":
+        print(guide.load_guide(), end="")
+        return 0
+    root, explicit = _find_root(args.project)
+    _print_root(root, explicit)
+    try:
+        written = guide.install(root, args.target, __version__)
+    except OSError as exc:
+        raise CliError(str(exc)) from exc
+    for path in written:
+        print(f"записано: {path.relative_to(root).as_posix()}")
+    print("Агент прочитает это руководство сам; студия отдаёт то же по GET /api/agent/guide.")
+    return 0
+
+
+def cmd_mcp(_args) -> int:
+    """MCP-сервер (stdio) для AI-агента. В stdout — только протокол, поэтому без печати."""
+    try:
+        from studio.mcp_server import create_server
+
+        server = create_server()
+    except ImportError as exc:
+        raise CliError(str(exc)) from exc
+    server.run()
+    return 0
+
+
 def cmd_help(_args) -> int:
     print("studio — карта пути HTTP-запроса")
     print()
@@ -571,6 +603,11 @@ def cmd_help(_args) -> int:
     print("  verify [BRIEF] [--json]            проверить выполнение ТЗ")
     print("  report [--part backend|frontend] [--section S ...] [--stdout | --json]")
     print("                                       отчёт по проекту")
+    print("  skill [--target stdout|claude|agents|all] [--project .]")
+    print("                                       руководство для AI-агента: печать или")
+    print("                                       установка (скилл Claude Code, AGENTS.md)")
+    print("  mcp                                MCP-сервер для AI-агента (stdio);")
+    print('                                       нужен pip install "pacage-studio[mcp]"')
     print("  doctor [--project .] [--json] [--strict]  диагностика одной командой")
     print("  install-full [--project .]         установить/обновить fastbase[full]")
     print("  help                               этот экран")
@@ -647,6 +684,19 @@ def build_parser() -> argparse.ArgumentParser:
     verify_p.add_argument("--part", choices=["backend", "frontend"], default="backend")
     verify_p.add_argument("--json", action="store_true")
     verify_p.set_defaults(f=cmd_verify)
+
+    skill_p = sub.add_parser("skill", help="руководство для AI-агента: печать или установка")
+    _add_project(skill_p)
+    skill_p.add_argument(
+        "--target",
+        choices=["stdout", "claude", "agents", "all"],
+        default="stdout",
+        help="stdout — напечатать; claude — .claude/skills; agents — блок в AGENTS.md",
+    )
+    skill_p.set_defaults(f=cmd_skill)
+
+    mcp_p = sub.add_parser("mcp", help="MCP-сервер для AI-агента (stdio)")
+    mcp_p.set_defaults(f=cmd_mcp)
 
     doctor_p = sub.add_parser("doctor", help="диагностика проекта")
     _add_project(doctor_p)

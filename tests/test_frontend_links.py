@@ -217,6 +217,6 @@ def test_http_связи_видны_в_графе_и_агент_может_их_
         assert status == 200 and body["pages"] == []
         status, body = srv.post("/api/decompose/parse", {"text": "не json"})
         assert status == 400 and body["error"]["code"] == "invalid_input"
-        # агенту разбор не нужен: записывает идеи сам
-        status, body = srv.post("/api/decompose/parse", {"text": "{}"}, plan)
-        assert status == 403
+        # агенту разбор доступен (самопроверка ответа), но ничего не записывает
+        status, body = srv.post("/api/decompose/parse", {"text": '{"pages": []}'}, plan)
+        assert status == 200 and body["pages"] == []

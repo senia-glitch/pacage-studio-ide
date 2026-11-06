@@ -11,6 +11,8 @@ studio list [--json]           # сценарии в терминале
 studio brief [--stdout] [--plan SLUG] [--only ANCHOR] [--scenario NAME] [--section NAME]
 studio verify [BRIEF] [--part backend|frontend]   # проверить выполнение ТЗ
 studio report [--part backend|frontend] [--section NAME ...] [--stdout | --json]
+studio skill [--target stdout|claude|agents|all]   # руководство для AI-агента
+studio mcp                     # MCP-сервер для AI-агента (stdio), см. mcp.md
 studio install-full            # fastbase[full] в текущий venv
 studio help                    # все команды
 studio --version               # версия пакета
@@ -157,6 +159,22 @@ models` выбирает разделы, `--part frontend` — отчёт по `
   (`POST /api/agent/report`): в шапке появится кнопка **✉ N**. Откройте отчёт,
   проверьте отличия и нажмите «Применить» — пока вы этого не сделали, ничего не
   записано. Вручную отчёт тоже можно вставить во вкладке «Принять отчёт агента».
+
+Агенту нужно знать порядок работы. Руководство для любого агента
+([agent-workflow.md](agent-workflow.md)) можно передать тремя способами:
+
+- `studio skill --target claude` (скилл Claude Code), `--target agents` (блок в
+  `AGENTS.md`), `--target all` — установка в проект; `studio skill` без флагов печатает
+  текст. Повторный запуск обновляет файлы после обновления пакета;
+- агент сам читает `GET /api/agent/guide` (ссылка есть в `GET /api/agent`);
+- кнопка **«Скопировать с инструкцией»** в окне «AI-агент» копирует строку подключения
+  и руководство — для агента, который студию не знает.
+
+**MCP.** Агентам с поддержкой MCP удобнее инструменты, чем HTTP: `studio mcp`
+(extra `pacage-studio[mcp]`) даёт `studio_connect`, `studio_idea_add`, `studio_brief`,
+`studio_verify`, `studio_report` и другие, а права и правило владения остаются на стороне
+студии. Подключение — той же строкой из окна «AI-агент»; настройка клиента и список
+инструментов — в [mcp.md](mcp.md).
 
 Ограничения режимов сервер проверяет сам: агент не может применять ответы
 (`apply`), пересобирать ТЗ, создавать файлы-скелеты и править описания

@@ -143,3 +143,27 @@ def test_отчёт_по_фронтенду_и_живое_обновление(t
         status, listing = _req(srv, "GET", "/api/agent/reports", srv.token)
         assert listing["reports"][0]["part"] == "frontend"
         assert listing["reports"][0]["mode"] == "implement"
+
+
+def test_параллельные_отчёты_не_теряются_и_id_уникальны(tmp_path: Path) -> None:
+    import threading
+
+    count = 16
+    barrier = threading.Barrier(count)
+    ids: list[str] = []
+    errors: list[Exception] = []
+
+    def send() -> None:
+        try:
+            barrier.wait()
+            ids.append(inbox.submit_report(tmp_path, "backend", "plan", "{}", PREVIEW)["id"])
+        except Exception as exc:  # noqa: BLE001 — собираем для проверки
+            errors.append(exc)
+
+    threads = [threading.Thread(target=send) for _ in range(count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not errors
+    assert len(set(ids)) == count and len(inbox.list_reports(tmp_path)) == count

@@ -66,9 +66,13 @@ def test_метка_агента_на_плановых_страницах_и_б�
         mine = {"action": "save_page", "id": "page-plan:u1", "name": "user-page",
                 "plannedNew": True}
         assert srv.post("/api/frontend/meta", mine)[0] == 200
-        # агент дорабатывает страницу пользователя: метка не появляется
+        # страницу человека агент не меняет, но может добавить в неё свой блок
         edit = {"action": "save_page", "id": "page-plan:u1", "description": "правка агента"}
-        assert _post(srv, "/api/frontend/meta", plan, edit)[0] == 200
+        status, body = _post(srv, "/api/frontend/meta", plan, edit)
+        assert status == 403 and body["error"]["code"] == "mode_forbidden"
+        extra = {"action": "save_block", "pageId": "page-plan:u1", "id": "block-plan:x1",
+                 "name": "AgentExtra"}
+        assert _post(srv, "/api/frontend/meta", plan, extra)[0] == 200
         # агент не может подделать авторство через тело запроса
         forged = {"action": "save_page", "id": "page-plan:f1", "name": "f", "plannedNew": True,
                   "_actor": "user", "created_by": "user"}
@@ -82,7 +86,8 @@ def test_метка_агента_на_плановых_страницах_и_б�
     assert pages["page-plan:a1"]["created_by"] == "agent"
     assert pages["page-plan:a1"]["blocks"][0]["created_by"] == "agent"
     assert not pages["page-plan:u1"]["created_by"]
-    assert pages["page-plan:u1"]["description"] == "правка агента"
+    assert not pages["page-plan:u1"]["description"]
+    assert pages["page-plan:u1"]["blocks"][0]["created_by"] == "agent"
     assert pages["page-plan:f1"]["created_by"] == "agent"
     assert not pages["page-plan:u2"]["created_by"]
 

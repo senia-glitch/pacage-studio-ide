@@ -1,10 +1,12 @@
 // Шим для `node --test tests/js`: Node 22+ передаёт каталог как модуль.
 // CI и pytest запускают файлы по маске `*.test.mjs`, этот файл им не мешает.
+import "./agentmodel.test.mjs";
 import "./briefmodel.test.mjs";
 import "./anchors.test.mjs";
 import "./drag.test.mjs";
 import "./editor.test.mjs";
 import "./geometry.test.mjs";
+import "./ideamodel.test.mjs";
 import "./rendering.test.mjs";
 import "./savestate.test.mjs";
 import "./search.test.mjs";

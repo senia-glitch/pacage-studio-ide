@@ -31,14 +31,21 @@ def _token(value: str) -> str:
 
 
 def _find_node(graph: Graph, kind: str, anchor: str, node_id: str = "") -> Node | None:
+    """Узел кода для задачи ТЗ.
+
+    Плановые узлы (их рисует студия, строки в коде у них нет) сами «выполнением» не
+    считаются: после реализации задачу закрывает настоящий узел с тем же именем. Иначе
+    плановый узел и узел из кода давали бы неоднозначность, и ТЗ нельзя было бы
+    выполнить, пока человек не удалит плановый узел вручную.
+    """
     if node_id:
         node = graph.by_id().get(node_id)
-        if node is not None and node.kind == kind:
+        if node is not None and node.kind == kind and not node.planned:
             return node
     candidates = [
         node
         for node in graph.nodes
-        if node.kind == kind and (node_anchor(node) or node.label) == anchor
+        if node.kind == kind and not node.planned and (node_anchor(node) or node.label) == anchor
     ]
     if len(candidates) == 1:
         return candidates[0]
@@ -46,7 +53,9 @@ def _find_node(graph: Graph, kind: str, anchor: str, node_id: str = "") -> Node 
         candidates = [
             node
             for node in graph.nodes
-            if node.kind == kind and (node_anchor(node) or node.label).lower() == anchor.lower()
+            if node.kind == kind
+            and not node.planned
+            and (node_anchor(node) or node.label).lower() == anchor.lower()
         ]
     if len(candidates) == 1:
         return candidates[0]
@@ -57,8 +66,9 @@ def _resolve_expected_node(graph: Graph, prefix: str, expected: dict) -> Node | 
     node_id = str(expected.get(f"{prefix}_id") or "")
     node = graph.by_id().get(node_id)
     kind = str(expected.get(f"{prefix}_kind") or "")
-    if node is not None and (not kind or node.kind == kind):
+    if node is not None and (not kind or node.kind == kind) and not node.planned:
         return node
+    # плановый узел — не код: ищем настоящий узел с тем же именем
     return _find_node(graph, kind, str(expected.get(f"{prefix}_anchor") or ""))
 
 

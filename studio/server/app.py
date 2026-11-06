@@ -15,6 +15,7 @@ from pathlib import Path
 from studio import log as slog
 from studio._constants import MAX_HTTP_BODY
 from studio.agent import BriefError, BriefNotFound, inbox
+from studio.agent.guide import load_guide
 from studio.agent.sync_json import check_undo_entries, extract_json, same_state
 from studio.creator import CreateError
 from studio.frontend import brief as front_brief
@@ -152,6 +153,7 @@ def make_handler(ctx):
                     self._discard_body()
                     raise _HTTPProblem(403, "bad_token", "Нет или неверен X-Studio-Token")
                 if not access.route_allowed(mode, self.command, path):
+                    slog.step(f"агент[{mode}] ЗАПРЕЩЕНО {self.command} {path}")
                     self._discard_body()
                     raise _HTTPProblem(
                         403,
@@ -160,6 +162,8 @@ def make_handler(ctx):
                         "Список разрешённого — GET /api/agent",
                     )
                 self._mode = mode
+                if mode != access.FULL and path != "/api/wait":
+                    slog.step(f"агент[{mode}] {self.command} {path}")
             if self.command == "POST":
                 ctype = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
                 raw_length = self.headers.get("Content-Length")
@@ -207,12 +211,15 @@ def make_handler(ctx):
             except NodeNotFound:
                 self._error(404, "node_not_found", "Узел не найден — обновите карту")
             except MetadataError as exc:
+                if exc.code == "mode_forbidden":
+                    slog.step(f"агент[{self._mode}] отказ: {exc.message}")
                 status = {
                     "invalid_input": 400,
                     "node_not_found": 404,
                     "anchor_not_found": 404,
                     "not_writable": 422,
                     "ideas_conflict": 409,
+                    "mode_forbidden": 403,
                 }.get(exc.code, 400)
                 code = "node_not_found" if exc.code == "anchor_not_found" else exc.code
                 self._error(status, code, exc.message, getattr(exc, "details", None))
@@ -330,6 +337,10 @@ def make_handler(ctx):
                 return self._json(state.load_ideas())
             if url.path == "/api/brief/last":
                 return self._json(state.saved_brief())
+            if url.path == "/api/agent/guide":
+                from studio import __version__
+
+                return self._json({"markdown": load_guide(), "studio_version": __version__})
             if url.path == "/api/agent/reports":
                 reports = inbox.list_reports(state.root)
                 pending = sum(1 for item in reports if item.get("status") == inbox.PENDING)
@@ -367,10 +378,6 @@ def make_handler(ctx):
                     "mode_forbidden",
                     "Агент может только проверить ответ (без apply): применяет пользователь в UI",
                 )
-            if self._mode != access.FULL and url.path == "/api/frontend/meta":
-                reason = access.frontend_meta_violation(data)
-                if reason:
-                    return self._error(403, "mode_forbidden", reason)
             if url.path == "/api/agent/report":
                 return self._json(agent_report_submit(state, data, self._mode))
             if url.path == "/api/agent/report/decision":
@@ -481,6 +488,10 @@ def frontend_meta_op(root: Path, data: dict) -> dict:
     payload = {key: value for key, value in data.items() if key not in ("action", "_actor")}
     with front_meta.META_LOCK:
         before = front_meta.load_meta(root) if actor == "agent" else None
+        if before is not None:
+            reason = front_meta.agent_violation(before, action, payload)
+            if reason:
+                raise MetadataError("mode_forbidden", reason)
         op(root, payload)
         if before is not None:
             front_meta.stamp_agent(root, before, action, payload)

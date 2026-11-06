@@ -1,4 +1,4 @@
-# pacage-studio 5.19.0 — единая карта проекта
+# pacage-studio 5.21.0 — единая карта проекта
 
 Офлайн-инструмент для проектов на `fastbase` / `core-package` / `event-infra`.
 Читает код по AST (без запуска) и рисует в браузере путь:
@@ -22,12 +22,28 @@ python -m pip install "fastbase[full] @ git+https://github.com/senia-glitch/fast
 python -m pip install "pacage-studio @ git+https://github.com/senia-glitch/pacage-studio-ide.git"
 ```
 
-`fastbase` также ставится одной командой из студии — `studio install-full`.
+`fastbase[full]` сам подтягивает `core-package` и `event-infra`, поэтому установку и
+обновление всего стека можно выполнить одной командой:
+
+```powershell
+python -m pip install --upgrade "fastbase[full] @ git+https://github.com/senia-glitch/fastapi-transport.git" "pacage-studio @ git+https://github.com/senia-glitch/pacage-studio-ide.git"
+```
+
+Если версии не обновились, добавьте `--force-reinstall` (переустановятся и зависимости).
+`fastbase` также ставится из студии — `studio install-full`.
 
 ## Инициализация проекта
 
-В корне проекта — файл `.env.fastbase` (ключи: `FAT_ROUTES_PACKAGE`,
-`FAT_CORE_DISCOVER`, `FAT_API_PREFIX`, `STUDIO_MODELS`), затем:
+Пакеты стека инициализируют проект своими командами (в корне проекта):
+
+```powershell
+infra init        # event-infra: models.py, .infra.env, alembic/
+core-init         # core-package: .core-package.env, core_project/
+fb init           # fastbase: структура app/ и .env.fastbase
+```
+
+В `.env.fastbase` — ключи `FAT_ROUTES_PACKAGE`, `FAT_CORE_DISCOVER`, `FAT_API_PREFIX`,
+`STUDIO_MODELS`. Затем:
 
 ```powershell
 studio doctor     # проверка источников и окружения
@@ -45,6 +61,23 @@ studio                      # скан + интерфейс в браузере
 Дальше: `studio brief` собирает ТЗ для AI-агента по планируемым узлам,
 `studio verify` проверяет результат, `studio report` собирает отчёт по проекту
 (бэкенд или `--part frontend`).
+
+## Работа с AI-агентом
+
+Студия даёт агенту доступ к проекту, а решения оставляет за вами.
+
+1. Запустите `studio` и нажмите **«AI-агент»**: выберите режим (планирование или
+   реализация) и скопируйте строку подключения (адрес, токен, режим).
+2. Вставьте её агенту. Если агент студию не знает — **«Скопировать с инструкцией»**
+   или `studio skill --target all` (скилл Claude Code и блок в `AGENTS.md`).
+3. **Планирование:** агент предлагает идеи и плановые узлы (бейдж «агент»). **Реализация:**
+   агент делает выбранное вами ТЗ, проверяет `verify` и присылает отчёт — он ждёт в
+   **✉** до вашего «Применить».
+
+Агент не применяет ничего сам, не удаляет и не переписывает созданное вами; права
+режимов проверяет сервер. Для агентов с MCP есть сервер `studio mcp` (extra
+`pacage-studio[mcp]`), для остальных — HTTP-руководство. Подробности —
+[docs/mcp.md](docs/mcp.md) и [docs/agent-workflow.md](docs/agent-workflow.md).
 
 ## Что умеет
 
@@ -95,7 +128,11 @@ studio                      # скан + интерфейс в браузере
 - ТЗ с выбором необязательных разделов и правкой текста прямо в окне; итоговый
   отчёт агента по ТЗ — строгий JSON; применение любого JSON-ответа отменяется
   кнопкой «↩ Отменить применение»;
-- `studio brief` / `studio verify`: ТЗ для AI-агента и проверка только фактов.
+- `studio brief` / `studio verify`: ТЗ для AI-агента и проверка только фактов;
+  то же для фронтенда (`studio verify --part frontend`), связи «страница или блок →
+  эндпоинт бэкенда» и сквозные идеи (бэкенд + фронтенд);
+- режимы AI-агента (планирование, реализация) с токенами, правилом владения, бейджем
+  «агент», входящими отчётами и руководством для любого агента (`studio skill`).
 
 ## Документация
 
@@ -106,18 +143,12 @@ studio                      # скан + интерфейс в браузере
 - [docs/troubleshooting.md](docs/troubleshooting.md) — коды диагностик.
 - [docs/agent-brief.md](docs/agent-brief.md) — ТЗ для AI-агента, JSON-ответ
   на промпт синхронизации и `studio verify`.
+- [docs/agent-workflow.md](docs/agent-workflow.md) — руководство для любого
+  AI-агента: подключение, режимы, форматы, запреты.
+- [docs/mcp.md](docs/mcp.md) — MCP-сервер `studio mcp`: установка, подключение
+  клиента, инструменты.
 - [docs/SPEC.md](docs/SPEC.md) — краткое устройство пакета.
 
 Разработка: `pip install -e ".[dev]"`, затем `ruff check` и `pytest -m "not integration"`;
 интеграционные тесты запускаются отдельно: `pytest -m integration`.
-
-## Установка полного стека:
-python -m pip install --upgrade --force-reinstall "fastbase[full] @ git+https://github.com/senia-glitch/fastapi-transport.git" "pacage-studio @ git+https://github.com/senia-glitch/pacage-studio-ide.git"
-# инициализация пакетов:
-infra init
-core-init
-fb init
-studio doctor
-# запуск студии
-studio
 

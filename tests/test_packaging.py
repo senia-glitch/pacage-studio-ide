@@ -59,9 +59,10 @@ def test_ui_статика_упакована():
 def test_rules_упакован():
     data = _pyproject()["tool"]["setuptools"]["package-data"]
     assert data["studio.metadata"] == ["rules.md"]
-    assert data["studio.agent"] == ["rules.md"]
+    assert data["studio.agent"] == ["rules.md", "guide.md"]
     assert (ROOT / "studio/metadata/rules.md").is_file()
     assert (ROOT / "studio/agent/rules.md").is_file()
+    assert (ROOT / "studio/agent/guide.md").is_file()
 
 
 def test_readme_существует():

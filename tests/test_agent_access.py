@@ -71,6 +71,7 @@ def test_agent_самоописание_по_режимам(demo: Path) -> None:
         assert status == 200 and full["mode"] == "full"
         assert full["tokens"]["plan"] == access.derive_token(srv.token, "plan")
         assert set(full["routes"]) == {"plan", "implement"}
+        assert full["briefs"] == {"backend": None, "frontend": None}  # ТЗ ещё нет
 
         token = full["tokens"]["plan"]
         status, info = _get(srv, "/api/agent", token)

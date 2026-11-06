@@ -41,10 +41,14 @@ endpoint → scenario → io → model
     ставит `created_by: agent` на всё, что создал агент; второй счётчик `aux`
     (frontend.json, ideas.json) будит `/api/wait` для живого обновления. Входящие отчёты агента (`studio/agent/inbox.py`,
     `.studio/agent-reports/`) — отправка `POST /api/agent/report`, решение за
-    пользователем.
+    пользователем. Руководство агента (`studio/agent/guide.md`): `GET /api/agent/guide`,
+    `studio skill`, `docs/agent-workflow.md`.
 13. **Связи фронтенд → бэкенд** (`studio/frontend/links.py`) — объявленные
     `calls` у страниц и блоков, сверка с эндпоинтами графа бэкенда (префикс API и
     параметры нормализуются); `links` в `/api/frontend/graph`, раздел ТЗ.
+15. **MCP-сервер** (`studio/mcp_server.py`, `studio/agent/client.py`) — инструменты
+    агента поверх HTTP API студии (`studio mcp`, extra `mcp`); права и правило владения
+    остаются на стороне студии.
 14. **Проверка ТЗ фронтенда** (`studio/frontend/verify.py`) — задачи ТЗ по маркеру
     `studio-front-brief` сверяются с кодом; `studio verify --part frontend`,
     `/api/frontend/verify`.
