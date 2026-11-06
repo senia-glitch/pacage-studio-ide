@@ -13,7 +13,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from test_agent_loop import _call, _implement
+from agent_helpers import call as _call
+from agent_helpers import implement_lessons as _implement
 from test_frontend_links import _project
 from test_server import _Server
 

@@ -10,7 +10,8 @@ from studio.agent.client import StudioClient, StudioError, check_url, parse_conn
 
 pytest.importorskip("mcp")
 
-from studio.mcp_server import INSTRUCTIONS, Session, create_server  # noqa: E402
+from studio.agent.guide import load_guide  # noqa: E402
+from studio.mcp_server import Session, create_server  # noqa: E402
 
 
 class FakeClient:
@@ -258,4 +259,6 @@ def test_инструкции_и_набор_инструментов():
     names = set(server.studio_tools)
     assert {"studio_connect", "studio_idea_add", "studio_page_add", "studio_brief",
             "studio_verify", "studio_report"} <= names
-    assert len(names) == 17 and "studio_connect" in INSTRUCTIONS
+    assert len(names) == 17
+    # клиент получает руководство как инструкции MCP: один источник, без HTTP
+    assert getattr(server, "instructions", None) == load_guide()

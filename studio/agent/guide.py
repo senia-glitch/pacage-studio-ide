@@ -1,9 +1,9 @@
 """Руководство для AI-агента (guide.md): один текст для любого агента.
 
-Источник — ``studio/agent/guide.md``. Он отдаётся по ``GET /api/agent/guide`` и
-устанавливается в проект командой ``studio skill``: как скилл Claude Code
-(``.claude/skills/pacage-studio/SKILL.md``) и/или как блок в ``AGENTS.md`` (его
-читают многие агенты). Блок в ``AGENTS.md`` обновляется между маркерами и не
+Единственный источник — ``studio/agent/guide.md`` (про инструменты MCP-сервера). Он же
+отдаётся клиенту как ``instructions`` MCP при подключении и устанавливается в проект
+командой ``studio skill``: как скилл Claude Code (``.claude/skills/pacage-studio/SKILL.md``)
+и/или как блок в ``AGENTS.md``. Блок в ``AGENTS.md`` обновляется между маркерами и не
 трогает остальной текст файла.
 """
 
@@ -16,9 +16,10 @@ from studio.store import atomic_write
 
 SKILL_NAME = "pacage-studio"
 SKILL_DESCRIPTION = (
-    "Работа с проектом через pacage-studio: планирование идей и узлов, реализация "
-    "выбранного ТЗ, проверка по коду и отчёт. Используй, когда пользователь даёт "
-    "строку подключения студии (Studio, Token, Mode) или просит работать через studio."
+    "Работа с проектом через MCP-сервер pacage-studio (инструменты studio_*): планирование "
+    "идей и узлов, реализация выбранного ТЗ, проверка по коду и отчёт. Используй, когда "
+    "пользователь даёт строку подключения студии (Studio, Token, Mode) или просит работать "
+    "через studio."
 )
 BEGIN = "<!-- pacage-studio:begin -->"
 END = "<!-- pacage-studio:end -->"

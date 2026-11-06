@@ -58,33 +58,31 @@ def test_права_маршрутов_по_режимам() -> None:
         for path in ("/api/plan", "/api/decompose", "/api/metadata/node", "/api/brief",
                      "/api/brief/save", "/api/frontend/brief", "/api/sync/undo"):
             assert not access.route_allowed(mode, "POST", path), (mode, path)
-    assert access.routes_for("нет") == []
 
 
 # ------------------------------------------------------------ HTTP-режимы
 
 
 @pytest.mark.integration
-def test_agent_самоописание_по_режимам(demo: Path) -> None:
+def test_рукопожатие_по_режимам(demo: Path) -> None:
+    """GET /api/agent — только рукопожатие для MCP и окна «AI-агент»: без списка маршрутов."""
     with _Server(demo) as srv:
         status, full = _get(srv, "/api/agent", srv.token)
         assert status == 200 and full["mode"] == "full"
         assert full["tokens"]["plan"] == access.derive_token(srv.token, "plan")
-        assert set(full["routes"]) == {"plan", "implement"}
         assert full["briefs"] == {"backend": None, "frontend": None}  # ТЗ ещё нет
 
-        token = full["tokens"]["plan"]
-        status, info = _get(srv, "/api/agent", token)
-        assert status == 200 and info["mode"] == "plan"
-        assert "tokens" not in info and info["workflow"]
-        assert any(r["path"] == "/api/ideas" and r["method"] == "POST" for r in info["routes"])
-
-        status, info = _get(srv, "/api/agent", full["tokens"]["implement"])
-        assert info["mode"] == "implement"
-        assert not any(r["path"] == "/api/ideas" and r["method"] == "POST" for r in info["routes"])
+        for mode in access.AGENT_MODES:
+            status, info = _get(srv, "/api/agent", full["tokens"][mode])
+            assert status == 200 and info["mode"] == mode
+            assert set(info) == {"studio_version", "mode", "project_root", "revision"}
 
         status, error = _get(srv, "/api/agent", "wrong-token")
         assert status == 403 and error["error"]["code"] == "bad_token"
+        # HTTP-руководства и описания маршрутов для агента нет: агент работает через MCP
+        for path in ("/api/agent/guide", "/api/agent/routes"):
+            assert _get(srv, path, full["tokens"]["plan"])[0] == 403  # агенту закрыто всё лишнее
+            assert _get(srv, path, srv.token)[0] == 404  # а самих маршрутов нет
 
 
 @pytest.mark.integration

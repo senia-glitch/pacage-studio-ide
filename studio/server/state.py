@@ -706,7 +706,10 @@ class ProjectState:
         return access.derive_token(self.token, mode)
 
     def agent_info(self, mode: str) -> dict:
-        """Самоописание API для агента: что разрешено в его режиме и как работать."""
+        """Рукопожатие для MCP-сервера и окна «AI-агент»: режим, версия, корень проекта.
+
+        Токены режимов и состояние ТЗ отдаются только интерфейсу (полный доступ).
+        """
         from studio import __version__
 
         info: dict = {
@@ -714,38 +717,10 @@ class ProjectState:
             "mode": mode,
             "project_root": str(self.root),
             "revision": self.revision,
-            "guide": "/api/agent/guide",
-            "rules": [
-                "Запросы идут с заголовком X-Studio-Token и Content-Type: application/json.",
-                "Токен и адрес даёт пользователь; не сохраняйте их в файлах проекта.",
-                "Решения принимает пользователь: агент ничего не применяет (apply запрещён).",
-                "Файлы проекта вне .studio/ правит только режим implement и только по ТЗ.",
-            ],
         }
         if mode == access.FULL:
             info["tokens"] = {m: self.mode_token(m) for m in access.AGENT_MODES}
-            info["routes"] = {m: access.routes_for(m) for m in access.AGENT_MODES}
             info["briefs"] = self._briefs_status()
-            return info
-        info["routes"] = access.routes_for(mode)
-        if mode == access.PLAN:
-            info["workflow"] = [
-                "GET /api/state, /api/graph, /api/frontend/graph, /api/ideas — прочитать проект.",
-                "Предложить изменения плановыми узлами (POST /api/metadata/graph-node, "
-                "/api/frontend/meta) и идеями (POST /api/ideas с revision).",
-                "Файлы кода не писать и /api/decompose, /api/plan не вызывать.",
-                "Пользователь сам отметит в UI, что реализовать.",
-            ]
-        else:
-            info["workflow"] = [
-                "GET /api/brief/last — ТЗ бэкенда, выбранное пользователем; делать только его "
-                "задачи. Для фронтенда — GET /api/frontend/brief/last.",
-                "Реализовать задачи в коде, не трогая .env*, .studio/ и конфигурацию.",
-                "GET /api/verify?brief=last (фронтенд — GET /api/frontend/verify) — проверить "
-                "выполнение; повторять до «выполнено».",
-                "Итоговый JSON-отчёт отправить POST /api/agent/report {part, json}: студия "
-                "проверит его и положит в «Отчёты агента»; применяет его пользователь в UI.",
-            ]
         return info
 
     # ------------------------------------------------- синхронизация описаний

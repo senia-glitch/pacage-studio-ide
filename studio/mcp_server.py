@@ -17,23 +17,7 @@ import uuid
 from typing import Any
 
 from studio.agent.client import StudioClient, StudioError, parse_connection
-
-INSTRUCTIONS = """\
-Студия (pacage-studio) — локальный сервис с картой проекта; человек работает в её
-интерфейсе, ты — через эти инструменты. Решения всегда за человеком: ты предлагаешь и
-реализуешь выбранное, но ничего не применяешь за него.
-
-1. Попроси у человека строку подключения из окна «AI-агент» в студии (Studio, Token, Mode)
-   и вызови studio_connect. Токен нельзя сохранять в файлы, коммиты и логи; после
-   перезапуска студии нужна новая строка.
-2. Режим planning: изучи проект (studio_overview, studio_graph, studio_frontend,
-   studio_ideas), предложи идеи (studio_idea_add) и плановые узлы (studio_node_add,
-   studio_page_add, studio_block_add). Код не пиши.
-3. Режим implement: возьми ТЗ человека (studio_brief), реализуй только его задачи,
-   проверь (studio_verify) до статуса «выполнено», отправь отчёт (studio_report).
-4. Править и удалять можно только своё (бейдж «агент»); к чужому можно добавлять новое.
-   Запрещённое студия отклонит (mode_forbidden) — не обходи, сообщи человеку.
-"""
+from studio.agent.guide import load_guide
 
 
 class McpUnavailable(ImportError):
@@ -127,7 +111,7 @@ def _guarded(func):
 def create_server(session: Session | None = None):
     """Собрать MCP-сервер; ``session`` можно подставить готовый (тесты, встраивание)."""
     session = session or Session()
-    server = _server_class()("pacage-studio", instructions=INSTRUCTIONS)
+    server = _server_class()("pacage-studio", instructions=load_guide())
 
     registry: dict[str, Any] = {}
 
@@ -605,4 +589,4 @@ def create_server(session: Session | None = None):
     return server
 
 
-__all__ = ["INSTRUCTIONS", "McpUnavailable", "Session", "create_server"]
+__all__ = ["McpUnavailable", "Session", "create_server"]

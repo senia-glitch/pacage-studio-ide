@@ -570,7 +570,9 @@ def cmd_skill(args) -> int:
         raise CliError(str(exc)) from exc
     for path in written:
         print(f"записано: {path.relative_to(root).as_posix()}")
-    print("Агент прочитает это руководство сам; студия отдаёт то же по GET /api/agent/guide.")
+    print("Подключите MCP-сервер студии клиенту, например:")
+    print("  claude mcp add pacage-studio -- studio mcp")
+    print("Подробнее — docs/mcp.md. То же руководство клиент получает от сервера сам.")
     return 0
 
 

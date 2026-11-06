@@ -5,7 +5,7 @@ export function connectionText(origin, token, mode) {
     `Studio: ${origin}`,
     `Token: ${token}`,
     `Mode: ${mode}`,
-    "Заголовок запросов: X-Studio-Token. Начни с GET /api/agent — там маршруты и порядок работы.",
+    "Вызови инструмент studio_connect и передай ему эту строку целиком.",
   ].join("\n");
 }
 

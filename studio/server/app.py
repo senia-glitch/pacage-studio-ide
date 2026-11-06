@@ -15,7 +15,6 @@ from pathlib import Path
 from studio import log as slog
 from studio._constants import MAX_HTTP_BODY
 from studio.agent import BriefError, BriefNotFound, inbox
-from studio.agent.guide import load_guide
 from studio.agent.sync_json import check_undo_entries, extract_json, same_state
 from studio.creator import CreateError
 from studio.frontend import brief as front_brief
@@ -337,10 +336,6 @@ def make_handler(ctx):
                 return self._json(state.load_ideas())
             if url.path == "/api/brief/last":
                 return self._json(state.saved_brief())
-            if url.path == "/api/agent/guide":
-                from studio import __version__
-
-                return self._json({"markdown": load_guide(), "studio_version": __version__})
             if url.path == "/api/agent/reports":
                 reports = inbox.list_reports(state.root)
                 pending = sum(1 for item in reports if item.get("status") == inbox.PENDING)

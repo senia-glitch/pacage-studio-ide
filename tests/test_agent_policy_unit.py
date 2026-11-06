@@ -140,11 +140,11 @@ def test_идеи_владение_и_метка(tmp_path: Path):
 def test_agent_info_по_режимам(demo: Path):
     state = _state(demo)
     full = state.agent_info(access.FULL)
-    assert set(full["tokens"]) == {"plan", "implement"} and full["guide"] == "/api/agent/guide"
+    assert set(full["tokens"]) == {"plan", "implement"}
     assert full["briefs"] == {"backend": None, "frontend": None}
     for mode in access.AGENT_MODES:
         info = state.agent_info(mode)
-        assert info["mode"] == mode and info["workflow"] and "tokens" not in info
+        assert info["mode"] == mode and "tokens" not in info and "briefs" not in info
     state.save_brief({})
     assert state.agent_info(access.FULL)["briefs"]["backend"] is not None
 

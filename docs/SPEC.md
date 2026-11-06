@@ -36,19 +36,20 @@ endpoint → scenario → io → model
 11. **JSON-ответ синхронизации** (`studio/agent/sync_json.py`) — разбор и проверка
     ответа агента; запись только по явному «Применить».
 12. **Доступ агента** (`studio/server/access.py`) — производные токены режимов
-    `plan` и `implement`, таблица разрешённых маршрутов, самоописание
-    `GET /api/agent`; агент не применяет ответы и не пересобирает ТЗ. Сервер
+    `plan` и `implement`, таблица разрешённых маршрутов, рукопожатие
+    `GET /api/agent` (режим, версия, корень проекта); агент не применяет ответы и не
+    пересобирает ТЗ. Сервер
     ставит `created_by: agent` на всё, что создал агент; второй счётчик `aux`
     (frontend.json, ideas.json) будит `/api/wait` для живого обновления. Входящие отчёты агента (`studio/agent/inbox.py`,
     `.studio/agent-reports/`) — отправка `POST /api/agent/report`, решение за
-    пользователем. Руководство агента (`studio/agent/guide.md`): `GET /api/agent/guide`,
-    `studio skill`, `docs/agent-workflow.md`.
+    пользователем. Руководство агента (`studio/agent/guide.md`) — единственный источник для
+    `instructions` MCP и для `studio skill` (`docs/agent-workflow.md`).
 13. **Связи фронтенд → бэкенд** (`studio/frontend/links.py`) — объявленные
     `calls` у страниц и блоков, сверка с эндпоинтами графа бэкенда (префикс API и
     параметры нормализуются); `links` в `/api/frontend/graph`, раздел ТЗ.
-15. **MCP-сервер** (`studio/mcp_server.py`, `studio/agent/client.py`) — инструменты
-    агента поверх HTTP API студии (`studio mcp`, extra `mcp`); права и правило владения
-    остаются на стороне студии.
+15. **MCP-сервер** (`studio/mcp_server.py`, `studio/agent/client.py`) — единственный
+    интерфейс агента (`studio mcp`, extra `mcp`); инструменты вызывают HTTP API студии, права
+    и правило владения остаются на её стороне.
 14. **Проверка ТЗ фронтенда** (`studio/frontend/verify.py`) — задачи ТЗ по маркеру
     `studio-front-brief` сверяются с кодом; `studio verify --part frontend`,
     `/api/frontend/verify`.

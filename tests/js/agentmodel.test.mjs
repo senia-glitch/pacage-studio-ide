@@ -8,7 +8,8 @@ test("connectionText: адрес, токен, режим и подсказка",
   assert.equal(lines[0], "Studio: http://127.0.0.1:8777");
   assert.equal(lines[1], "Token: TOKEN");
   assert.equal(lines[2], "Mode: plan");
-  assert.ok(lines[3].includes("X-Studio-Token") && lines[3].includes("/api/agent"));
+  assert.ok(lines[3].includes("studio_connect"));
+  assert.ok(!lines.join("\n").includes("/api/"), "строка не должна отсылать к HTTP");
 });
 
 test("tasksWord: склонение «задача»", () => {

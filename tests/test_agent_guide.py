@@ -1,43 +1,40 @@
-"""Руководство агента: согласованность с маршрутами, команда `studio skill`, `/api/agent/guide`."""
+"""Руководство агента: только про инструменты MCP, сверка с сервером, `studio skill`."""
 
 from __future__ import annotations
 
-import json
 import re
-import urllib.request
 from pathlib import Path
 
 import pytest
 
 from studio import cli
 from studio.agent import guide
-from studio.server import access
-from studio.server.state import ProjectState
 
 ROOT = Path(__file__).resolve().parent.parent
-ROUTE_RE = re.compile(r"\b(GET|POST) (/api/[A-Za-z0-9_/.-]+)")
+TOOL_RE = re.compile(r"studio_[a-z_]+")
+NOT_TOOLS = {"studio_version"}  # поле ответа studio_connect, а не инструмент
 
 
-# ------------------------------------------------- руководство и маршруты
+# ----------------------------------------------- руководство и инструменты MCP
 
 
-def test_каждый_маршрут_из_руководства_существует_и_доступен_агенту() -> None:
+def test_руководство_только_про_mcp_без_http() -> None:
     text = guide.load_guide()
-    routes = {(method, path.rstrip(".")) for method, path in ROUTE_RE.findall(text)}
-    assert len(routes) >= 15, routes
-    for method, path in sorted(routes):
-        assert (method, path) in access.ROUTE_DOCS, f"{method} {path} нет в ROUTE_DOCS"
-        assert any(
-            access.route_allowed(mode, method, path) for mode in access.AGENT_MODES
-        ), f"{method} {path} закрыт обоим режимам агента"
-
-
-def test_руководство_называет_режимы_подключение_и_запреты() -> None:
-    text = guide.load_guide()
-    for needle in ("X-Studio-Token", "GET /api/agent", "planning", "implement",
-                   "POST /api/agent/report", "GET /api/agent/guide", "mode_forbidden",
-                   "ideas_conflict", "`/api/plan`"):
+    for needle in ("studio_connect", "plan", "implement", "mode_forbidden", "bad_token",
+                   "not_connected", "studio_report", "studio_verify", "studio_brief"):
         assert needle in text, needle
+    for http in ("/api/", "X-Studio-Token", "Content-Type", "curl", "Authorization"):
+        assert http not in text, f"в руководстве осталась отсылка к HTTP: {http!r}"
+
+
+def test_руководство_совпадает_с_инструментами_сервера() -> None:
+    pytest.importorskip("mcp")
+    from studio.mcp_server import create_server
+
+    tools = set(create_server().studio_tools)
+    mentioned = set(TOOL_RE.findall(guide.load_guide())) - NOT_TOOLS
+    assert mentioned <= tools, f"в руководстве есть несуществующие инструменты: {mentioned - tools}"
+    assert tools <= mentioned, f"инструменты без описания в руководстве: {tools - mentioned}"
 
 
 def test_руководство_совпадает_с_документацией() -> None:
@@ -54,7 +51,7 @@ def test_файл_скилла_claude_имеет_frontmatter() -> None:
     # описание в кавычках: внутри есть «: », без них YAML-парсер ломается
     assert text.split("\n")[2].endswith('"')
     assert "\n---\n" in text and guide.load_guide().strip() in text
-    assert "9.9.9" in text
+    assert "9.9.9" in text and "MCP" in text.split("\n")[2]
 
 
 def test_блок_agents_md_обновляется_не_трогая_чужой_текст() -> None:
@@ -87,6 +84,7 @@ def test_cli_skill_устанавливает_скилл_и_agents(tmp_path: Pat
     assert cli.main(["skill", "--target", "all", "--project", str(root)]) == 0
     out = capsys.readouterr().out
     assert ".claude/skills/pacage-studio/SKILL.md" in out and "AGENTS.md" in out
+    assert "claude mcp add pacage-studio -- studio mcp" in out  # как подключить сервер
     skill = (root / ".claude/skills/pacage-studio/SKILL.md").read_text(encoding="utf-8")
     assert skill.startswith("---") and "name: pacage-studio" in skill
     agents = (root / "AGENTS.md").read_text(encoding="utf-8")
@@ -94,23 +92,3 @@ def test_cli_skill_устанавливает_скилл_и_agents(tmp_path: Pat
     # повторный запуск ничего не дублирует
     assert cli.main(["skill", "--target", "agents", "--project", str(root)]) == 0
     assert (root / "AGENTS.md").read_text(encoding="utf-8").count(guide.BEGIN) == 1
-
-
-# ------------------------------------------------------------------- HTTP
-
-
-@pytest.mark.integration
-def test_guide_по_токенам_режимов(demo: Path) -> None:
-    from test_server import _Server
-
-    with _Server(demo) as srv:
-        for mode in access.AGENT_MODES:
-            token = access.derive_token(srv.token, mode)
-            request = urllib.request.Request(
-                srv.url + "/api/agent/guide", headers={"X-Studio-Token": token}
-            )
-            with urllib.request.urlopen(request, timeout=10) as response:
-                body = json.loads(response.read().decode("utf-8"))
-            assert body["markdown"] == guide.load_guide() and body["studio_version"]
-        info = ProjectState(demo).agent_info(access.PLAN)
-        assert info["guide"] == "/api/agent/guide"

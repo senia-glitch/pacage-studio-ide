@@ -39,8 +39,7 @@ async function openAgentDialog() {
     <p class="hint" id="agentModeHint">${esc(MODES[mode].hint)}</p>
     <p class="hint" id="agentBriefState" hidden>${esc(briefState(backend, frontend))}</p>
     <textarea id="agentConn" class="prompt-editor-text" rows="4" readonly spellcheck="false" style="min-height:0;height:104px"></textarea>
-    <div class="pre-actions"><button type="button" class="primary" id="agentCopy">Скопировать для агента</button><button type="button" id="agentCopyFull" title="Строка подключения и полное руководство: для агента, который не знает студию">Скопировать с инструкцией</button></div>
-    <p class="hint">Агентам, которым скилл установлен (команда studio skill), хватит строки; остальным вставьте «с инструкцией» — или попросите прочитать GET /api/agent/guide.</p>`;
+    <div class="pre-actions"><button type="button" class="primary" id="agentCopy">Скопировать для агента</button></div>`;
   modal("Подключить AI-агента", body, [{label: "Закрыть"}]);
   const overlay = document.querySelector(".studio-modal");
   if (!overlay) return;
@@ -59,14 +58,6 @@ async function openAgentDialog() {
     };
   });
   overlay.querySelector("#agentCopy").onclick = () => copyText(current(), "Строка для агента скопирована");
-  overlay.querySelector("#agentCopyFull").onclick = async () => {
-    try {
-      const guide = await api("/api/agent/guide");
-      copyText(`${current()}\n\n${guide.markdown}`, "Строка и инструкция скопированы");
-    } catch (error) {
-      toast("Не удалось получить инструкцию: " + error.message);
-    }
-  };
   refresh();
 }
 
