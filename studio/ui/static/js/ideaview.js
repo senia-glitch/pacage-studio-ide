@@ -11,6 +11,10 @@ let promptMode = "new";
 /* Отмена действий: снапшоты доски перед деструктивными операциями. */
 const undoStack = [];
 let syncTimer = null;
+/* Ревизия серверной доски: по ней сервер отличает «моё устаревшее» от «чужого свежего»
+   (агент или другая вкладка правят .studio/ideas.json) и отвечает 409 вместо перезаписи. */
+let boardRevision = 0;
+let dirty = false;
 let serverSynced = false;
 
 function key(){ return `${storageKey((S.G&&S.G.project_root)||location.origin)}:ideas:v1`; }
@@ -48,11 +52,33 @@ function updateUndoButton(){
   if(button)button.hidden=!undoStack.length;
 }
 function indicator(state,textValue){if(state)state.textContent=textValue}
+function localCopy(){return JSON.stringify({...board,revision:boardRevision})}
+function adoptRemote(raw){
+  pushUndo();
+  board=normalizeBoard(raw);
+  boardRevision=Number(raw&&raw.revision)||0;
+  dirty=false;
+  try{localStorage.setItem(loadedKey,localCopy())}catch(_){ }
+  render();
+  toast("Доску идей изменил агент или другая вкладка — загружена серверная версия (можно отменить)");
+}
+async function pushBoard(){
+  try{
+    const result=await api("/api/ideas","POST",{...board,revision:boardRevision});
+    boardRevision=Number(result&&result.revision)||boardRevision;
+    dirty=false;
+    try{localStorage.setItem(loadedKey,localCopy())}catch(_){ }
+  }catch(error){
+    if(error&&error.code==="ideas_conflict"&&error.details&&error.details.board){adoptRemote(error.details.board);return}
+    throw error;
+  }
+}
 function save(){
   clearTimeout(persistTimer);
+  dirty=true;
   const state=$("ideasSaveState"); if(state)state.textContent="Сохранение…";
   persistTimer=setTimeout(()=>{
-    try{localStorage.setItem(loadedKey,JSON.stringify(board))}catch(_){indicator(state,"Не удалось сохранить");return}
+    try{localStorage.setItem(loadedKey,localCopy())}catch(_){indicator(state,"Не удалось сохранить");return}
     syncToServer(state);
   },220);
 }
@@ -60,7 +86,7 @@ function syncToServer(state){
   clearTimeout(syncTimer);
   syncTimer=setTimeout(async()=>{
     try{
-      await api("/api/ideas","POST",board);
+      await pushBoard();
       serverSynced=true;
       indicator(state,"Все изменения сохранены в проект");
     }catch(_){
@@ -71,14 +97,19 @@ function syncToServer(state){
 }
 function flushSave(){
   clearTimeout(persistTimer);
-  try{localStorage.setItem(loadedKey,JSON.stringify(board));const state=$("ideasSaveState");if(state)state.textContent="Все изменения сохранены в проект"}
+  try{localStorage.setItem(loadedKey,localCopy());const state=$("ideasSaveState");if(state)state.textContent="Все изменения сохранены в проект"}
   catch(_){const state=$("ideasSaveState");if(state)state.textContent="Не удалось сохранить"}
   clearTimeout(syncTimer);
-  api("/api/ideas","POST",board).catch(()=>{ });
+  pushBoard().catch(()=>{ });
 }
 function load(){
   loadedKey=key();
-  try{board=normalizeBoard(JSON.parse(localStorage.getItem(loadedKey)||"null"))}
+  boardRevision=0;
+  try{
+    const stored=JSON.parse(localStorage.getItem(loadedKey)||"null");
+    board=normalizeBoard(stored);
+    boardRevision=Number(stored&&stored.revision)||0;
+  }
   catch(_){board=clone(EMPTY)}
   try{promptMode=localStorage.getItem(loadedKey+":promptMode")==="improve"?"improve":"new"}catch(_){promptMode="new"}
 }
@@ -87,11 +118,16 @@ function load(){
 async function syncFromServer(){
   const state=$("ideasSaveState");
   try{
-    const remote=normalizeBoard(await api("/api/ideas","GET"));
+    const raw=await api("/api/ideas","GET");
+    const remote=normalizeBoard(raw);
+    const remoteRevision=Number(raw&&raw.revision)||0;
     if(!board.ideas.length&&remote.ideas.length){
-      board=remote;render();
+      board=remote;boardRevision=remoteRevision;render();
     }else if(!remote.ideas.length&&board.ideas.length){
-      await api("/api/ideas","POST",board);
+      boardRevision=remoteRevision;
+      await pushBoard();
+    }else if(remoteRevision!==boardRevision&&!dirty){
+      board=remote;boardRevision=remoteRevision;render();
     }
     serverSynced=true;
     indicator(state,board.ideas.length?"Все изменения сохранены в проект":"Все изменения сохранены");

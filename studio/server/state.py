@@ -14,6 +14,7 @@ from pathlib import Path
 from studio import log as slog
 from studio import store
 from studio.agent import (
+    BriefNotFound,
     BriefOptions,
     build_brief,
     build_decompose_prompt,
@@ -59,6 +60,7 @@ from studio.metadata import (
 from studio.metamodel import EDGE_KINDS, NODE_KINDS, Graph, Node
 from studio.scanner import scan
 from studio.scanner.anchors import AnchorResolver
+from studio.server import access
 from studio.source import load_sources, stat_fingerprint
 
 DEFAULT_POLL = 1.0
@@ -546,21 +548,111 @@ class ProjectState:
             return {"version": 1, "activeId": "", "ideas": []}
         return data
 
+    @staticmethod
+    def _board_revision(board: dict) -> int:
+        value = board.get("revision") if isinstance(board, dict) else 0
+        return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
     def save_ideas(self, data: dict) -> dict:
+        """Сохранить доску. Если передан revision, он должен совпадать с серверным.
+
+        Так UI и агент не затирают друг другу записи: проигравший получает 409
+        ideas_conflict с актуальной доской в details.board и перечитывает её.
+        Без revision запись принимается (совместимость со старыми клиентами).
+        """
         if not isinstance(data, dict) or not isinstance(data.get("ideas"), list):
             raise MetadataError("invalid_input", "Ожидалась доска идей с массивом ideas")
         if len(data["ideas"]) > 500:
             raise MetadataError("invalid_input", "Слишком много идей в доске (максимум 500)")
-        path = self._ideas_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-            newline="\n",
-        )
-        tmp.replace(path)
-        return {"ok": True, "count": len(data["ideas"])}
+        with self.lock:
+            current = self.load_ideas()
+            current_revision = self._board_revision(current)
+            if "revision" in data and self._board_revision(data) != current_revision:
+                error = MetadataError(
+                    "ideas_conflict",
+                    "Доска идей изменилась с момента загрузки (её правил агент или другая "
+                    "вкладка). Перечитайте её: GET /api/ideas",
+                )
+                error.details = {"board": current}
+                raise error
+            board = {**data, "revision": current_revision + 1}
+            path = self._ideas_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(
+                json.dumps(board, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+                newline="\n",
+            )
+            tmp.replace(path)
+            return {"ok": True, "count": len(data["ideas"]), "revision": board["revision"]}
+
+    # ------------------------------------------------------------- агент
+
+    def saved_brief(self) -> dict:
+        """ТЗ, которое пользователь сохранил в проект: его и должен реализовать агент."""
+        from studio.agent.brief import BRIEF_FILENAME
+
+        with self.lock:
+            path = Path(self.root) / ".studio" / BRIEF_FILENAME
+            if not path.is_file():
+                raise BriefNotFound(
+                    "Сохранённого ТЗ нет: пользователь должен сохранить его в окне «ТЗ» студии"
+                )
+            try:
+                markdown = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                raise BriefNotFound(f"Файл ТЗ не читается: {exc}") from exc
+            data = load_brief(self.root, path)
+            return {
+                "markdown": markdown,
+                "brief_id": str(data.get("brief_id") or ""),
+                "fingerprint": str(data.get("fingerprint") or ""),
+                "path": f".studio/{BRIEF_FILENAME}",
+                "tasks": data.get("tasks") or [],
+            }
+
+    def mode_token(self, mode: str) -> str:
+        return access.derive_token(self.token, mode)
+
+    def agent_info(self, mode: str) -> dict:
+        """Самоописание API для агента: что разрешено в его режиме и как работать."""
+        from studio import __version__
+
+        info: dict = {
+            "studio_version": __version__,
+            "mode": mode,
+            "project_root": str(self.root),
+            "revision": self.revision,
+            "rules": [
+                "Запросы идут с заголовком X-Studio-Token и Content-Type: application/json.",
+                "Токен и адрес даёт пользователь; не сохраняйте их в файлах проекта.",
+                "Решения принимает пользователь: агент ничего не применяет (apply запрещён).",
+                "Файлы проекта вне .studio/ правит только режим implement и только по ТЗ.",
+            ],
+        }
+        if mode == access.FULL:
+            info["tokens"] = {m: self.mode_token(m) for m in access.AGENT_MODES}
+            info["routes"] = {m: access.routes_for(m) for m in access.AGENT_MODES}
+            return info
+        info["routes"] = access.routes_for(mode)
+        if mode == access.PLAN:
+            info["workflow"] = [
+                "GET /api/state, /api/graph, /api/frontend/graph, /api/ideas — прочитать проект.",
+                "Предложить изменения плановыми узлами (POST /api/metadata/graph-node, "
+                "/api/frontend/meta) и идеями (POST /api/ideas с revision).",
+                "Файлы кода не писать и /api/decompose, /api/plan не вызывать.",
+                "Пользователь сам отметит в UI, что реализовать.",
+            ]
+        else:
+            info["workflow"] = [
+                "GET /api/brief/last — ТЗ, выбранное пользователем; делать только его задачи.",
+                "Реализовать задачи в коде, не трогая .env*, .studio/ и конфигурацию.",
+                "GET /api/verify?brief=last — проверить выполнение; повторять до «выполнено».",
+                "Итоговый JSON-отчёт проверить через POST /api/sync/apply (без apply) "
+                "и отдать пользователю: принимает его он в UI.",
+            ]
+        return info
 
     # ------------------------------------------------- синхронизация описаний
 

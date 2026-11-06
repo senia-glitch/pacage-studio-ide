@@ -67,7 +67,9 @@ def origin_allowed(origin: str | None, host_header: str) -> bool:
 def token_ok(expected: str, provided: str | None) -> bool:
     if not expected or not provided:
         return False
-    return hmac.compare_digest(str(expected), str(provided))
+    return hmac.compare_digest(
+        str(expected).encode("utf-8"), str(provided).encode("utf-8", "replace")
+    )
 
 
 def static_path(root: Path, url_path: str) -> Path | None:

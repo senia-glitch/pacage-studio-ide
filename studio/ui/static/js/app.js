@@ -11,6 +11,7 @@ import {renderMap} from "./mapview.js";
 import {initIdeas, renderIdeas} from "./ideaview.js";
 import {initSync} from "./syncview.js";
 import {initReport} from "./reportview.js";
+import {initAgent} from "./agentview.js";
 import {renderSettings} from "./settingsview.js";
 import {bindViewport, fitView} from "./viewport.js";
 import {initTree, renderTree} from "./treeview.js";
@@ -42,6 +43,7 @@ async function boot(){
   initIdeas();
   initSync();
   initReport();
+  initAgent();
   initEditorChoice();
   initTree();
   initFrontend();

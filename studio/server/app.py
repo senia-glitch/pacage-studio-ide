@@ -23,6 +23,7 @@ from studio.frontend import meta as front_meta
 from studio.frontend import scan_frontend
 from studio.frontend import sync as front_sync
 from studio.metadata import MetadataError
+from studio.server import access
 from studio.server.security import (
     CSP,
     SECURITY_HEADERS,
@@ -31,7 +32,6 @@ from studio.server.security import (
     inject_token,
     origin_allowed,
     static_path,
-    token_ok,
 )
 from studio.server.state import NodeNotFound, ProjectState
 from studio.ui import INDEX, STATIC_DIR
@@ -68,6 +68,7 @@ def make_handler(ctx):
         protocol_version = "HTTP/1.1"
         server_version = "studio"
         sys_version = ""
+        _mode = access.FULL  # переопределяется в _security по токену запроса
 
         # ------------------------------------------------------------ ответы
 
@@ -143,11 +144,21 @@ def make_handler(ctx):
                 self._discard_body()
                 raise _HTTPProblem(403, "bad_origin", "Неверный Origin")
             path = urllib.parse.urlsplit(self.path).path
-            if path.startswith("/api/") and not token_ok(
-                state.token, self.headers.get("X-Studio-Token")
-            ):
-                self._discard_body()
-                raise _HTTPProblem(403, "bad_token", "Нет или неверен X-Studio-Token")
+            self._mode = access.FULL
+            if path.startswith("/api/"):
+                mode = access.token_mode(state.token, self.headers.get("X-Studio-Token"))
+                if mode is None:
+                    self._discard_body()
+                    raise _HTTPProblem(403, "bad_token", "Нет или неверен X-Studio-Token")
+                if not access.route_allowed(mode, self.command, path):
+                    self._discard_body()
+                    raise _HTTPProblem(
+                        403,
+                        "mode_forbidden",
+                        f"Режим «{mode}» не разрешает {self.command} {path}. "
+                        "Список разрешённого — GET /api/agent",
+                    )
+                self._mode = mode
             if self.command == "POST":
                 ctype = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
                 raw_length = self.headers.get("Content-Length")
@@ -200,6 +211,7 @@ def make_handler(ctx):
                     "node_not_found": 404,
                     "anchor_not_found": 404,
                     "not_writable": 422,
+                    "ideas_conflict": 409,
                 }.get(exc.code, 400)
                 code = "node_not_found" if exc.code == "anchor_not_found" else exc.code
                 self._error(status, code, exc.message, getattr(exc, "details", None))
@@ -306,6 +318,10 @@ def make_handler(ctx):
                 return self._json(state.prompts_state())
             if url.path == "/api/ideas":
                 return self._json(state.load_ideas())
+            if url.path == "/api/brief/last":
+                return self._json(state.saved_brief())
+            if url.path == "/api/agent":
+                return self._json(state.agent_info(self._mode))
             return self._error(404, "not_found", "Не найдено")
 
         # --------------------------------------------------------------- POST
@@ -313,6 +329,21 @@ def make_handler(ctx):
         def _post(self) -> None:
             url = urllib.parse.urlsplit(self.path)
             data = self._read_body()
+            if (
+                self._mode != access.FULL
+                and url.path in access.APPLY_PATHS
+                and data.get("apply") is not None
+                and data.get("apply") is not False
+            ):
+                return self._error(
+                    403,
+                    "mode_forbidden",
+                    "Агент может только проверить ответ (без apply): применяет пользователь в UI",
+                )
+            if self._mode != access.FULL and url.path == "/api/frontend/meta":
+                reason = access.frontend_meta_violation(data)
+                if reason:
+                    return self._error(403, "mode_forbidden", reason)
             if url.path == "/api/rescan":
                 graph = state.rescan("manual")
                 return self._json(graph.model_dump())
