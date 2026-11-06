@@ -110,3 +110,7 @@ studio                      # скан + интерфейс в браузере
 
 Разработка: `pip install -e ".[dev]"`, затем `ruff check` и `pytest -m "not integration"`;
 интеграционные тесты запускаются отдельно: `pytest -m integration`.
+
+## Установка полного стека:
+python -m pip install --upgrade --force-reinstall "fastbase[full] @ git+https://github.com/senia-glitch/fastapi-transport.git" "pacage-studio @ git+https://github.com/senia-glitch/pacage-studio-ide.git"
+
