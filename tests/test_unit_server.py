@@ -405,3 +405,18 @@ def test_serve_without_real_server(tmp_path: Path, monkeypatch, capsys) -> None:
     monkeypatch.setattr(app_mod, "_bind", lambda host, port, handler: FakeServer())
     monkeypatch.setattr(app_mod.os, "environ", {})
     assert serve(tmp_path, no_open=True) == 9999
+
+def test_второй_экземпляр_не_занимает_порт_первого() -> None:
+    """Регрессия: на Windows SO_REUSEADDR давал занять уже слушаемый порт, и браузер
+    попадал в чужой (старый) экземпляр студии с другим проектом."""
+    from http.server import BaseHTTPRequestHandler
+
+    first = _try_bind("127.0.0.1", 0, BaseHTTPRequestHandler)
+    assert first is not None
+    try:
+        port = first.server_address[1]
+        assert _try_bind("127.0.0.1", port, BaseHTTPRequestHandler) is None
+        with pytest.raises(app_mod.PortInUse):
+            _bind("127.0.0.1", port, BaseHTTPRequestHandler)
+    finally:
+        first.server_close()

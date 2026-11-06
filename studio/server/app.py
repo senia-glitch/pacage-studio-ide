@@ -6,6 +6,7 @@ import contextlib
 import functools
 import json
 import os
+import socket
 import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -511,6 +512,15 @@ def frontend_sync_undo_op(root: Path, data: dict) -> dict:
 def _try_bind(host: str, port: int, handler) -> ThreadingHTTPServer | None:
     """Создать сервер; занятый порт не оставляет полуоткрытый сокет."""
     server = ThreadingHTTPServer((host, port), handler, bind_and_activate=False)
+    if os.name == "nt":
+        # На Windows SO_REUSEADDR позволяет второму процессу занять уже слушаемый порт
+        # без ошибки: браузер попадает в старый экземпляр студии с другим проектом.
+        # Занимаем порт исключительно — занятый порт даст OSError и выбор следующего.
+        server.allow_reuse_address = False
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        sock = getattr(server, "socket", None)
+        if exclusive is not None and sock is not None:
+            sock.setsockopt(socket.SOL_SOCKET, exclusive, 1)
     try:
         server.server_bind()
         server.server_activate()
