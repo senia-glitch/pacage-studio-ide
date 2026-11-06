@@ -22,7 +22,9 @@ from studio.frontend.meta import load_meta
 def _merge_page(graph_page: dict, meta_page: dict | None) -> None:
     if not meta_page:
         return
-    for field in ("description", "acceptance", "domain", "note", "deletion", "name", "calls"):
+    for field in (
+        "description", "acceptance", "domain", "note", "deletion", "name", "calls", "created_by",
+    ):
         if field in meta_page:
             graph_page[field] = meta_page[field]
     if str(meta_page.get("route") or ""):
@@ -40,6 +42,7 @@ def _merge_page(graph_page: dict, meta_page: dict | None) -> None:
                 "acceptance": block_meta.get("acceptance") or [],
                 "deletion": block_meta.get("deletion"),
                 "calls": list(block_meta.get("calls") or []),
+                "created_by": block_meta.get("created_by") or "",
                 "rules": [dict(rule) for rule in block_meta.get("rules") or []],
             })
             continue
@@ -105,6 +108,7 @@ def build_front_graph(project_root: str | Path) -> dict:
                 "deletion": stored.get("deletion"),
                 "component": stored.get("component") or "",
                 "calls": list(stored.get("calls") or []),
+                "created_by": stored.get("created_by") or "",
                 "blocks": [
                     {
                         "id": block_id,
@@ -116,6 +120,7 @@ def build_front_graph(project_root: str | Path) -> dict:
                         "acceptance": block.get("acceptance") or [],
                         "deletion": block.get("deletion"),
                         "calls": list(block.get("calls") or []),
+                        "created_by": block.get("created_by") or "",
                         "rules": [dict(rule) for rule in block.get("rules") or []],
                     }
                     for block_id, block in (stored.get("blocks") or {}).items()
@@ -166,6 +171,7 @@ def build_front_graph(project_root: str | Path) -> dict:
                 "acceptance": block_data.get("acceptance") or [],
                 "deletion": block_data.get("deletion"),
                 "calls": list(block_data.get("calls") or []),
+                "created_by": block_data.get("created_by") or "",
                 "rules": [dict(rule) for rule in block_data.get("rules") or []],
             })
 

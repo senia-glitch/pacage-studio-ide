@@ -306,7 +306,14 @@ def make_handler(ctx):
                     rev = int((query.get("rev") or ["0"])[0])
                 except ValueError:
                     rev = 0
-                return self._json({"revision": state.wait_for_change(rev)})
+                if "aux" not in query:
+                    return self._json({"revision": state.wait_for_change(rev)})
+                try:
+                    aux = int(query["aux"][0])
+                except ValueError:
+                    aux = -1
+                revision = state.wait_for_change(rev, aux=aux)
+                return self._json({"revision": revision, "aux": state.aux})
             if url.path == "/api/frontend":
                 return self._json(scan_frontend(state.root))
             if url.path == "/api/frontend/graph":
@@ -338,6 +345,10 @@ def make_handler(ctx):
         def _post(self) -> None:
             url = urllib.parse.urlsplit(self.path)
             data = self._read_body()
+            # Автор записи: ставит только сервер по токену, значение из тела игнорируется.
+            data.pop("_actor", None)
+            if self._mode != access.FULL:
+                data["_actor"] = "agent"
             if (
                 self._mode != access.FULL
                 and url.path in access.APPLY_PATHS
@@ -447,12 +458,17 @@ def _front_errors(func):
 @_front_errors
 def frontend_meta_op(root: Path, data: dict) -> dict:
     """Диспетчер операций метаданных фронтенда; ответ = meta + граф."""
+    actor = str(data.get("_actor") or "")
     action = str(data.get("action") or "")
     op = _META_OPS.get(action)
     if op is None:
         raise ValueError(f"Неизвестная операция фронтенда: {action}")
-    payload = {key: value for key, value in data.items() if key != "action"}
-    op(root, payload)
+    payload = {key: value for key, value in data.items() if key not in ("action", "_actor")}
+    with front_meta.META_LOCK:
+        before = front_meta.load_meta(root) if actor == "agent" else None
+        op(root, payload)
+        if before is not None:
+            front_meta.stamp_agent(root, before, action, payload)
     return {
         "meta": front_meta.load_meta(root),
         "graph": front_graph.build_front_graph(root),

@@ -242,6 +242,7 @@ function renderTree(){
       +`<button type="button" class="tree-twist${leaf?" leaf":""}" tabindex="-1" title="${collapsed?"Развернуть":"Свернуть"}">${collapsed?"▸":"▾"}</button>`
       +(node.section?"":`<span class="tree-chip">${esc(kindLabel(node))}</span>`)
       +(node.planned?'<span class="chip todo">план</span>':"")
+      +(node.details&&node.details.created_by==="agent"?'<span class="chip agent" title="Создано AI-агентом">агент</span>':"")
       +`<span class="t" title="${esc(node.label||"")}">${esc(node.label||"")}</span></div>`;
   });
   body.innerHTML=rows.length?html.join(""):'<div class="hint tree-empty">Узлов нет. Добавьте эндпоинт или выполните «Обновить код».</div>';

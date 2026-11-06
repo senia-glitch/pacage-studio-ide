@@ -25,7 +25,7 @@ function promptBasis(idea){return JSON.stringify([idea.title,idea.description])}
 function normalizeBoard(value){
   if(!value||!Array.isArray(value.ideas))return clone(EMPTY);
   const ideas=value.ideas.filter(item=>item&&typeof item==="object"&&!Array.isArray(item)).map((item,index)=>{
-    const idea={id:text(item.id)||id(),title:text(item.title)||`Идея ${index+1}`,description:text(item.description),prompt:text(item.prompt),promptBasis:text(item.promptBasis),jsonText:text(item.jsonText),payload:item.payload&&typeof item.payload==="object"?item.payload:{scenarios:[]},scenarios:[],pages:pagesFrom(item.pages)};
+    const idea={id:text(item.id)||id(),created_by:text(item.created_by),title:text(item.title)||`Идея ${index+1}`,description:text(item.description),prompt:text(item.prompt),promptBasis:text(item.promptBasis),jsonText:text(item.jsonText),payload:item.payload&&typeof item.payload==="object"?item.payload:{scenarios:[]},scenarios:[],pages:pagesFrom(item.pages)};
     idea.scenarios=(Array.isArray(item.scenarios)?item.scenarios:[]).filter(s=>s&&typeof s==="object"&&!Array.isArray(s)).map((scenario,scenarioIndex)=>{
       const source=scenario.source&&typeof scenario.source==="object"&&!Array.isArray(scenario.source)?scenario.source:{};
       const acceptance=Array.isArray(scenario.acceptance)?scenario.acceptance.map(String):[];
@@ -271,7 +271,7 @@ function card(idea){
   }).join("");
   return `<section class="idea-row" data-idea="${esc(idea.id)}">
     <article class="idea-root-card">
-      <div class="node-kicker"><span class="node-dot"></span> ИДЕЯ <span class="node-state">Корень ветки</span><button type="button" class="icon-button danger" data-delete-idea="${esc(idea.id)}" title="Удалить идею">×</button></div>
+      <div class="node-kicker"><span class="node-dot"></span> ИДЕЯ <span class="node-state">Корень ветки${idea.created_by==="agent"?" · от агента":""}</span><button type="button" class="icon-button danger" data-delete-idea="${esc(idea.id)}" title="Удалить идею">×</button></div>
       <input class="idea-title" data-idea-title="${esc(idea.id)}" value="${esc(idea.title)}" aria-label="Название идеи">
       <label class="idea-field-label">ЗАДАЧА / ИДЕЯ<textarea data-idea-description="${esc(idea.id)}" rows="4" placeholder="Какую потребность или проблему нужно решить?">${esc(idea.description)}</textarea></label>
       <div class="idea-node-actions"><select class="prompt-mode" data-prompt-mode="${esc(idea.id)}" title="Режим сборки промпта"><option value="new"${promptMode==="new"?" selected":""}>Новая система</option><option value="improve"${promptMode==="improve"?" selected":""}>Развитие системы</option></select><button type="button" class="primary" data-generate-prompt="${esc(idea.id)}">✦ Собрать промпт</button><button type="button" data-copy-prompt="${esc(idea.id)}" ${promptIsFresh?"":"disabled"}>Копировать</button><span class="prompt-freshness ${promptIsFresh?"fresh":idea.prompt?"stale":""}" data-prompt-state="${esc(idea.id)}">${promptIsFresh?"Актуален":idea.prompt?"Устарел":""}</span></div>
@@ -292,7 +292,7 @@ function render(){
   if(visible.length&&!visible.some(idea=>idea.id===board.activeId))board.activeId=visible[0].id;
   const active=visible.find(idea=>idea.id===board.activeId);
   boardEl.innerHTML=active?card(active):query?'<div class="ideas-welcome"><span>⌕</span><h3>Ничего не найдено</h3><p>Попробуйте изменить поисковый запрос.</p></div>':board.ideas.length?'<div class="ideas-welcome"><span>⌁</span><h3>Выберите идею</h3><p>Выберите ветку в списке слева.</p></div>':'<div class="ideas-welcome"><span>✳</span><h3>Начните с идеи</h3><p>Создайте корневой узел, сформируйте промпт для LLM и добавьте сценарии в виде связанной ветки.</p><button class="primary" type="button" data-add-first>＋ Создать первую идею</button></div>';
-  list.innerHTML=visible.length?visible.map((idea,i)=>`<button type="button" class="idea-rail-item${idea.id===board.activeId?" on":""}" data-focus-idea="${esc(idea.id)}"><span>${String(i+1).padStart(2,"0")}</span><b>${esc(idea.title||"Без названия")}</b><small>${railCounts(idea)}</small></button>`).join(""):query?'<p class="rail-empty">Совпадений нет</p>':'<p class="rail-empty">Пока нет идей</p>';
+  list.innerHTML=visible.length?visible.map((idea,i)=>`<button type="button" class="idea-rail-item${idea.id===board.activeId?" on":""}" data-focus-idea="${esc(idea.id)}"><span>${String(i+1).padStart(2,"0")}</span><b>${esc(idea.title||"Без названия")}</b><small>${railLabel(idea)}</small></button>`).join(""):query?'<p class="rail-empty">Совпадений нет</p>':'<p class="rail-empty">Пока нет идей</p>';
   boardEl.querySelectorAll("[data-idea-title]").forEach(el=>el.oninput=()=>{const idea=find(el.dataset.ideaTitle);if(!idea)return;idea.title=el.value;updateRail();updatePromptState(idea);save()});
   boardEl.querySelectorAll("[data-idea-description]").forEach(el=>el.oninput=()=>{const idea=find(el.dataset.ideaDescription);if(idea){idea.description=el.value;updatePromptState(idea);save()}});
   boardEl.querySelectorAll("[data-idea-json]").forEach(el=>el.oninput=()=>{const idea=find(el.dataset.ideaJson);if(idea)idea.jsonText=el.value;save()});
@@ -343,6 +343,7 @@ function render(){
   list.querySelectorAll("[data-focus-idea]").forEach(el=>el.onclick=()=>{board.activeId=el.dataset.focusIdea;render();save()});
 }
 function plural(n,one,few,many){const a=n%10,b=n%100;return a===1&&b!==11?one:(a>=2&&a<=4&&(b<10||b>=20)?few:many)}
+function railLabel(idea){return railCounts(idea)+(idea.created_by==="agent"?" · от агента":"")}
 function railCounts(idea){
   const s=idea.scenarios.length,p=idea.pages.length;
   return `${s} ${plural(s,"сценарий","сценария","сценариев")}`+(p?` · ${p} ${plural(p,"страница","страницы","страниц")}`:"");
@@ -435,7 +436,7 @@ async function recreateScenario(scenario){
     toast("Сценарий на карте пересоздан данными карточки");
   }catch(error){toast("Не удалось пересоздать сценарий на карте: "+error.message)}
 }
-function updateRail(){const list=$("ideaList");if(!list)return;list.querySelectorAll(".idea-rail-item").forEach(el=>{const item=find(el.dataset.focusIdea);if(item){el.querySelector("b").textContent=item.title||"Без названия";el.querySelector("small").textContent=railCounts(item)}})}
+function updateRail(){const list=$("ideaList");if(!list)return;list.querySelectorAll(".idea-rail-item").forEach(el=>{const item=find(el.dataset.focusIdea);if(item){el.querySelector("b").textContent=item.title||"Без названия";el.querySelector("small").textContent=railLabel(item)}})}
 async function generatePrompt(ideaId,button){
   const idea=find(ideaId);if(!idea)return;if(!idea.description.trim()){toast("Сначала опишите идею");return}
   button.disabled=true;button.textContent="Собираю…";
@@ -484,6 +485,7 @@ async function importBoard(event){
   catch(error){toast("Не удалось загрузить доску: "+error.message)}
   finally{input.value=""}
 }
+export function refreshIdeas(){if(loadedKey===key())syncFromServer()}
 export function renderIdeas(){if(loadedKey!==key()){load();serverSynced=false}render();syncFromServer()}
 export function initIdeas(){
   load();bind();render();

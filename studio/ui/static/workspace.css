@@ -1050,6 +1050,7 @@ body[data-active-tab="frontend"] #inspectorToggle { display: none; }
 .idea-branch-tabs button span { margin-left: 4px; color: #7d8fa3; }
 .idea-branch-tabs button.on { border-color: #7aa7e0; background: #20344b; color: #ffffff; }
 .idea-branch-tabs button.on span { color: #bcd3f0; }
+.chip.agent { border-color: #8b6fd1; background: #2a2340; color: #d3c2ff; }
 .calls-status .calls-ok { color: #82d3b3; }
 .calls-status .calls-missing { color: #f0a48f; }
 .verify-list { margin: 8px 0 0; padding-left: 4px; list-style: none; line-height: 1.55; }

@@ -46,9 +46,11 @@ export const S = {
   briefLast: null,
   briefStatusTimer: null,
   briefPreview: null,
+  studioAux: null,
 };
 
 export const hooks = {
+  refreshAux() {},
   renderMap() {},
   renderIdeas() {},
   renderInspector() {},
@@ -279,8 +281,13 @@ async function refreshLiveGraph(){
 async function liveLoop(){
   while(S.liveStarted){
     try{
-      const data=await api("/api/wait?rev="+S.studioRevision);
+      const data=await api("/api/wait?rev="+S.studioRevision+"&aux="+(S.studioAux===null?-1:S.studioAux));
       S.liveFailures=0;setLive(true);
+      if(data&&data.aux!==undefined){
+        const aux=Number(data.aux);
+        if(S.studioAux===null)S.studioAux=aux;
+        else if(aux>S.studioAux){S.studioAux=aux;try{hooks.refreshAux()}catch(e){console.error("refreshAux:",e)}}
+      }
       if(data&&Number(data.revision)>S.studioRevision){
         S.studioRevision=Number(data.revision);
         await refreshLiveGraph();

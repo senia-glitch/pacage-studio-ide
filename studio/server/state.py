@@ -101,6 +101,10 @@ class ProjectState:
         self._watcher: threading.Thread | None = None
         self._watch_last: tuple | None = None
         self._signature: tuple | None = None
+        # Второй счётчик: правки frontend.json и ideas.json (их пишет и агент). Скан кода
+        # они не требуют, но интерфейс должен увидеть их без перезагрузки вкладки.
+        self.aux = 0
+        self._aux_stamp: str | None = None
 
     # ------------------------------------------------------------------ scan
 
@@ -335,6 +339,8 @@ class ProjectState:
             if parent_id and edge_kind not in EDGE_KINDS:
                 raise MetadataError("invalid_input", "Выберите допустимый тип связи")
             details = dict((existing.details or {}) if existing is not None else {"name": name})
+            if existing is None and data.get("_actor") == "agent":
+                details["created_by"] = "agent"
             if kind == "endpoint":
                 details.update(
                     {
@@ -574,6 +580,7 @@ class ProjectState:
         """
         if not isinstance(data, dict) or not isinstance(data.get("ideas"), list):
             raise MetadataError("invalid_input", "Ожидалась доска идей с массивом ideas")
+        actor = str(data.pop("_actor", "") or "")
         if len(data["ideas"]) > 500:
             raise MetadataError("invalid_input", "Слишком много идей в доске (максимум 500)")
         with self.lock:
@@ -587,7 +594,23 @@ class ProjectState:
                 )
                 error.details = {"board": current}
                 raise error
-            board = {**data, "revision": current_revision + 1}
+            known = {
+                str(item.get("id")): item
+                for item in current.get("ideas") or []
+                if isinstance(item, dict)
+            }
+            ideas = []
+            for item in data["ideas"]:
+                if isinstance(item, dict):
+                    item = dict(item)
+                    item.pop("created_by", None)  # метку ставит только сервер
+                    old = known.get(str(item.get("id")))
+                    if old is not None and old.get("created_by"):
+                        item["created_by"] = old["created_by"]
+                    elif old is None and actor == "agent":
+                        item["created_by"] = "agent"
+                ideas.append(item)
+            board = {**data, "ideas": ideas, "revision": current_revision + 1}
             path = self._ideas_path()
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix(".json.tmp")
@@ -930,12 +953,38 @@ class ProjectState:
 
     # -------------------------------------------------------------- long-poll
 
-    def wait_for_change(self, rev: int, timeout: float = 25) -> int:
+    def wait_for_change(self, rev: int, timeout: float = 25, aux: int | None = None) -> int:
+        """Ждать смены ревизии (а если передан aux — и счётчика frontend/идей)."""
         with self.lock:
-            if self.revision > rev:
-                return self.revision
-            self._cond.wait_for(lambda: self.revision > rev, timeout=timeout)
+
+            def changed() -> bool:
+                return self.revision > rev or (aux is not None and self.aux > aux)
+
+            if not changed():
+                self._cond.wait_for(changed, timeout=timeout)
             return self.revision
+
+    def _aux_stamp_now(self) -> str:
+        digest = hashlib.sha1()
+        for name in ("frontend.json", "ideas.json"):
+            try:
+                digest.update((self.root / ".studio" / name).read_bytes())
+            except OSError:
+                digest.update(b"-")
+            digest.update(b"|")
+        return digest.hexdigest()
+
+    def check_aux(self) -> bool:
+        """Сравнить подпись frontend.json и ideas.json; при изменении поднять aux."""
+        stamp = self._aux_stamp_now()
+        with self.lock:
+            first = self._aux_stamp is None
+            changed = not first and stamp != self._aux_stamp
+            self._aux_stamp = stamp
+            if changed:
+                self.aux += 1
+                self._cond.notify_all()
+            return changed
 
     def snapshot(self) -> dict:
         with self.lock:
@@ -976,6 +1025,7 @@ class ProjectState:
         if self._watcher is not None and self._watcher.is_alive():
             return
         self._stop.clear()
+        self.check_aux()
         try:
             self._watch_last = stat_fingerprint(read_env(self.root))
         except Exception:  # noqa: BLE001 — watcher не должен мешать старту
@@ -996,6 +1046,7 @@ class ProjectState:
         interval = max(0.02, float(self.poll_interval or DEFAULT_POLL))
         while not self._stop.is_set():
             try:
+                self.check_aux()
                 fingerprint = stat_fingerprint(read_env(self.root))
                 if self._watch_last is not None and fingerprint != self._watch_last:
                     stable = fingerprint

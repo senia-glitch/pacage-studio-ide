@@ -10,7 +10,9 @@
 
 from __future__ import annotations
 
+import functools
 import json
+import threading
 import uuid
 from pathlib import Path
 
@@ -19,6 +21,20 @@ from studio.store import atomic_write
 
 FRONTEND_META = "frontend.json"
 META_VERSION = 1
+
+
+# Любая запись frontend.json — «прочитать, изменить, записать»; без замка два запроса
+# (агент и интерфейс) могут затереть правки друг друга.
+META_LOCK = threading.RLock()
+
+
+def _locked(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with META_LOCK:
+            return func(*args, **kwargs)
+
+    return wrapper
 
 
 def _meta_path(root: Path) -> Path:
@@ -94,6 +110,7 @@ def ensure_page(meta: dict, page_id: str) -> dict:
     return page
 
 
+@_locked
 def save_page_meta(root: Path, data: dict) -> dict:
     """Описания/критерии/домен/маршрут страницы (факт или план).
 
@@ -141,6 +158,7 @@ def save_page_meta(root: Path, data: dict) -> dict:
     return {"meta": meta}
 
 
+@_locked
 def save_block_meta(root: Path, data: dict) -> dict:
     """Описания/критерии блока (факт или плановый блок страницы).
 
@@ -184,6 +202,7 @@ def save_block_meta(root: Path, data: dict) -> dict:
     return {"meta": meta}
 
 
+@_locked
 def save_rule(root: Path, data: dict) -> dict:
     """Создать/обновить правило страницы или блока (правила всегда плановые).
 
@@ -235,6 +254,7 @@ def save_rule(root: Path, data: dict) -> dict:
     return {"meta": meta}
 
 
+@_locked
 def move_block(root: Path, data: dict) -> dict:
     """Перенос блока на другую страницу.
 
@@ -293,6 +313,7 @@ def move_block(root: Path, data: dict) -> dict:
     return {"meta": meta}
 
 
+@_locked
 def save_delete_note(root: Path, data: dict) -> dict:
     """Пометка на удаление для фактической страницы/блока (код не меняется).
 
@@ -317,6 +338,7 @@ def save_delete_note(root: Path, data: dict) -> dict:
     return {"meta": meta}
 
 
+@_locked
 def delete_planned(root: Path, data: dict) -> dict:
     """Удалить плановый узел (kind: page|block|blockRule|pageRule) с undo.
 
@@ -362,6 +384,7 @@ def delete_planned(root: Path, data: dict) -> dict:
     return {"meta": meta, "undo": undo}
 
 
+@_locked
 def restore_planned(root: Path, undo: dict) -> dict:
     """Вернуть удалённую плановую ветку (по undo записи delete_planned)."""
     meta = load_meta(root)
@@ -393,6 +416,7 @@ def restore_planned(root: Path, undo: dict) -> dict:
     return {"meta": meta}
 
 
+@_locked
 def save_domain(root: Path, data: dict) -> dict:
     """Создать/переименовать домен (роль фронтенда); delete: по id/name."""
     meta = load_meta(root)
@@ -424,7 +448,34 @@ def save_domain(root: Path, data: dict) -> dict:
     return {"meta": meta}
 
 
+@_locked
+def stamp_agent(root: Path, before: dict, action: str, payload: dict) -> None:
+    """Пометить созданные агентом плановые страницу или блок: ``created_by: agent``.
+
+    ``before`` — метаданные до операции: помечается только то, чего в них не было.
+    """
+    meta = load_meta(root)
+    page_id = str(payload.get("id") if action == "save_page" else payload.get("pageId") or "")
+    changed = False
+    if action in ("save_page", "save_block") and page_id in meta["pages"]:
+        page = meta["pages"][page_id]
+        if page_id not in before["pages"] and not page.get("created_by"):
+            page["created_by"] = "agent"
+            changed = True
+        if action == "save_block":
+            block_id = str(payload.get("id") or "")
+            block = (page.get("blocks") or {}).get(block_id)
+            old_blocks = (before["pages"].get(page_id) or {}).get("blocks") or {}
+            if block is not None and block_id not in old_blocks and not block.get("created_by"):
+                block["created_by"] = "agent"
+                changed = True
+    if changed:
+        save_meta(root, meta)
+
+
 __all__ = [
+    "META_LOCK",
+    "stamp_agent",
     "FRONTEND_META",
     "delete_planned",
     "empty_meta",

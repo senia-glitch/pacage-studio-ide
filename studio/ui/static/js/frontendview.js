@@ -159,6 +159,7 @@ function buildFrontNodes(graph) {
             description: page.description,
             acceptance: page.acceptance,
             calls: page.calls,
+            createdBy: page.created_by,
             deletion: page.deletion,
             planned: page.planned,
         }, shelf.id);
@@ -169,6 +170,7 @@ function buildFrontNodes(graph) {
                 description: block.description,
                 acceptance: block.acceptance,
                 calls: block.calls,
+                createdBy: block.created_by,
                 deletion: block.deletion,
                 planned: block.planned,
             }, page.id);
@@ -695,8 +697,12 @@ function callsField(node) {
         <div class="hint">По одному на строку: «МЕТОД /путь». Префикс API можно не писать.</div>${status}`;
 }
 
+function agentMark(item) {
+    return item.created_by === "agent" ? " · агент" : "";
+}
+
 function propsPage(node) {
-    const title = node.planned ? "Плановая страница" : "Страница";
+    const title = (node.planned ? "Плановая страница" : "Страница") + (node.createdBy === "agent" ? " · создано агентом" : "");
     const body = node.planned
         ? `
         <label>Название (папка kebab-case)<input id="fpName" value="${esc(node.name)}" maxlength="60"></label>
@@ -720,7 +726,7 @@ function propsPage(node) {
 }
 
 function propsBlock(node) {
-    const title = node.planned ? "Плановый блок" : "Блок";
+    const title = (node.planned ? "Плановый блок" : "Блок") + (node.createdBy === "agent" ? " · создано агентом" : "");
     const parent = S0.nodes.find((item) => item.id === node.parentId);
     const body = node.planned
         ? `
@@ -761,6 +767,7 @@ async function metaPost(payload) {
     try {
         const data = await api("/api/frontend/meta", "POST", payload);
         S0.graph = data.graph;
+        S0.graphJson = JSON.stringify(data.graph);
         S0.selected = null;
         drawFrontCanvas(data.graph);
         renderHeading(data.graph);
@@ -1025,7 +1032,7 @@ function renderTree(graph) {
     };
 
     const walkBlock = (block, depth) => {
-        rows.push(row(block.id, "block", "[ПЛАН] ".repeat(block.planned) + block.name, depth, (block.rules || []).length > 0, !collapsed.has(block.id)));
+        rows.push(row(block.id, "block", "[ПЛАН] ".repeat(block.planned) + block.name + agentMark(block), depth, (block.rules || []).length > 0, !collapsed.has(block.id)));
         if (collapsed.has(block.id)) return;
         if (mode === "fact") return; // правила — всегда план
         for (const rule of block.rules || []) {
@@ -1034,7 +1041,7 @@ function renderTree(graph) {
     };
     const walkPage = (page, depth) => {
         const kidsCount = (page.blocks || []).length + (page.rules || []).length;
-        rows.push(row(page.id, "page", "[ПЛАН] ".repeat(page.planned) + page.name, depth, kidsCount > 0, !collapsed.has(page.id)));
+        rows.push(row(page.id, "page", "[ПЛАН] ".repeat(page.planned) + page.name + agentMark(page), depth, kidsCount > 0, !collapsed.has(page.id)));
         if (collapsed.has(page.id)) return;
         for (const block of page.blocks || []) {
             if (mode === "fact" && block.planned) continue; // плановые блоки — в режиме «план»
@@ -1689,11 +1696,38 @@ function initFrontend() {
         S0.stickyViol = false;
         switchRightTab("props");
     });
+    document.addEventListener("mousedown", () => { S0.mouseDown = true; }, true);
+    document.addEventListener("mouseup", () => { S0.mouseDown = false; }, true);
     if (S.tab === "frontend") void loadFrontGraph();
 }
 
-async function loadFrontGraph() {
+function userIsEditing() {
+    const active = document.activeElement;
+    return !!active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName)
+        && !!active.closest("#tab-frontend");
+}
+
+/* Отложенное «живое» обновление: ждём, пока пользователь закончит ввод. Опрос, а не
+   событие focusout: оно не приходит, если окно браузера не в фокусе. */
+function settleFrontRefresh() {
+    if (!S0.refreshPending) return;
+    if (userIsEditing() || S0.mouseDown) {
+        setTimeout(settleFrontRefresh, 400);
+        return;
+    }
+    S0.refreshPending = false;
+    void loadFrontGraph({soft: true});
+}
+
+async function loadFrontGraph(options = {}) {
     if (S0.loading) return;
+    if (options.soft && (userIsEditing() || S0.mouseDown)) {
+        if (!S0.refreshPending) {
+            S0.refreshPending = true;
+            setTimeout(settleFrontRefresh, 400);
+        }
+        return;
+    }
     S0.loading = true;
     if (!S0.graph) {
         renderTree(null);
@@ -1711,6 +1745,9 @@ async function loadFrontGraph() {
             switchRightTab("props");
             return;
         }
+        const json = JSON.stringify(graph);
+        if (options.soft && json === S0.graphJson) return;
+        S0.graphJson = json;
         S0.graph = graph;
         renderHeading(graph);
         drawFrontCanvas(graph);

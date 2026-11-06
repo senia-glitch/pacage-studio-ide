@@ -8,7 +8,7 @@ import {refreshBriefStatus, scheduleBriefStatus, updateBriefBadge, initTodoChip}
 import {openDiagnostics, updateDiagBadge} from "./diagnosticsview.js";
 import {renderInspector} from "./inspectorview.js";
 import {renderMap} from "./mapview.js";
-import {initIdeas, renderIdeas} from "./ideaview.js";
+import {initIdeas, renderIdeas, refreshIdeas} from "./ideaview.js";
 import {initSync} from "./syncview.js";
 import {initReport} from "./reportview.js";
 import {initAgent} from "./agentview.js";
@@ -23,6 +23,11 @@ hooks.renderIdeas = renderIdeas;
 hooks.renderSettings = renderSettings;
 hooks.renderInspector = renderInspector;
 hooks.renderFrontend = renderFrontend;
+hooks.refreshAux = () => {
+  // frontend.json или ideas.json изменили снаружи (агент, другая вкладка)
+  if (S.tab === "frontend") void renderFrontend({soft: true});
+  else if (S.tab === "ideas") refreshIdeas();
+};
 hooks.updateBriefBadge = updateBriefBadge;
 hooks.scheduleBriefStatus = scheduleBriefStatus;
 hooks.updateDiagBadge = updateDiagBadge;
