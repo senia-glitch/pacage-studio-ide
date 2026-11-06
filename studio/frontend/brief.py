@@ -7,6 +7,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from pathlib import Path
 
 from studio.agent.sync_json import BRIEF_REPORT_FRONTEND_LINES
@@ -39,6 +42,9 @@ STANDARD_REPORT = """Отчёт собирается по данным вкла�
 по слоям, связи импортов. Файл обновляется при каждом построении."""
 
 _PROMPTS_DIR = ".studio/prompts"
+FRONT_BRIEF_FILENAME = "agent-brief-frontend.md"
+LAST_FRONT_BRIEF = "last-front-brief.json"
+_MARKER_RE = re.compile(r"<!--\s*studio-front-brief:v1\s+(\{.*?\})\s*-->", re.DOTALL)
 
 # Разделы, которые пользователь включает и выключает; по умолчанию — все.
 # «Что нужно сделать» и правила работы входят в ТЗ всегда.
@@ -105,9 +111,13 @@ def _calls_line(item: dict, prefix: str = "") -> str:
     return f"{prefix}Вызывает эндпоинты: {', '.join(calls)}" if calls else ""
 
 
-def _plan_tasks(graph: dict, pages: list[dict]) -> tuple[list[str], int]:
-    """Плановые задачи: не готовые правила, плановые узлы, удаления."""
+def _plan_tasks(graph: dict, pages: list[dict]) -> tuple[list[str], int, list[dict]]:
+    """Плановые задачи: не готовые правила, плановые узлы, удаления.
+
+    Третий элемент — те же задачи структурно (для маркера ТЗ и ``studio verify``).
+    """
     tasks: list[str] = []
+    records: list[dict] = []
     number = 1
     for page in pages:
         for item in _iter_rules(page):
@@ -125,6 +135,15 @@ def _plan_tasks(graph: dict, pages: list[dict]) -> tuple[list[str], int]:
             if rule.get("note"):
                 lines.append(f"- Примечание: {rule['note']}")
             tasks.append("\n".join(lines))
+            records.append(
+                {
+                    "number": number,
+                    "kind": "rule",
+                    "id": str(rule.get("id")),
+                    "name": str(rule.get("name") or ""),
+                    "page_id": page["id"],
+                }
+            )
             number += 1
     for page in pages:
         if page.get("planned"):
@@ -136,6 +155,16 @@ def _plan_tasks(graph: dict, pages: list[dict]) -> tuple[list[str], int]:
                 f"- Описание: {page.get('description') or '—'}"
                 + _calls_line(page, "\n- ")
             )
+            records.append(
+                {
+                    "number": number,
+                    "kind": "page",
+                    "id": page["id"],
+                    "name": str(page.get("name") or ""),
+                    "route": str(page.get("route") or ""),
+                    "calls": list(page.get("calls") or []),
+                }
+            )
             number += 1
         for block in page.get("blocks") or []:
             if block.get("planned"):
@@ -144,19 +173,48 @@ def _plan_tasks(graph: dict, pages: list[dict]) -> tuple[list[str], int]:
                 tasks.append(
                     f"### T{number}. {title}\n- Описание: {desc}" + _calls_line(block, "\n- ")
                 )
+                records.append(
+                    {
+                        "number": number,
+                        "kind": "block",
+                        "id": block["id"],
+                        "name": str(block.get("name") or ""),
+                        "page_id": page["id"],
+                        "page_name": str(page.get("name") or ""),
+                        "page_planned": bool(page.get("planned")),
+                        "calls": list(block.get("calls") or []),
+                    }
+                )
                 number += 1
             if block.get("deletion"):
                 title = f"Убрать блок «{block.get('name')}» со страницы «{page.get('name')}»"
                 note = block["deletion"].get("note") or "—"
                 tasks.append(f"### T{number}. {title}\n- Причина: {note}")
+                records.append(
+                    {
+                        "number": number,
+                        "kind": "block_deletion",
+                        "id": block["id"],
+                        "name": str(block.get("name") or ""),
+                        "page_id": page["id"],
+                    }
+                )
                 number += 1
         if page.get("deletion"):
             tasks.append(
                 f"### T{number}. Удалить страницу «{page.get('name')}»\n"
                 f"- Причина/примечание: {page['deletion'].get('note') or '—'}"
             )
+            records.append(
+                {
+                    "number": number,
+                    "kind": "page_deletion",
+                    "id": page["id"],
+                    "name": str(page.get("name") or ""),
+                }
+            )
             number += 1
-    return tasks, number - 1
+    return tasks, number - 1, records
 
 
 def _branch_outline(graph: dict, pages: list[dict]) -> list[str]:
@@ -191,6 +249,43 @@ def _branch_outline(graph: dict, pages: list[dict]) -> list[str]:
                 state = "готово" if rule.get("done") else "не готово"
                 lines.append(f"  - правило `{rule.get('name')}` — {state}")
     return lines
+
+
+def _front_brief_id(records: list[dict]) -> str:
+    key = json.dumps(records, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+
+
+def load_front_brief(project_root: str | Path, target: str | None = None) -> dict:
+    """Структура ТЗ фронтенда: последнее собранное или файл с маркером.
+
+    Нет ТЗ или в файле нет маркера — FileNotFoundError с понятным текстом.
+    """
+    root = Path(project_root)
+    if target in (None, "", "last"):
+        path = root / ".studio" / LAST_FRONT_BRIEF
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                data = None
+            if isinstance(data, dict):
+                return data
+        path = root / ".studio" / FRONT_BRIEF_FILENAME
+    else:
+        path = Path(str(target))
+        if not path.is_absolute() and not path.is_file():
+            path = root / path
+    if not path.is_file():
+        raise FileNotFoundError("ТЗ фронтенда не найдено: сначала сформируйте его («⇄ ТЗ…»)")
+    try:
+        match = _MARKER_RE.search(path.read_text(encoding="utf-8"))
+        data = json.loads(match.group(1)) if match else None
+    except (OSError, UnicodeDecodeError, ValueError):
+        data = None
+    if not isinstance(data, dict):
+        raise FileNotFoundError("В файле нет маркера studio-front-brief — это не ТЗ фронтенда")
+    return data
 
 
 def _link_lines(pages: list[dict], links: dict | None) -> list[str]:
@@ -285,9 +380,19 @@ def brief_frontend(
     violations = graph.get("violations") or []
 
     lines: list[str] = [f"# ТЗ для AI-агента: frontend — {Path(graph.get('root') or 'frontend')}"]
-    tasks, total = _plan_tasks(graph, pages)
+    tasks, total, records = _plan_tasks(graph, pages)
     if scope == "violations":
-        total += len(violations)
+        for item in violations:
+            total += 1
+            records.append(
+                {
+                    "number": total,
+                    "kind": "violation",
+                    "code": str(item.get("code") or ""),
+                    "file": str(item.get("file") or ""),
+                    "line": int(item.get("line") or 0),
+                }
+            )
     lines.append(
         f"\nСгенерировано студией · область: {scope_note} · задач: {total} · "
         f"нарушений в области: {len(violations)}"
@@ -337,11 +442,23 @@ def brief_frontend(
     lines.append("")
     lines.extend(BRIEF_REPORT_FRONTEND_LINES)
     lines.append("")
-    markdown = "\n".join(lines) + "\n"
+    brief_id = _front_brief_id(records)
+    payload = {"brief_id": brief_id, "scope": scope, "tasks": records}
+    marker = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    markdown = "\n".join(lines) + f"\n\n<!-- studio-front-brief:v1 {marker} -->\n"
 
     target = Path(project_root) / ".studio" / "agent-brief-frontend.md"
     _write(target, markdown)
-    return {"markdown": markdown, "path": ".studio/agent-brief-frontend.md", "tasks": total}
+    _write(
+        Path(project_root) / ".studio" / LAST_FRONT_BRIEF,
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+    )
+    return {
+        "markdown": markdown,
+        "path": ".studio/agent-brief-frontend.md",
+        "tasks": total,
+        "brief_id": brief_id,
+    }
 
 
 def _rules_progress(pages: list[dict]) -> tuple[int, int]:
@@ -463,6 +580,7 @@ __all__ = [
     "BRIEF_SECTIONS",
     "REPORT_SECTIONS",
     "brief_frontend",
+    "load_front_brief",
     "front_prompt_override_path",
     "front_prompt_standard",
     "front_prompt_state",

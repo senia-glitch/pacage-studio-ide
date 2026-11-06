@@ -41,6 +41,9 @@ endpoint → scenario → io → model
 13. **Связи фронтенд → бэкенд** (`studio/frontend/links.py`) — объявленные
     `calls` у страниц и блоков, сверка с эндпоинтами графа бэкенда (префикс API и
     параметры нормализуются); `links` в `/api/frontend/graph`, раздел ТЗ.
+14. **Проверка ТЗ фронтенда** (`studio/frontend/verify.py`) — задачи ТЗ по маркеру
+    `studio-front-brief` сверяются с кодом; `studio verify --part frontend`,
+    `/api/frontend/verify`.
 
 ## Граф
 

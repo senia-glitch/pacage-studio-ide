@@ -1,5 +1,5 @@
 ﻿import {api} from "./api.js";
-import {$,esc,S,toast,schedulePersist,openEditorForNode,enableNodeDrag} from "./core.js";
+import {$,esc,S,toast,modal,schedulePersist,openEditorForNode,enableNodeDrag} from "./core.js";
 import {createSyncAcceptPane, promptTotal} from "./syncapply.js";
 import {copyText as copyFront, documentDialog} from "./docdialog.js";
 import {bindViewport, applyTransform, fitView} from "./viewport.js";
@@ -685,9 +685,11 @@ function callsField(node) {
     const status = mine.length
         ? `<div class="hint calls-status">${mine
               .map((row) => (row.status === "ok"
-                  ? `✓ ${esc(row.call)} — есть в бэкенде`
-                  : `✗ ${esc(row.call)} — эндпоинта в бэкенде нет`))
-              .join("<br>")}</div>`
+                  ? `<span class="calls-ok">✓ ${esc(row.call)} — есть в бэкенде</span>`
+                  : `<span class="calls-missing">✗ ${esc(row.call)} — эндпоинта в бэкенде нет</span>`))
+              .join("<br>")}${mine.some((row) => row.status !== "ok")
+              ? "<br>Добавьте недостающий эндпоинт на карту бэкенда (в идее — «На карту ↗»)."
+              : ""}</div>`
         : "";
     return `<label>Вызывает эндпоинты бэкенда<textarea id="fpCalls" rows="2" placeholder="GET /lessons&#10;POST /orders/create">${esc((node.calls || []).join("\n"))}</textarea></label>
         <div class="hint">По одному на строку: «МЕТОД /путь». Префикс API можно не писать.</div>${status}`;
@@ -1074,6 +1076,39 @@ function treePageVisible(page, mode) {
 }
 
 /* ---------- ТЗ и отчёт ---------- */
+
+const VERIFY_KINDS = {
+    page: "страница",
+    block: "блок",
+    page_deletion: "удаление страницы",
+    block_deletion: "удаление блока",
+    rule: "правило",
+    violation: "нарушение",
+};
+const VERIFY_MARKS = {"выполнено": "✓", "частично": "◐", "не сделано": "✗"};
+
+function verifyBody(report) {
+    const rows = (report.items || []).map((item) => `<li>
+        <b>${VERIFY_MARKS[item.status] || "?"}</b> T${esc(String(item.number))} ${esc(VERIFY_KINDS[item.kind] || item.kind)}
+        «${esc(item.name)}» — ${esc(item.message)}</li>`).join("");
+    return `<p class="hint">ТЗ ${esc(report.brief_id || "?")}: выполнено ${report.done} из ${report.total} · ${esc(report.status)}.
+        Проверка идёт по текущему коду frontend/ и объявленным вызовам эндпоинтов.</p>
+        <ul class="verify-list">${rows || "<li>В ТЗ нет задач.</li>"}</ul>`;
+}
+
+async function openVerify() {
+    try {
+        const report = await api("/api/frontend/verify?brief=last");
+        modal("Проверка ТЗ фронтенда", verifyBody(report), [
+            {label: "Проверить снова", action: openVerify},
+            {label: "Закрыть", cls: "primary"},
+        ]);
+    } catch (error) {
+        toast(error.status === 404
+            ? "ТЗ фронтенда ещё не собрано: нажмите «⇄ ТЗ…»"
+            : "Не удалось проверить ТЗ: " + error.message);
+    }
+}
 
 const BRIEF_SECTIONS = [
     ["outline", "Область работ"],
@@ -1561,6 +1596,7 @@ function initFrontend() {
         saveFrontUi();
     });
     document.getElementById("frontReportBtn")?.addEventListener("click", requestReport);
+    document.getElementById("frontVerifyBtn")?.addEventListener("click", openVerify);
     document.querySelectorAll("[data-front-mode]").forEach((button) => {
         button.addEventListener("click", () => {
             S0.mode = button.dataset.frontMode === "plan" ? "plan" : "fact";

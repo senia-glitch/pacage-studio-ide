@@ -34,6 +34,8 @@ _GET_READ = frozenset(
         "/api/verify",
         "/api/ideas",
         "/api/brief/last",
+        "/api/frontend/brief/last",
+        "/api/frontend/verify",
     }
 )
 # POST, которые ничего не меняют в плане и коде проекта (отчёты, промпты,
@@ -82,6 +84,9 @@ ROUTE_DOCS: dict[tuple[str, str], str] = {
     ("GET", "/api/verify"): "?brief=last|id|путь — проверка выполнения ТЗ по коду.",
     ("GET", "/api/ideas"): "Доска идей {version, revision, activeId, ideas[]}.",
     ("GET", "/api/brief/last"): "ТЗ, сохранённое пользователем: {markdown, brief_id, tasks[]}.",
+    ("GET", "/api/frontend/brief/last"): "Последнее ТЗ фронтенда, собранное в окне «⇄ ТЗ…»: "
+    "{markdown, brief_id, tasks[]}.",
+    ("GET", "/api/frontend/verify"): "?brief=last|путь — проверка выполнения ТЗ фронтенда по коду.",
     ("POST", "/api/rescan"): "Перечитать проект; возвращает граф.",
     ("POST", "/api/report"): "{sections?} — отчёт по бэкенду.",
     ("POST", "/api/frontend/report"): "{sections?} — отчёт по фронтенду.",

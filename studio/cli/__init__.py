@@ -352,10 +352,33 @@ def cmd_report(args) -> int:
     return 0
 
 
+def _cmd_verify_frontend(args, root, explicit, graph) -> int:
+    from studio.frontend.brief import load_front_brief
+    from studio.frontend.graph import build_front_graph
+    from studio.frontend.links import check_links
+    from studio.frontend.verify import render_front_report, verify_front_brief
+
+    try:
+        brief = load_front_brief(root, getattr(args, "brief", None))
+    except FileNotFoundError as exc:
+        raise CliError(str(exc), 2) from exc
+    front = build_front_graph(root)
+    links = check_links(front, graph, read_env(root).api_prefix)
+    report = verify_front_brief(front, brief, links)
+    if getattr(args, "json", False):
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return int(report["code"])
+    _print_root(root, explicit)
+    print(render_front_report(report))
+    return int(report["code"])
+
+
 def cmd_verify(args) -> int:
     root, explicit = _find_root(args.project)
     slog.start_run(root, "verify")
     graph = scan(root)
+    if getattr(args, "part", "backend") == "frontend":
+        return _cmd_verify_frontend(args, root, explicit, graph)
     try:
         data = load_brief(root, getattr(args, "brief", None))
     except BriefNotFound as exc:
@@ -621,6 +644,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify_p = sub.add_parser("verify", help="проверить выполнение ТЗ")
     _add_project(verify_p)
     verify_p.add_argument("brief", nargs="?", default=None, help="файл, id или last")
+    verify_p.add_argument("--part", choices=["backend", "frontend"], default="backend")
     verify_p.add_argument("--json", action="store_true")
     verify_p.set_defaults(f=cmd_verify)
 

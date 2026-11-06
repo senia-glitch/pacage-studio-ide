@@ -22,6 +22,7 @@ from studio.frontend import graph as front_graph
 from studio.frontend import meta as front_meta
 from studio.frontend import scan_frontend
 from studio.frontend import sync as front_sync
+from studio.frontend import verify as front_verify
 from studio.metadata import MetadataError
 from studio.server import access
 from studio.server.security import (
@@ -322,6 +323,12 @@ def make_handler(ctx):
                 return self._json(state.load_ideas())
             if url.path == "/api/brief/last":
                 return self._json(state.saved_brief())
+            if url.path == "/api/frontend/brief/last":
+                return self._json(frontend_brief_last(state.root))
+            if url.path == "/api/frontend/verify":
+                query = urllib.parse.parse_qs(url.query)
+                target = (query.get("brief") or [None])[0]
+                return self._json(frontend_verify_op(state.root, target, state.check_front_links))
             if url.path == "/api/agent":
                 return self._json(state.agent_info(self._mode))
             return self._error(404, "not_found", "Не найдено")
@@ -450,6 +457,36 @@ def frontend_meta_op(root: Path, data: dict) -> dict:
         "meta": front_meta.load_meta(root),
         "graph": front_graph.build_front_graph(root),
     }
+
+
+def frontend_brief_last(root: Path) -> dict:
+    """ТЗ фронтенда, собранное в окне «⇄ ТЗ…» последним: его и реализует агент."""
+    path = Path(root) / ".studio" / front_brief.FRONT_BRIEF_FILENAME
+    if not path.is_file():
+        raise BriefNotFound("ТЗ фронтенда нет: соберите его кнопкой «⇄ ТЗ…» во вкладке «Фронтенд»")
+    try:
+        markdown = path.read_text(encoding="utf-8")
+        brief = front_brief.load_front_brief(root, path.as_posix())
+    except (OSError, UnicodeDecodeError, FileNotFoundError) as exc:
+        raise BriefNotFound(f"ТЗ фронтенда не читается: {exc}") from exc
+    return {
+        "markdown": markdown,
+        "brief_id": str(brief.get("brief_id") or ""),
+        "path": f".studio/{front_brief.FRONT_BRIEF_FILENAME}",
+        "tasks": brief.get("tasks") or [],
+    }
+
+
+@_front_errors
+def frontend_verify_op(root: Path, target: str | None, check_links=None) -> dict:
+    """Проверка выполнения ТЗ фронтенда по текущему коду (как /api/verify)."""
+    try:
+        brief = front_brief.load_front_brief(root, target)
+    except FileNotFoundError as exc:
+        raise BriefNotFound(str(exc)) from exc
+    front = front_graph.build_front_graph(root)
+    links = check_links(front) if check_links else None
+    return front_verify.verify_front_brief(front, brief, links)
 
 
 @_front_errors

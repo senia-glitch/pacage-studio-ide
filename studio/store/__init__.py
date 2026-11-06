@@ -25,6 +25,7 @@ GITIGNORE_ARTIFACTS = (
     "agent-brief.md",
     "briefs/",
     "last-brief.json",
+    "last-front-brief.json",
 )
 METADATA_IGNORE = "metadata.json"
 

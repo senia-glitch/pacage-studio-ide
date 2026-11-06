@@ -662,9 +662,11 @@ class ProjectState:
             ]
         else:
             info["workflow"] = [
-                "GET /api/brief/last — ТЗ, выбранное пользователем; делать только его задачи.",
+                "GET /api/brief/last — ТЗ бэкенда, выбранное пользователем; делать только его "
+                "задачи. Для фронтенда — GET /api/frontend/brief/last.",
                 "Реализовать задачи в коде, не трогая .env*, .studio/ и конфигурацию.",
-                "GET /api/verify?brief=last — проверить выполнение; повторять до «выполнено».",
+                "GET /api/verify?brief=last (фронтенд — GET /api/frontend/verify) — проверить "
+                "выполнение; повторять до «выполнено».",
                 "Итоговый JSON-отчёт проверить через POST /api/sync/apply (без apply) "
                 "и отдать пользователю: принимает его он в UI.",
             ]

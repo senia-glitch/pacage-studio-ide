@@ -1043,6 +1043,14 @@ body[data-active-tab="frontend"] #inspectorToggle { display: none; }
 .idea-block-row { margin-top: 8px; padding: 8px; border: 1px solid #2d3a49; border-radius: 8px; background: #151c24; }
 .idea-block-row textarea { margin-top: 6px; }
 .calls-status { margin-top: 4px; line-height: 1.5; }
-.idea-branches { display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: 14px; overflow-y: auto; }
-.idea-branches .idea-branch { flex: 0 0 auto; height: min(560px, 72vh); }
-.idea-branches .idea-branch:only-child { flex: 1 1 auto; height: auto; }
+.idea-branches { display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: 10px; }
+.idea-branches .idea-branch { flex: 1 1 auto; min-height: 0; }
+.idea-branch-tabs { display: flex; flex: 0 0 auto; gap: 6px; }
+.idea-branch-tabs button { padding: 6px 14px; border: 1px solid #354252; border-radius: 8px; background: #1a222c; color: #aab8c8; font-size: 12px; cursor: pointer; }
+.idea-branch-tabs button span { margin-left: 4px; color: #7d8fa3; }
+.idea-branch-tabs button.on { border-color: #7aa7e0; background: #20344b; color: #ffffff; }
+.idea-branch-tabs button.on span { color: #bcd3f0; }
+.calls-status .calls-ok { color: #82d3b3; }
+.calls-status .calls-missing { color: #f0a48f; }
+.verify-list { margin: 8px 0 0; padding-left: 4px; list-style: none; line-height: 1.55; }
+.verify-list li { margin-bottom: 4px; }

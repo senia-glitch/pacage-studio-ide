@@ -15,6 +15,8 @@ let syncTimer = null;
    (агент или другая вкладка правят .studio/ideas.json) и отвечает 409 вместо перезаписи. */
 let boardRevision = 0;
 let dirty = false;
+/* Какая ветка идеи открыта: сценарии бэкенда или страницы фронтенда. */
+let branchView = "backend";
 let serverSynced = false;
 
 function key(){ return `${storageKey((S.G&&S.G.project_root)||location.origin)}:ideas:v1`; }
@@ -234,7 +236,8 @@ function pageCard(page,index){
       <textarea data-bfield="calls" rows="1" placeholder="Вызывает: GET /path (по одному на строку)">${esc(b.calls.join("\n"))}</textarea>
     </div>`).join("");
   return `<article class="idea-scenario-card idea-page-card${sent?" on-map":""}" data-page="${esc(page.id)}">
-    <div class="idea-scenario-head"><span class="scenario-index">${String(index+1).padStart(2,"0")}</span>${sent?'<span class="scenario-on-map" title="Страница уже передана во вкладку «Фронтенд»">во фронтенде</span>':""}<input class="scenario-title" data-pfield="title" aria-label="Название страницы" value="${esc(page.title)}"><button class="text-button" type="button" data-page-to-front="${esc(page.id)}" title="Создать плановую страницу и блоки во вкладке «Фронтенд»">Во фронтенд ↗</button><button class="icon-button danger" type="button" data-delete-page="${esc(page.id)}" title="Удалить страницу из ветки" aria-label="Удалить страницу">×</button></div>
+    <div class="idea-scenario-head"><span class="scenario-index">${String(index+1).padStart(2,"0")}</span><input class="scenario-title" data-pfield="title" aria-label="Название страницы" value="${esc(page.title)}"><button class="text-button" type="button" data-page-to-front="${esc(page.id)}" title="Создать плановую страницу и блоки во вкладке «Фронтенд»">Во фронтенд ↗</button><button class="icon-button danger" type="button" data-delete-page="${esc(page.id)}" title="Удалить страницу из ветки" aria-label="Удалить страницу">×</button></div>
+    ${sent?'<div class="hint">✓ Передана во вкладку «Фронтенд». «Во фронтенд ↗» обновит те же узлы.</div>':""}
     <label class="idea-field-label">ПАПКА СТРАНИЦЫ<input data-pfield="name" value="${esc(page.name)}" placeholder="orders-list"></label>
     <label class="idea-field-label">МАРШРУТ<input data-pfield="route" value="${esc(page.route)}" placeholder="/orders"></label>
     <label class="idea-field-label">ОПИСАНИЕ<textarea data-pfield="description" rows="4" placeholder="Что делает страница…">${esc(page.description)}</textarea></label>
@@ -244,7 +247,18 @@ function pageCard(page,index){
     <div class="idea-page-blocks"><div class="branch-label">БЛОКИ <span>${page.blocks.length}</span></div>${blocks||'<div class="hint">Блоков нет</div>'}</div>
   </article>`;
 }
+function scenarioBranch(idea,children){
+  return `<div class="idea-branch"><div class="branch-label">СЦЕНАРИИ БЭКЕНДА <span>${idea.scenarios.length}</span></div><div class="scenario-branch">${children||'<div class="branch-empty"><span>＋</span><b>Ветка пока пустая</b><small>Вставьте JSON от LLM и разберите ответ</small></div>'}</div></div>`;
+}
+function pageBranch(idea){
+  return `<div class="idea-branch"><div class="branch-label">СТРАНИЦЫ ФРОНТЕНДА <span>${idea.pages.length}</span></div><div class="scenario-branch">${idea.pages.map(pageCard).join("")}</div></div>`;
+}
+function branchTabs(idea,view){
+  if(!idea.pages.length)return "";
+  return `<div class="idea-branch-tabs" role="tablist"><button type="button" role="tab" class="${view==="backend"?"on":""}" data-branch-tab="backend">Бэкенд <span>${idea.scenarios.length}</span></button><button type="button" role="tab" class="${view==="frontend"?"on":""}" data-branch-tab="frontend">Фронтенд <span>${idea.pages.length}</span></button></div>`;
+}
 function card(idea){
+  const view=idea.pages.length&&(branchView==="frontend"||!idea.scenarios.length)?"frontend":"backend";
   const promptIsFresh=!!idea.prompt&&idea.promptBasis===promptBasis(idea);
   const children=idea.scenarios.map((s,index)=>{
     const onMap=isOnMap(s);
@@ -264,10 +278,9 @@ function card(idea){
       <details class="idea-prompt-details"><summary>Промпт для LLM</summary><textarea data-idea-prompt="${esc(idea.id)}" rows="7" readonly placeholder="Соберите промпт на основе идеи">${esc(idea.prompt)}</textarea></details>
       <div class="idea-json-head"><label class="idea-field-label">ОТВЕТ LLM · JSON</label><button type="button" class="text-button" data-import-json="${esc(idea.id)}">Разобрать ответ ↓</button></div>
       <textarea class="idea-json" data-idea-json="${esc(idea.id)}" rows="7" placeholder='Вставьте ответ LLM: JSON с "scenarios" и, если нужен интерфейс, "pages"'>${esc(idea.jsonText)}</textarea>
-      <div class="idea-json-foot">${idea.jsonText&&idea.jsonText!==JSON.stringify(idea.payload,null,2)?'JSON изменён — нажмите «Разобрать сценарии»':(idea.scenarios.length||idea.pages.length)?`${idea.scenarios.length} сценариев, ${idea.pages.length} страниц в ветке`:'Ответ ещё не разобран'}</div>
+      <div class="idea-json-foot">${idea.jsonText&&idea.jsonText!==JSON.stringify(idea.payload,null,2)?'JSON изменён — нажмите «Разобрать ответ»':(idea.scenarios.length||idea.pages.length)?`${railCounts(idea)} в ветке`:'Ответ ещё не разобран'}</div>
     </article>
-    <div class="idea-branches"><div class="idea-branch"><div class="branch-label">СЦЕНАРИИ БЭКЕНДА <span>${idea.scenarios.length}</span></div><div class="scenario-branch">${children||'<div class="branch-empty"><span>＋</span><b>Ветка пока пустая</b><small>Вставьте JSON от LLM и разберите ответ</small></div>'}</div></div>
-    ${idea.pages.length?`<div class="idea-branch"><div class="branch-label">СТРАНИЦЫ ФРОНТЕНДА <span>${idea.pages.length}</span></div><div class="scenario-branch">${idea.pages.map(pageCard).join("")}</div></div>`:""}</div>
+    <div class="idea-branches">${branchTabs(idea,view)}${view==="frontend"?pageBranch(idea):scenarioBranch(idea,children)}</div>
   </section>`;
 }
 function render(){
@@ -318,6 +331,7 @@ function render(){
   boardEl.querySelectorAll("[data-page-to-front]").forEach(el=>el.onclick=()=>{
     const {page}=pageOf(el);if(page)sendPageToFront(page,el);
   });
+  boardEl.querySelectorAll("[data-branch-tab]").forEach(el=>el.onclick=()=>{branchView=el.dataset.branchTab;render()});
   boardEl.querySelectorAll("[data-delete-idea]").forEach(el=>el.onclick=()=>{if(!confirm("Удалить идею вместе со всеми сценариями?"))return;pushUndo();board.ideas=board.ideas.filter(x=>x.id!==el.dataset.deleteIdea);if(board.activeId===el.dataset.deleteIdea)board.activeId=board.ideas[0]?.id||"";render();save()});
   boardEl.querySelectorAll("[data-delete-scenario]").forEach(el=>el.onclick=()=>{const idea=find(el.closest("[data-idea]").dataset.idea);if(!idea)return;pushUndo();idea.scenarios=idea.scenarios.filter(x=>x.id!==el.dataset.deleteScenario);idea.payload=payloadFor(idea);idea.jsonText=JSON.stringify(idea.payload,null,2);render();save();toast("Сценарий удалён из ветки и JSON")});
   boardEl.querySelectorAll("[data-to-plan]").forEach(el=>el.onclick=()=>sendToConstructor(el));
@@ -328,7 +342,11 @@ function render(){
   boardEl.querySelectorAll("[data-add-first]").forEach(el=>el.onclick=addIdea);
   list.querySelectorAll("[data-focus-idea]").forEach(el=>el.onclick=()=>{board.activeId=el.dataset.focusIdea;render();save()});
 }
-function railCounts(idea){return idea.pages.length?`${idea.scenarios.length} сценариев · ${idea.pages.length} стр.`:`${idea.scenarios.length} сценариев`}
+function plural(n,one,few,many){const a=n%10,b=n%100;return a===1&&b!==11?one:(a>=2&&a<=4&&(b<10||b>=20)?few:many)}
+function railCounts(idea){
+  const s=idea.scenarios.length,p=idea.pages.length;
+  return `${s} ${plural(s,"сценарий","сценария","сценариев")}`+(p?` · ${p} ${plural(p,"страница","страницы","страниц")}`:"");
+}
 function find(ideaId){return board.ideas.find(x=>x.id===ideaId)}
 function updatePromptState(idea){
   const fresh=!!idea.prompt&&idea.promptBasis===promptBasis(idea);
@@ -345,17 +363,22 @@ async function sendPageToFront(page,button){
   button.disabled=true;
   try{
     const pageId=page.mapPageId||`page-plan:${uid()}`;
-    await api("/api/frontend/meta","POST",{action:"save_page",id:pageId,plannedNew:true,name:page.name||page.title,description:page.description,acceptance:page.acceptance,domain:page.domain,route:page.route,calls:page.calls});
+    let last=await api("/api/frontend/meta","POST",{action:"save_page",id:pageId,plannedNew:true,name:page.name||page.title,description:page.description,acceptance:page.acceptance,domain:page.domain,route:page.route,calls:page.calls});
     page.mapPageId=pageId;
     for(const block of page.blocks){
       const blockId=block.mapBlockId||`block-plan:${uid()}`;
-      await api("/api/frontend/meta","POST",{action:"save_block",pageId,id:blockId,name:block.name,description:block.description,acceptance:block.acceptance,calls:block.calls});
+      last=await api("/api/frontend/meta","POST",{action:"save_block",pageId,id:blockId,name:block.name,description:block.description,acceptance:block.acceptance,calls:block.calls});
       block.mapBlockId=blockId;
     }
+    const mine=new Set([pageId,...page.blocks.map(b=>b.mapBlockId)]);
+    const missing=new Set(((last&&last.graph&&last.graph.links&&last.graph.links.rows)||[]).filter(r=>mine.has(r.node)&&r.status!=="ok").map(r=>r.call));
     const idea=find(button.closest("[data-idea]").dataset.idea);
     if(idea)syncPage(idea,page);
     render();
-    toast("Страница и блоки добавлены во вкладку «Фронтенд» как плановые узлы");
+    await setTab("frontend");
+    toast(missing.size
+      ?`Страница добавлена во «Фронтенд». Эндпоинтов нет в бэкенде: ${missing.size} (${[...missing].slice(0,2).join(", ")}${missing.size>2?"…":""}) — передайте сценарии «На карту ↗»`
+      :"Страница и блоки добавлены во вкладку «Фронтенд» как плановые узлы");
   }catch(error){button.disabled=false;toast("Не удалось передать страницу во фронтенд: "+error.message)}
 }
 function confirmRecreate(scenario){
