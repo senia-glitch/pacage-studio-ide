@@ -14,7 +14,7 @@ from pathlib import Path
 
 from studio import log as slog
 from studio._constants import MAX_HTTP_BODY
-from studio.agent import BriefError, BriefNotFound
+from studio.agent import BriefError, BriefNotFound, inbox
 from studio.agent.sync_json import check_undo_entries, extract_json, same_state
 from studio.creator import CreateError
 from studio.frontend import brief as front_brief
@@ -330,6 +330,13 @@ def make_handler(ctx):
                 return self._json(state.load_ideas())
             if url.path == "/api/brief/last":
                 return self._json(state.saved_brief())
+            if url.path == "/api/agent/reports":
+                reports = inbox.list_reports(state.root)
+                pending = sum(1 for item in reports if item.get("status") == inbox.PENDING)
+                return self._json({"reports": reports, "pending": pending})
+            if url.path == "/api/agent/report":
+                query = urllib.parse.parse_qs(url.query)
+                return self._json(inbox.get_report(state.root, (query.get("id") or [""])[0]))
             if url.path == "/api/frontend/brief/last":
                 return self._json(frontend_brief_last(state.root))
             if url.path == "/api/frontend/verify":
@@ -364,6 +371,14 @@ def make_handler(ctx):
                 reason = access.frontend_meta_violation(data)
                 if reason:
                     return self._error(403, "mode_forbidden", reason)
+            if url.path == "/api/agent/report":
+                return self._json(agent_report_submit(state, data, self._mode))
+            if url.path == "/api/agent/report/decision":
+                return self._json(
+                    inbox.decide_report(
+                        state.root, str(data.get("id") or ""), str(data.get("decision") or "")
+                    )
+                )
             if url.path == "/api/rescan":
                 graph = state.rescan("manual")
                 return self._json(graph.model_dump())
@@ -472,6 +487,43 @@ def frontend_meta_op(root: Path, data: dict) -> dict:
     return {
         "meta": front_meta.load_meta(root),
         "graph": front_graph.build_front_graph(root),
+    }
+
+
+def agent_report_submit(state, data: dict, mode: str) -> dict:
+    """Принять итоговый JSON-отчёт агента во входящие; ничего не применяется.
+
+    Отчёт проверяется так же, как при ручном приёме: агент сразу видит, что студия
+    отклонит и почему, а пользователь получает запись «ждёт решения».
+    """
+    part = str(data.get("part") or "backend")
+    if part not in ("backend", "frontend"):
+        raise MetadataError("invalid_input", "part: backend или frontend")
+    raw = data.get("json")
+    if isinstance(raw, dict):
+        text = json.dumps(raw, ensure_ascii=False)
+    elif isinstance(raw, str) and raw.strip():
+        text = raw
+    else:
+        raise MetadataError("invalid_input", "Передайте JSON-отчёт в поле json")
+    if part == "backend":
+        preview = state.sync_apply({"json": text})
+    else:
+        preview = frontend_sync_apply_op(state.root, {"json": text})
+    record = inbox.submit_report(state.root, part, mode, text, preview)
+    return {
+        "id": record["id"],
+        "status": record["status"],
+        "counts": record["counts"],
+        "rejected": [
+            {
+                "ref": row.get("label") or row.get("ref") or row.get("id"),
+                "reason": row.get("reason", ""),
+            }
+            for row in preview.get("rows") or []
+            if row.get("status") == "rejected"
+        ],
+        "warnings": preview.get("warnings") or [],
     }
 
 

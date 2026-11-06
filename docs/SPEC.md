@@ -39,7 +39,9 @@ endpoint → scenario → io → model
     `plan` и `implement`, таблица разрешённых маршрутов, самоописание
     `GET /api/agent`; агент не применяет ответы и не пересобирает ТЗ. Сервер
     ставит `created_by: agent` на всё, что создал агент; второй счётчик `aux`
-    (frontend.json, ideas.json) будит `/api/wait` для живого обновления.
+    (frontend.json, ideas.json) будит `/api/wait` для живого обновления. Входящие отчёты агента (`studio/agent/inbox.py`,
+    `.studio/agent-reports/`) — отправка `POST /api/agent/report`, решение за
+    пользователем.
 13. **Связи фронтенд → бэкенд** (`studio/frontend/links.py`) — объявленные
     `calls` у страниц и блоков, сверка с эндпоинтами графа бэкенда (префикс API и
     параметры нормализуются); `links` в `/api/frontend/graph`, раздел ТЗ.

@@ -36,6 +36,7 @@ _GET_READ = frozenset(
         "/api/brief/last",
         "/api/frontend/brief/last",
         "/api/frontend/verify",
+        "/api/agent/reports",
     }
 )
 # POST, которые ничего не меняют в плане и коде проекта (отчёты, промпты,
@@ -51,6 +52,7 @@ _POST_SAFE = frozenset(
         "/api/plan/preview",
         "/api/sync/apply",
         "/api/frontend/sync/apply",
+        "/api/agent/report",
     }
 )
 # Запись плана: только режим планирования. Файлы кода эти маршруты не пишут.
@@ -87,6 +89,10 @@ ROUTE_DOCS: dict[tuple[str, str], str] = {
     ("GET", "/api/frontend/brief/last"): "Последнее ТЗ фронтенда, собранное в окне «⇄ ТЗ…»: "
     "{markdown, brief_id, tasks[]}.",
     ("GET", "/api/frontend/verify"): "?brief=last|путь — проверка выполнения ТЗ фронтенда по коду.",
+    ("GET", "/api/agent/reports"): "Ваши отчёты и решения пользователя: [{id, part, status, "
+    "counts}] (pending, accepted, rejected).",
+    ("POST", "/api/agent/report"): "{part: backend|frontend, json} — отправить итоговый "
+    "JSON-отчёт: студия проверит его и положит в «Отчёты агента»; применяет пользователь.",
     ("POST", "/api/rescan"): "Перечитать проект; возвращает граф.",
     ("POST", "/api/report"): "{sections?} — отчёт по бэкенду.",
     ("POST", "/api/frontend/report"): "{sections?} — отчёт по фронтенду.",

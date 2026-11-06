@@ -1050,6 +1050,11 @@ body[data-active-tab="frontend"] #inspectorToggle { display: none; }
 .idea-branch-tabs button span { margin-left: 4px; color: #7d8fa3; }
 .idea-branch-tabs button.on { border-color: #7aa7e0; background: #20344b; color: #ffffff; }
 .idea-branch-tabs button.on span { color: #bcd3f0; }
+.inbox-btn[hidden] { display: none; }
+.inbox-btn { border-color: #8b6fd1; color: #d3c2ff; }
+.inbox-btn b { margin-left: 4px; padding: 0 7px; border-radius: 9px; background: #8b6fd1; color: #ffffff; }
+.inbox-row { margin-top: 8px; padding: 10px 12px; border: 1px solid #2d3a49; border-radius: 8px; background: #151c24; }
+.inbox-actions { display: flex; gap: 8px; margin-top: 8px; }
 .chip.agent { border-color: #8b6fd1; background: #2a2340; color: #d3c2ff; }
 .calls-status .calls-ok { color: #82d3b3; }
 .calls-status .calls-missing { color: #f0a48f; }

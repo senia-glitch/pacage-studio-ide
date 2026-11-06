@@ -11,7 +11,7 @@ import {renderMap} from "./mapview.js";
 import {initIdeas, renderIdeas, refreshIdeas} from "./ideaview.js";
 import {initSync} from "./syncview.js";
 import {initReport} from "./reportview.js";
-import {initAgent} from "./agentview.js";
+import {initAgent, refreshAgentReports} from "./agentview.js";
 import {renderSettings} from "./settingsview.js";
 import {bindViewport, fitView} from "./viewport.js";
 import {initTree, renderTree} from "./treeview.js";
@@ -24,6 +24,7 @@ hooks.renderSettings = renderSettings;
 hooks.renderInspector = renderInspector;
 hooks.renderFrontend = renderFrontend;
 hooks.refreshAux = () => {
+  void refreshAgentReports();
   // frontend.json или ideas.json изменили снаружи (агент, другая вкладка)
   if (S.tab === "frontend") void renderFrontend({soft: true});
   else if (S.tab === "ideas") refreshIdeas();

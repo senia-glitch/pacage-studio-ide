@@ -18,6 +18,7 @@ from studio.agent import (
     BriefOptions,
     build_brief,
     build_decompose_prompt,
+    inbox,
     load_brief,
     save_brief_sidecars,
 )
@@ -690,8 +691,8 @@ class ProjectState:
                 "Реализовать задачи в коде, не трогая .env*, .studio/ и конфигурацию.",
                 "GET /api/verify?brief=last (фронтенд — GET /api/frontend/verify) — проверить "
                 "выполнение; повторять до «выполнено».",
-                "Итоговый JSON-отчёт проверить через POST /api/sync/apply (без apply) "
-                "и отдать пользователю: принимает его он в UI.",
+                "Итоговый JSON-отчёт отправить POST /api/agent/report {part, json}: студия "
+                "проверит его и положит в «Отчёты агента»; применяет его пользователь в UI.",
             ]
         return info
 
@@ -972,6 +973,12 @@ class ProjectState:
             except OSError:
                 digest.update(b"-")
             digest.update(b"|")
+        try:  # входящие отчёты агента: появился, принят или отклонён
+            for path in sorted(inbox.reports_dir(self.root).glob("r-*.json")):
+                info = path.stat()
+                digest.update(f"{path.name}:{info.st_mtime_ns}:{info.st_size}|".encode())
+        except OSError:
+            digest.update(b"-")
         return digest.hexdigest()
 
     def check_aux(self) -> bool:
