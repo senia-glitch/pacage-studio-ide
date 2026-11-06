@@ -42,7 +42,7 @@ _PROMPTS_DIR = ".studio/prompts"
 
 # Разделы, которые пользователь включает и выключает; по умолчанию — все.
 # «Что нужно сделать» и правила работы входят в ТЗ всегда.
-BRIEF_SECTIONS = ("outline", "violations", "verify")
+BRIEF_SECTIONS = ("outline", "links", "violations", "verify")
 REPORT_SECTIONS = ("summary", "notes", "structure", "coverage", "violations", "dag")
 
 
@@ -99,6 +99,12 @@ def _iter_rules(page: dict, branch_ids: set | None = None):
             }
 
 
+def _calls_line(item: dict, prefix: str = "") -> str:
+    """Строка «Вызывает эндпоинты: …» для узла с объявленными вызовами; иначе пусто."""
+    calls = item.get("calls") or []
+    return f"{prefix}Вызывает эндпоинты: {', '.join(calls)}" if calls else ""
+
+
 def _plan_tasks(graph: dict, pages: list[dict]) -> tuple[list[str], int]:
     """Плановые задачи: не готовые правила, плановые узлы, удаления."""
     tasks: list[str] = []
@@ -128,13 +134,16 @@ def _plan_tasks(graph: dict, pages: list[dict]) -> tuple[list[str], int]:
                 f"- Маршрут: {route}\n"
                 f"- Домен: {page.get('domain') or 'не задан'}\n"
                 f"- Описание: {page.get('description') or '—'}"
+                + _calls_line(page, "\n- ")
             )
             number += 1
         for block in page.get("blocks") or []:
             if block.get("planned"):
                 title = f"Плановый блок «{block.get('name')}» на «{page.get('name')}»"
                 desc = block.get("description") or "—"
-                tasks.append(f"### T{number}. {title}\n- Описание: {desc}")
+                tasks.append(
+                    f"### T{number}. {title}\n- Описание: {desc}" + _calls_line(block, "\n- ")
+                )
                 number += 1
             if block.get("deletion"):
                 title = f"Убрать блок «{block.get('name')}» со страницы «{page.get('name')}»"
@@ -167,10 +176,14 @@ def _branch_outline(graph: dict, pages: list[dict]) -> list[str]:
             lines.append(
                 f"- {marker}страница `{page.get('name')}` ({route}) — `{file}`"
             )
+            if page.get("calls"):
+                lines.append("  " + _calls_line(page, "- "))
             for block in page.get("blocks") or []:
                 block_mark = "[ПЛАН] " if block.get("planned") else ""
                 file = block.get("file") or "файл после реализации"
                 lines.append(f"  - {block_mark}блок `{block.get('name')}` — `{file}`")
+                if block.get("calls"):
+                    lines.append("    " + _calls_line(block, "- "))
                 for rule in block.get("rules") or []:
                     state = "готово" if rule.get("done") else "не готово"
                     lines.append(f"    - правило `{rule.get('name')}` — {state}")
@@ -180,11 +193,37 @@ def _branch_outline(graph: dict, pages: list[dict]) -> list[str]:
     return lines
 
 
+def _link_lines(pages: list[dict], links: dict | None) -> list[str]:
+    """Объявленные вызовы эндпоинтов в области ТЗ и результат сверки с бэкендом."""
+    status = {}
+    for row in (links or {}).get("rows") or []:
+        status[(row["node"], row["call"])] = row["status"]
+    lines: list[str] = []
+    for page in pages:
+        owners = [(page, f"страница «{page.get('name')}»")]
+        owners += [
+            (block, f"блок «{block.get('name')}» страницы «{page.get('name')}»")
+            for block in page.get("blocks") or []
+        ]
+        for item, where in owners:
+            for call in item.get("calls") or []:
+                state = status.get((item["id"], call))
+                if state == "ok":
+                    note = "эндпоинт в бэкенде есть"
+                elif state == "missing":
+                    note = "ЭНДПОИНТА В БЭКЕНДЕ ЕЩЁ НЕТ — сначала реализуйте его (ТЗ бэкенда)"
+                else:
+                    note = "не проверено"
+                lines.append(f"- {where} → `{call}` — {note}")
+    return lines
+
+
 def brief_frontend(
     project_root: str | Path,
     scope: str = "all",
     node_id: str | None = None,
     sections=None,
+    check_links=None,
 ) -> dict:
     """ТЗ фронтенда по области; сохраняется в .studio/agent-brief-frontend.md.
 
@@ -193,6 +232,8 @@ def brief_frontend(
            "violations" — только нарушения (как задачи).
     sections: подмножество BRIEF_SECTIONS (None — все); «Что нужно сделать» и правила
     работы входят всегда.
+    check_links: функция «граф фронтенда → результат сверки вызовов с бэкендом»; без неё
+    раздел «Связи» показывает вызовы без проверки.
     """
     picked = pick_sections(sections, BRIEF_SECTIONS, "ТЗ")
     graph = build_front_graph(project_root)
@@ -265,6 +306,13 @@ def brief_frontend(
         lines.append("")
         lines.extend(_branch_outline(graph, pages))
         lines.append("")
+    if scope != "violations" and "links" in picked:
+        link_lines = _link_lines(pages, check_links(graph) if check_links else None)
+        if link_lines:
+            lines.append("## 3.1. Связи с бэкендом")
+            lines.append("")
+            lines.extend(link_lines)
+            lines.append("")
     if "violations" in picked:
         lines.append("## 4. Нарушения правил (исправить)")
         lines.append("")

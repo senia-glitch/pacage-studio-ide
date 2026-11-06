@@ -309,7 +309,9 @@ def make_handler(ctx):
             if url.path == "/api/frontend":
                 return self._json(scan_frontend(state.root))
             if url.path == "/api/frontend/graph":
-                return self._json(front_graph.build_front_graph(state.root))
+                graph = front_graph.build_front_graph(state.root)
+                graph["links"] = state.check_front_links(graph)
+                return self._json(graph)
             if url.path == "/api/verify":
                 query = urllib.parse.parse_qs(url.query)
                 target = (query.get("brief") or [None])[0]
@@ -387,12 +389,16 @@ def make_handler(ctx):
                 return self._json(state.restore_graph_node(data))
             if url.path == "/api/decompose/prompt":
                 return self._json(state.decompose_prompt(data))
+            if url.path == "/api/decompose/parse":
+                return self._json(state.decompose_parse(data))
             if url.path == "/api/decompose":
                 return self._json(state.decompose_apply(data))
             if url.path == "/api/frontend/meta":
-                return self._json(frontend_meta_op(state.root, data))
+                result = frontend_meta_op(state.root, data)
+                result["graph"]["links"] = state.check_front_links(result["graph"])
+                return self._json(result)
             if url.path == "/api/frontend/brief":
-                return self._json(frontend_brief_op(state.root, data))
+                return self._json(frontend_brief_op(state.root, data, state.check_front_links))
             if url.path == "/api/frontend/sync":
                 return self._json(frontend_sync_op(state.root, data))
             if url.path == "/api/frontend/sync/apply":
@@ -447,7 +453,7 @@ def frontend_meta_op(root: Path, data: dict) -> dict:
 
 
 @_front_errors
-def frontend_brief_op(root: Path, data: dict) -> dict:
+def frontend_brief_op(root: Path, data: dict, check_links=None) -> dict:
     """ТЗ фронтенда по области; markdown сохраняется в .studio."""
     scope = str(data.get("scope") or "all")
     node_id = data.get("nodeId") or None
@@ -456,6 +462,7 @@ def frontend_brief_op(root: Path, data: dict) -> dict:
         scope=scope,
         node_id=str(node_id) if node_id else None,
         sections=data.get("sections"),
+        check_links=check_links,
     )
 
 

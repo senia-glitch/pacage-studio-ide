@@ -92,7 +92,8 @@ ROUTE_DOCS: dict[tuple[str, str], str] = {
     ("POST", "/api/sync/apply"): "{json} — проверка JSON-ответа. apply=true агенту запрещён.",
     ("POST", "/api/frontend/sync/apply"): "То же для фронтенда. apply=true агенту запрещён.",
     ("POST", "/api/ideas"): "Сохранить доску. Передайте revision, прочитанный в GET; "
-    "при расхождении — 409 ideas_conflict.",
+    "при расхождении — 409 ideas_conflict. У идеи: scenarios (бэкенд) и pages "
+    "(страницы фронтенда с blocks и calls).",
     ("POST", "/api/metadata/graph-node"): "Создать/изменить плановый узел бэкенда.",
     ("POST", "/api/metadata/graph-node/delete"): "Удалить плановый узел.",
     ("POST", "/api/metadata/graph-node/restore"): "Вернуть удалённый плановый узел.",
@@ -100,7 +101,8 @@ ROUTE_DOCS: dict[tuple[str, str], str] = {
     ("POST", "/api/metadata/domain-plan"): "Сохранить плановый домен.",
     ("POST", "/api/metadata/domain-plan/delete"): "Удалить плановый домен.",
     ("POST", "/api/frontend/meta"): "{action, …} — плановые страницы (page-plan:…), "
-    "блоки (block-plan:…), правила, домены; существующие страницы и блоки агенту закрыты.",
+    "блоки (block-plan:…), правила, домены; calls — список вызываемых эндпоинтов "
+    "(«GET /path»); существующие страницы и блоки агенту закрыты.",
 }
 
 

@@ -1035,3 +1035,14 @@ body[data-active-tab="frontend"] #inspectorToggle { display: none; }
 .brief-preview textarea.brief-edit{margin:0;flex:1;min-height:360px;max-height:56vh;resize:vertical;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px;font:11px/1.45 Consolas,monospace;color:var(--txt)}
 .brief-sections{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center}
 .brief-sections label{display:inline-flex;gap:4px;align-items:center}
+
+/* страницы фронтенда в ветке идеи и статусы связей */
+.idea-page-card { border-top-color: #7aa7e0; }
+.idea-page-card.on-map { border-top-color: #82d3b3; }
+.idea-page-blocks { margin-top: 12px; }
+.idea-block-row { margin-top: 8px; padding: 8px; border: 1px solid #2d3a49; border-radius: 8px; background: #151c24; }
+.idea-block-row textarea { margin-top: 6px; }
+.calls-status { margin-top: 4px; line-height: 1.5; }
+.idea-branches { display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: 14px; overflow-y: auto; }
+.idea-branches .idea-branch { flex: 0 0 auto; height: min(560px, 72vh); }
+.idea-branches .idea-branch:only-child { flex: 1 1 auto; height: auto; }

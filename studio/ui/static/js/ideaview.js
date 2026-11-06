@@ -23,13 +23,13 @@ function promptBasis(idea){return JSON.stringify([idea.title,idea.description])}
 function normalizeBoard(value){
   if(!value||!Array.isArray(value.ideas))return clone(EMPTY);
   const ideas=value.ideas.filter(item=>item&&typeof item==="object"&&!Array.isArray(item)).map((item,index)=>{
-    const idea={id:text(item.id)||id(),title:text(item.title)||`Идея ${index+1}`,description:text(item.description),prompt:text(item.prompt),promptBasis:text(item.promptBasis),jsonText:text(item.jsonText),payload:item.payload&&typeof item.payload==="object"?item.payload:{scenarios:[]},scenarios:[]};
+    const idea={id:text(item.id)||id(),title:text(item.title)||`Идея ${index+1}`,description:text(item.description),prompt:text(item.prompt),promptBasis:text(item.promptBasis),jsonText:text(item.jsonText),payload:item.payload&&typeof item.payload==="object"?item.payload:{scenarios:[]},scenarios:[],pages:pagesFrom(item.pages)};
     idea.scenarios=(Array.isArray(item.scenarios)?item.scenarios:[]).filter(s=>s&&typeof s==="object"&&!Array.isArray(s)).map((scenario,scenarioIndex)=>{
       const source=scenario.source&&typeof scenario.source==="object"&&!Array.isArray(scenario.source)?scenario.source:{};
       const acceptance=Array.isArray(scenario.acceptance)?scenario.acceptance.map(String):[];
       return {id:text(scenario.id)||id(),source,title:text(scenario.title)||scenarioName(source,scenarioIndex),description:text(scenario.description)||text(source.description),acceptance,domain:text(scenario.domain)||text(source.domain),mapNodeId:text(scenario.mapNodeId),mapEndpointId:text(scenario.mapEndpointId)};
     });
-    idea.payload=payloadFor(idea);if(!idea.jsonText&&idea.scenarios.length)idea.jsonText=JSON.stringify(idea.payload,null,2);
+    idea.payload=payloadFor(idea);if(!idea.jsonText&&(idea.scenarios.length||idea.pages.length))idea.jsonText=JSON.stringify(idea.payload,null,2);
     return idea;
   });
   const requested=text(value.activeId);
@@ -149,10 +149,31 @@ function normalizedScenarios(value){
     return {id:id(),source:item,title:scenarioName(item,index),description:text(item.description),acceptance:Array.isArray(item.acceptance)?item.acceptance.map(String):[],domain:text(item.domain)};
   });
 }
+function strings(value){return Array.isArray(value)?value.map(x=>String(x).trim()).filter(Boolean):[]}
+function uid(){return (globalThis.crypto&&crypto.randomUUID)?crypto.randomUUID():`${Date.now().toString(16)}-${Math.random().toString(16).slice(2,10)}`}
+function blockFrom(raw,index){
+  const b=raw&&typeof raw==="object"&&!Array.isArray(raw)?raw:{};
+  return {id:text(b.id)||id(),name:text(b.name||b.title)||`Блок ${index+1}`,description:text(b.description),acceptance:strings(b.acceptance),calls:strings(b.calls),mapBlockId:text(b.mapBlockId)};
+}
+function pageFrom(raw,index){
+  const source=raw.source&&typeof raw.source==="object"&&!Array.isArray(raw.source)?raw.source:{...raw};
+  return {id:text(raw.id)||id(),source,title:text(raw.title||raw.name)||`Страница ${index+1}`,name:text(raw.name),description:text(raw.description),acceptance:strings(raw.acceptance),domain:text(raw.domain),route:text(raw.route),calls:strings(raw.calls),blocks:(Array.isArray(raw.blocks)?raw.blocks:[]).map(blockFrom),mapPageId:text(raw.mapPageId)};
+}
+function pagesFrom(list){
+  return (Array.isArray(list)?list:[]).filter(item=>item&&typeof item==="object"&&!Array.isArray(item)).map(pageFrom);
+}
+function pageSource(page){
+  return {...page.source,title:page.title,name:page.name,description:page.description,acceptance:page.acceptance,domain:page.domain,route:page.route,calls:page.calls,blocks:page.blocks.map(b=>({name:b.name,description:b.description,acceptance:b.acceptance,calls:b.calls}))};
+}
+function syncPage(idea,page){
+  page.source=pageSource(page);
+  idea.payload=payloadFor(idea);idea.jsonText=JSON.stringify(idea.payload,null,2);save();
+}
 function payloadFor(idea){
   const parsed=idea.payload&&typeof idea.payload==="object"?clone(idea.payload):{scenarios:[]};
   if(Array.isArray(parsed))return idea.scenarios.map(s=>({...s.source}));
   parsed.scenarios=idea.scenarios.map(s=>({...s.source}));
+  if((idea.pages&&idea.pages.length)||Array.isArray(parsed.pages))parsed.pages=(idea.pages||[]).map(p=>({...p.source}));
   return parsed;
 }
 function syncScenario(idea,scenario){
@@ -200,9 +221,28 @@ function hydrateMapLinks(){
 }
 function addIdea(){
   const search=$("searchBox");if(search&&search.value){search.value="";S.lastSearchQuery="";const count=$("searchCount");if(count)count.textContent=""}
-  const idea={id:id(),title:"Новая идея",description:"",prompt:"",jsonText:"",payload:{scenarios:[]},scenarios:[]};
+  const idea={id:id(),title:"Новая идея",description:"",prompt:"",jsonText:"",payload:{scenarios:[]},scenarios:[],pages:[]};
   board.ideas.push(idea);board.activeId=idea.id;render();save();
   const input=document.querySelector(`[data-idea-title="${idea.id}"]`);if(input){input.focus();input.select()}
+}
+function pageCard(page,index){
+  const sent=!!page.mapPageId;
+  const blocks=page.blocks.map(b=>`<div class="idea-block-row" data-block="${esc(b.id)}">
+      <div class="idea-scenario-head"><input class="scenario-title" data-bfield="name" aria-label="Название блока" value="${esc(b.name)}"><button class="icon-button danger" type="button" data-delete-block="${esc(b.id)}" title="Удалить блок" aria-label="Удалить блок">×</button></div>
+      <textarea data-bfield="description" rows="2" placeholder="Что делает блок">${esc(b.description)}</textarea>
+      <textarea data-bfield="acceptance" rows="2" placeholder="Критерии: по одному на строку">${esc(b.acceptance.join("\n"))}</textarea>
+      <textarea data-bfield="calls" rows="1" placeholder="Вызывает: GET /path (по одному на строку)">${esc(b.calls.join("\n"))}</textarea>
+    </div>`).join("");
+  return `<article class="idea-scenario-card idea-page-card${sent?" on-map":""}" data-page="${esc(page.id)}">
+    <div class="idea-scenario-head"><span class="scenario-index">${String(index+1).padStart(2,"0")}</span>${sent?'<span class="scenario-on-map" title="Страница уже передана во вкладку «Фронтенд»">во фронтенде</span>':""}<input class="scenario-title" data-pfield="title" aria-label="Название страницы" value="${esc(page.title)}"><button class="text-button" type="button" data-page-to-front="${esc(page.id)}" title="Создать плановую страницу и блоки во вкладке «Фронтенд»">Во фронтенд ↗</button><button class="icon-button danger" type="button" data-delete-page="${esc(page.id)}" title="Удалить страницу из ветки" aria-label="Удалить страницу">×</button></div>
+    <label class="idea-field-label">ПАПКА СТРАНИЦЫ<input data-pfield="name" value="${esc(page.name)}" placeholder="orders-list"></label>
+    <label class="idea-field-label">МАРШРУТ<input data-pfield="route" value="${esc(page.route)}" placeholder="/orders"></label>
+    <label class="idea-field-label">ОПИСАНИЕ<textarea data-pfield="description" rows="4" placeholder="Что делает страница…">${esc(page.description)}</textarea></label>
+    <label class="idea-field-label">КРИТЕРИИ ПРИЁМКИ<textarea data-pfield="acceptance" rows="3" placeholder="По одному критерию на строку">${esc(page.acceptance.join("\n"))}</textarea></label>
+    <label class="idea-field-label">РОЛЬ (ДОМЕН)<input data-pfield="domain" value="${esc(page.domain)}" placeholder="клиент"></label>
+    <label class="idea-field-label">ВЫЗЫВАЕТ ЭНДПОИНТЫ<textarea data-pfield="calls" rows="2" placeholder="GET /orders/list&#10;POST /orders/create">${esc(page.calls.join("\n"))}</textarea></label>
+    <div class="idea-page-blocks"><div class="branch-label">БЛОКИ <span>${page.blocks.length}</span></div>${blocks||'<div class="hint">Блоков нет</div>'}</div>
+  </article>`;
 }
 function card(idea){
   const promptIsFresh=!!idea.prompt&&idea.promptBasis===promptBasis(idea);
@@ -222,23 +262,24 @@ function card(idea){
       <label class="idea-field-label">ЗАДАЧА / ИДЕЯ<textarea data-idea-description="${esc(idea.id)}" rows="4" placeholder="Какую потребность или проблему нужно решить?">${esc(idea.description)}</textarea></label>
       <div class="idea-node-actions"><select class="prompt-mode" data-prompt-mode="${esc(idea.id)}" title="Режим сборки промпта"><option value="new"${promptMode==="new"?" selected":""}>Новая система</option><option value="improve"${promptMode==="improve"?" selected":""}>Развитие системы</option></select><button type="button" class="primary" data-generate-prompt="${esc(idea.id)}">✦ Собрать промпт</button><button type="button" data-copy-prompt="${esc(idea.id)}" ${promptIsFresh?"":"disabled"}>Копировать</button><span class="prompt-freshness ${promptIsFresh?"fresh":idea.prompt?"stale":""}" data-prompt-state="${esc(idea.id)}">${promptIsFresh?"Актуален":idea.prompt?"Устарел":""}</span></div>
       <details class="idea-prompt-details"><summary>Промпт для LLM</summary><textarea data-idea-prompt="${esc(idea.id)}" rows="7" readonly placeholder="Соберите промпт на основе идеи">${esc(idea.prompt)}</textarea></details>
-      <div class="idea-json-head"><label class="idea-field-label">ОТВЕТ LLM · JSON</label><button type="button" class="text-button" data-import-json="${esc(idea.id)}">Разобрать сценарии ↓</button></div>
-      <textarea class="idea-json" data-idea-json="${esc(idea.id)}" rows="7" placeholder='Вставьте JSON с массивом "scenarios"'>${esc(idea.jsonText)}</textarea>
-      <div class="idea-json-foot">${idea.jsonText&&idea.jsonText!==JSON.stringify(idea.payload,null,2)?'JSON изменён — нажмите «Разобрать сценарии»':idea.scenarios.length?`${idea.scenarios.length} сценариев в ветке`:'Ответ ещё не разобран'}</div>
+      <div class="idea-json-head"><label class="idea-field-label">ОТВЕТ LLM · JSON</label><button type="button" class="text-button" data-import-json="${esc(idea.id)}">Разобрать ответ ↓</button></div>
+      <textarea class="idea-json" data-idea-json="${esc(idea.id)}" rows="7" placeholder='Вставьте ответ LLM: JSON с "scenarios" и, если нужен интерфейс, "pages"'>${esc(idea.jsonText)}</textarea>
+      <div class="idea-json-foot">${idea.jsonText&&idea.jsonText!==JSON.stringify(idea.payload,null,2)?'JSON изменён — нажмите «Разобрать сценарии»':(idea.scenarios.length||idea.pages.length)?`${idea.scenarios.length} сценариев, ${idea.pages.length} страниц в ветке`:'Ответ ещё не разобран'}</div>
     </article>
-    <div class="idea-branch"><div class="branch-label">СЦЕНАРИИ <span>${idea.scenarios.length}</span></div><div class="scenario-branch">${children||'<div class="branch-empty"><span>＋</span><b>Ветка пока пустая</b><small>Вставьте JSON от LLM и разберите ответ</small></div>'}</div></div>
+    <div class="idea-branches"><div class="idea-branch"><div class="branch-label">СЦЕНАРИИ БЭКЕНДА <span>${idea.scenarios.length}</span></div><div class="scenario-branch">${children||'<div class="branch-empty"><span>＋</span><b>Ветка пока пустая</b><small>Вставьте JSON от LLM и разберите ответ</small></div>'}</div></div>
+    ${idea.pages.length?`<div class="idea-branch"><div class="branch-label">СТРАНИЦЫ ФРОНТЕНДА <span>${idea.pages.length}</span></div><div class="scenario-branch">${idea.pages.map(pageCard).join("")}</div></div>`:""}</div>
   </section>`;
 }
 function render(){
   hydrateMapLinks();
   const boardEl=$("ideasBoard"),list=$("ideaList");if(!boardEl||!list)return;
   const query=String(S.lastSearchQuery||"").trim().toLocaleLowerCase("ru");
-  const visible=board.ideas.filter(idea=>!query||[idea.title,idea.description,...idea.scenarios.flatMap(s=>[s.title,s.description,s.domain])].some(value=>String(value||"").toLocaleLowerCase("ru").includes(query)));
+  const visible=board.ideas.filter(idea=>!query||[idea.title,idea.description,...idea.scenarios.flatMap(s=>[s.title,s.description,s.domain]),...idea.pages.flatMap(p=>[p.title,p.name,p.description,p.domain])].some(value=>String(value||"").toLocaleLowerCase("ru").includes(query)));
   const count=$("searchCount");if(count&&S.tab==="ideas")count.textContent=query?`идей: ${visible.length} из ${board.ideas.length}`:"";
   if(visible.length&&!visible.some(idea=>idea.id===board.activeId))board.activeId=visible[0].id;
   const active=visible.find(idea=>idea.id===board.activeId);
   boardEl.innerHTML=active?card(active):query?'<div class="ideas-welcome"><span>⌕</span><h3>Ничего не найдено</h3><p>Попробуйте изменить поисковый запрос.</p></div>':board.ideas.length?'<div class="ideas-welcome"><span>⌁</span><h3>Выберите идею</h3><p>Выберите ветку в списке слева.</p></div>':'<div class="ideas-welcome"><span>✳</span><h3>Начните с идеи</h3><p>Создайте корневой узел, сформируйте промпт для LLM и добавьте сценарии в виде связанной ветки.</p><button class="primary" type="button" data-add-first>＋ Создать первую идею</button></div>';
-  list.innerHTML=visible.length?visible.map((idea,i)=>`<button type="button" class="idea-rail-item${idea.id===board.activeId?" on":""}" data-focus-idea="${esc(idea.id)}"><span>${String(i+1).padStart(2,"0")}</span><b>${esc(idea.title||"Без названия")}</b><small>${idea.scenarios.length} сценариев</small></button>`).join(""):query?'<p class="rail-empty">Совпадений нет</p>':'<p class="rail-empty">Пока нет идей</p>';
+  list.innerHTML=visible.length?visible.map((idea,i)=>`<button type="button" class="idea-rail-item${idea.id===board.activeId?" on":""}" data-focus-idea="${esc(idea.id)}"><span>${String(i+1).padStart(2,"0")}</span><b>${esc(idea.title||"Без названия")}</b><small>${railCounts(idea)}</small></button>`).join(""):query?'<p class="rail-empty">Совпадений нет</p>':'<p class="rail-empty">Пока нет идей</p>';
   boardEl.querySelectorAll("[data-idea-title]").forEach(el=>el.oninput=()=>{const idea=find(el.dataset.ideaTitle);if(!idea)return;idea.title=el.value;updateRail();updatePromptState(idea);save()});
   boardEl.querySelectorAll("[data-idea-description]").forEach(el=>el.oninput=()=>{const idea=find(el.dataset.ideaDescription);if(idea){idea.description=el.value;updatePromptState(idea);save()}});
   boardEl.querySelectorAll("[data-idea-json]").forEach(el=>el.oninput=()=>{const idea=find(el.dataset.ideaJson);if(idea)idea.jsonText=el.value;save()});
@@ -247,6 +288,35 @@ function render(){
     if(el.dataset.field==="acceptance")scenario.acceptance=el.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);else scenario[el.dataset.field]=el.value;
     syncScenario(idea,scenario);
     const json=boardEl.querySelector(`[data-idea-json="${idea.id}"]`);if(json)json.value=idea.jsonText;
+  });
+  const pageOf=el=>{const idea=find(el.closest("[data-idea]").dataset.idea);return {idea,page:idea&&idea.pages.find(x=>x.id===el.closest("[data-page]").dataset.page)}};
+  boardEl.querySelectorAll("[data-pfield]").forEach(el=>el.oninput=()=>{
+    const {idea,page}=pageOf(el);if(!page)return;
+    const key=el.dataset.pfield;
+    page[key]=(key==="acceptance"||key==="calls")?strings(el.value.split(/\r?\n/)):el.value;
+    syncPage(idea,page);
+    const json=boardEl.querySelector(`[data-idea-json="${idea.id}"]`);if(json)json.value=idea.jsonText;
+  });
+  boardEl.querySelectorAll("[data-bfield]").forEach(el=>el.oninput=()=>{
+    const {idea,page}=pageOf(el);if(!page)return;
+    const block=page.blocks.find(x=>x.id===el.closest("[data-block]").dataset.block);if(!block)return;
+    const key=el.dataset.bfield;
+    block[key]=(key==="acceptance"||key==="calls")?strings(el.value.split(/\r?\n/)):el.value;
+    syncPage(idea,page);
+    const json=boardEl.querySelector(`[data-idea-json="${idea.id}"]`);if(json)json.value=idea.jsonText;
+  });
+  boardEl.querySelectorAll("[data-delete-page]").forEach(el=>el.onclick=()=>{
+    const idea=find(el.closest("[data-idea]").dataset.idea);if(!idea)return;
+    pushUndo();idea.pages=idea.pages.filter(x=>x.id!==el.dataset.deletePage);
+    idea.payload=payloadFor(idea);idea.jsonText=JSON.stringify(idea.payload,null,2);render();save();toast("Страница удалена из ветки и JSON");
+  });
+  boardEl.querySelectorAll("[data-delete-block]").forEach(el=>el.onclick=()=>{
+    const {idea,page}=pageOf(el);if(!page)return;
+    pushUndo();page.blocks=page.blocks.filter(x=>x.id!==el.dataset.deleteBlock);
+    syncPage(idea,page);render();toast("Блок удалён");
+  });
+  boardEl.querySelectorAll("[data-page-to-front]").forEach(el=>el.onclick=()=>{
+    const {page}=pageOf(el);if(page)sendPageToFront(page,el);
   });
   boardEl.querySelectorAll("[data-delete-idea]").forEach(el=>el.onclick=()=>{if(!confirm("Удалить идею вместе со всеми сценариями?"))return;pushUndo();board.ideas=board.ideas.filter(x=>x.id!==el.dataset.deleteIdea);if(board.activeId===el.dataset.deleteIdea)board.activeId=board.ideas[0]?.id||"";render();save()});
   boardEl.querySelectorAll("[data-delete-scenario]").forEach(el=>el.onclick=()=>{const idea=find(el.closest("[data-idea]").dataset.idea);if(!idea)return;pushUndo();idea.scenarios=idea.scenarios.filter(x=>x.id!==el.dataset.deleteScenario);idea.payload=payloadFor(idea);idea.jsonText=JSON.stringify(idea.payload,null,2);render();save();toast("Сценарий удалён из ветки и JSON")});
@@ -258,6 +328,7 @@ function render(){
   boardEl.querySelectorAll("[data-add-first]").forEach(el=>el.onclick=addIdea);
   list.querySelectorAll("[data-focus-idea]").forEach(el=>el.onclick=()=>{board.activeId=el.dataset.focusIdea;render();save()});
 }
+function railCounts(idea){return idea.pages.length?`${idea.scenarios.length} сценариев · ${idea.pages.length} стр.`:`${idea.scenarios.length} сценариев`}
 function find(ideaId){return board.ideas.find(x=>x.id===ideaId)}
 function updatePromptState(idea){
   const fresh=!!idea.prompt&&idea.promptBasis===promptBasis(idea);
@@ -269,6 +340,23 @@ async function sendToConstructor(button){
   if(isOnMap(scenario)){confirmRecreate(scenario);return}
   if(!(await setTab("map")))return;
   await putScenarioOnMap(scenario);
+}
+async function sendPageToFront(page,button){
+  button.disabled=true;
+  try{
+    const pageId=page.mapPageId||`page-plan:${uid()}`;
+    await api("/api/frontend/meta","POST",{action:"save_page",id:pageId,plannedNew:true,name:page.name||page.title,description:page.description,acceptance:page.acceptance,domain:page.domain,route:page.route,calls:page.calls});
+    page.mapPageId=pageId;
+    for(const block of page.blocks){
+      const blockId=block.mapBlockId||`block-plan:${uid()}`;
+      await api("/api/frontend/meta","POST",{action:"save_block",pageId,id:blockId,name:block.name,description:block.description,acceptance:block.acceptance,calls:block.calls});
+      block.mapBlockId=blockId;
+    }
+    const idea=find(button.closest("[data-idea]").dataset.idea);
+    if(idea)syncPage(idea,page);
+    render();
+    toast("Страница и блоки добавлены во вкладку «Фронтенд» как плановые узлы");
+  }catch(error){button.disabled=false;toast("Не удалось передать страницу во фронтенд: "+error.message)}
 }
 function confirmRecreate(scenario){
   modal("Сценарий уже есть на карте",
@@ -324,17 +412,37 @@ async function recreateScenario(scenario){
     toast("Сценарий на карте пересоздан данными карточки");
   }catch(error){toast("Не удалось пересоздать сценарий на карте: "+error.message)}
 }
-function updateRail(){const list=$("ideaList");if(!list)return;list.querySelectorAll(".idea-rail-item").forEach(el=>{const item=find(el.dataset.focusIdea);if(item){el.querySelector("b").textContent=item.title||"Без названия";el.querySelector("small").textContent=`${item.scenarios.length} сценариев`}})}
+function updateRail(){const list=$("ideaList");if(!list)return;list.querySelectorAll(".idea-rail-item").forEach(el=>{const item=find(el.dataset.focusIdea);if(item){el.querySelector("b").textContent=item.title||"Без названия";el.querySelector("small").textContent=railCounts(item)}})}
 async function generatePrompt(ideaId,button){
   const idea=find(ideaId);if(!idea)return;if(!idea.description.trim()){toast("Сначала опишите идею");return}
   button.disabled=true;button.textContent="Собираю…";
   try{const data=await api("/api/decompose/prompt","POST",{task:`${idea.title}\n\n${idea.description}`,mode:promptMode});idea.prompt=data.prompt||"";idea.promptBasis=promptBasis(idea);render();save();toast("Промпт готов")}
   catch(error){toast("Не удалось собрать промпт: "+error.message);button.disabled=false;button.textContent="✦ Собрать промпт"}
 }
-function importJson(ideaId){
+async function parseAnswer(textValue){
+  try{return await api("/api/decompose/parse","POST",{text:textValue})}
+  catch(error){
+    if(error&&error.status)throw error;
+    const parsed=JSON.parse(textValue);
+    return Array.isArray(parsed)?{scenarios:parsed,pages:[],warnings:[]}:{scenarios:parsed.scenarios||[],pages:parsed.pages||[],warnings:[]};
+  }
+}
+async function importJson(ideaId){
   const idea=find(ideaId);if(!idea)return;
-  try{const parsed=JSON.parse(idea.jsonText);const scenarios=normalizedScenarios(parsed);if(idea.scenarios.length&&!confirm("Заменить сценарии этой ветки? Текущие правки карточек будут перезаписаны."))return;pushUndo();idea.payload=Array.isArray(parsed)?{scenarios:parsed}:parsed;idea.scenarios=scenarios;idea.payload=payloadFor(idea);idea.jsonText=JSON.stringify(idea.payload,null,2);render();save();toast(`Добавлено сценариев: ${scenarios.length}`)}
-  catch(error){toast("JSON не разобран: "+error.message)}
+  try{
+    const parsed=await parseAnswer(idea.jsonText);
+    const scenarios=normalizedScenarios(parsed.scenarios||[]);
+    const pages=pagesFrom(parsed.pages);
+    if((idea.scenarios.length||idea.pages.length)&&!confirm("Заменить ветку этой идеи? Текущие правки карточек будут перезаписаны."))return;
+    pushUndo();
+    idea.payload={scenarios:parsed.scenarios||[],...(parsed.pages&&parsed.pages.length?{pages:parsed.pages}:{})};
+    idea.scenarios=scenarios;idea.pages=pages;
+    idea.payload=payloadFor(idea);idea.jsonText=JSON.stringify(idea.payload,null,2);
+    render();save();
+    toast(`Добавлено: сценариев ${scenarios.length}, страниц ${pages.length}`);
+    const warnings=Array.isArray(parsed.warnings)?parsed.warnings:[];
+    if(warnings.length)toast(warnings.slice(0,2).join("; "));
+  }catch(error){toast("JSON не разобран: "+error.message)}
 }
 function copy(value){if(!value){toast("Сначала соберите промпт");return}if(navigator.clipboard?.writeText)navigator.clipboard.writeText(value).then(()=>toast("Промпт скопирован")).catch(()=>toast("Не удалось скопировать"));else{const el=document.createElement("textarea");el.value=value;document.body.appendChild(el);el.select();document.execCommand("copy");el.remove();toast("Промпт скопирован")}}
 function bind(){

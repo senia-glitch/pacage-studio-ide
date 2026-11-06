@@ -31,6 +31,7 @@ from studio.agent.brief import load_rules, rules_override_path, standard_rules
 from studio.agent.decompose import (
     decompose_override_path,
     load_decompose_template,
+    parse_decompose_answer,
     standard_decompose_template,
 )
 from studio.agent.report import build_report, save_report
@@ -45,6 +46,7 @@ from studio.creator import CreateError
 from studio.creator.plan import create_plan, delete_plan, preview_plan, update_plan
 from studio.env import read_env
 from studio.frontend.brief import front_prompt_state
+from studio.frontend.links import check_links
 from studio.metadata import (
     MetadataError,
     delete_domain_plan,
@@ -523,6 +525,16 @@ class ProjectState:
             self.ensure_graph()
             return {"prompt": build_decompose_prompt(self.graph, env, task, mode)}
 
+    def decompose_parse(self, data: dict) -> dict:
+        """Разобрать ответ LLM по идее: сценарии бэкенда и страницы фронтенда."""
+        text = data.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise MetadataError("invalid_input", "Вставьте ответ LLM")
+        try:
+            return parse_decompose_answer(text)
+        except SyncJsonError as exc:
+            raise MetadataError("invalid_input", str(exc)) from exc
+
     # -------------------------------------------------- шаблонные промпты
 
     _PROMPT_PATHS = {
@@ -611,6 +623,10 @@ class ProjectState:
                 "path": f".studio/{BRIEF_FILENAME}",
                 "tasks": data.get("tasks") or [],
             }
+
+    def check_front_links(self, front: dict) -> dict:
+        """Сверить объявленные вызовы фронтенда (calls) с эндпоинтами бэкенда."""
+        return check_links(front, self.ensure_graph(), read_env(self.root).api_prefix)
 
     def mode_token(self, mode: str) -> str:
         return access.derive_token(self.token, mode)

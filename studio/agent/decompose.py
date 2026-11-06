@@ -7,6 +7,7 @@ env-файлов и тела исходников в промпт не попа�
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from studio.env import ProjectEnv
@@ -37,6 +38,7 @@ _PROMPT_TEMPLATE = """# Роль
 Сценарии:  ${scenarios}
 Модели:    ${models_list}
 Планы:     ${plans}
+Страницы фронтенда: ${pages}
 
 ## Правила декомпозиции
 1. Сначала задай не более 5 уточняющих вопросов, если задача
@@ -46,6 +48,11 @@ _PROMPT_TEMPLATE = """# Роль
 4. Поля моделей и SQL не выдумывай — их определит AI-агент
    на этапе `studio brief`.
 5. Если сценарий не трогает БД — uses_db: false.
+6. Если задача затрагивает интерфейс — добавь ключ pages (страницы и их блоки);
+   если нет — ключ pages не добавляй. Фронтенд: Vue 3 + Pinia + Router + Vite,
+   страница = папка в kebab-case, блок = компонент в PascalCase. Вызовы бэкенда
+   записывай в calls строками «METHOD /path»: они должны совпадать с
+   http_method и path сценариев ниже или с существующими эндпоинтами.
 
 ## Формат финального ответа
 Когда пользователь подтвердил декомпозицию — отдай ОДИН JSON-блок:
@@ -61,10 +68,26 @@ _PROMPT_TEMPLATE = """# Роль
   "path": "/…",
   "uses_db": true,
   "with_test": true
+}],
+"pages": [{
+  "title": "…",
+  "name": "имя-страницы",
+  "description": "…",
+  "acceptance": ["…"],
+  "domain": "роль пользователя",
+  "route": "/…",
+  "calls": ["GET /…"],
+  "blocks": [{
+    "name": "ИмяБлока",
+    "description": "…",
+    "acceptance": ["…"],
+    "calls": ["GET /…"]
+  }]
 }]}
 ```
 
-Все поля обязательны, кроме slug (если пусто — выведется из title).
+Все поля scenarios обязательны, кроме slug (если пусто — выведется из title).
+Ключ pages необязателен; в страницах и блоках calls может быть пустым списком.
 http_method — один из: get, post, put, patch, delete, "".
 В финальном сообщении — только JSON-блок, без комментариев.
 
@@ -99,6 +122,7 @@ fastbase / core-package / event-infra / pacage-studio:
 Сценарии:  ${scenarios}
 Модели:    ${models_list}
 Планы:     ${plans}
+Страницы фронтенда: ${pages}
 
 ## Правила декомпозиции (режим развития)
 1. Сначала задай не более 5 уточняющих вопросов, если задача
@@ -113,6 +137,11 @@ fastbase / core-package / event-infra / pacage-studio:
 5. Поля моделей и SQL не выдумывай — их определит AI-агент
    на этапе `studio brief`.
 6. Если сценарий не трогает БД — uses_db: false.
+7. Если задача затрагивает интерфейс — добавь ключ pages (страницы и их блоки);
+   если нет — ключ pages не добавляй. Не повторяй существующие страницы
+   фронтенда. Страница = папка в kebab-case, блок = компонент в PascalCase.
+   Вызовы бэкенда записывай в calls строками «METHOD /path»: они должны
+   совпадать с http_method и path сценариев или с существующими эндпоинтами.
 
 ## Формат финального ответа
 Когда пользователь подтвердил декомпозицию — отдай ОДИН JSON-блок:
@@ -128,10 +157,26 @@ fastbase / core-package / event-infra / pacage-studio:
   "path": "/…",
   "uses_db": true,
   "with_test": true
+}],
+"pages": [{
+  "title": "…",
+  "name": "имя-страницы",
+  "description": "…",
+  "acceptance": ["…"],
+  "domain": "роль пользователя",
+  "route": "/…",
+  "calls": ["GET /…"],
+  "blocks": [{
+    "name": "ИмяБлока",
+    "description": "…",
+    "acceptance": ["…"],
+    "calls": ["GET /…"]
+  }]
 }]}
 ```
 
-Все поля обязательны, кроме slug (если пусто — выведется из title).
+Все поля scenarios обязательны, кроме slug (если пусто — выведется из title).
+Ключ pages необязателен; в страницах и блоках calls может быть пустым списком.
 http_method — один из: get, post, put, patch, delete, "".
 В финальном сообщении — только JSON-блок, без комментариев.
 
@@ -213,6 +258,26 @@ def _plan_lines(graph: Graph) -> list[str]:
     return out
 
 
+def _page_lines(graph: Graph) -> list[str]:
+    """Страницы фронтенда (факт и план) для промпта; нет frontend/ — пусто."""
+    from studio.frontend.graph import build_front_graph
+
+    front = build_front_graph(graph.project_root)
+    if not front.get("present"):
+        return []
+    out: list[str] = []
+    for page in sorted(front.get("pages") or [], key=lambda item: str(item.get("name"))):
+        blocks = ", ".join(str(block.get("name")) for block in page.get("blocks") or [])
+        line = f"{page.get('route') or '—'} {page.get('name')}"
+        if blocks:
+            line += f" (блоки: {blocks})"
+        calls = page.get("calls") or []
+        if calls:
+            line += f" вызывает: {', '.join(calls)}"
+        out.append(line)
+    return out
+
+
 def build_decompose_prompt(graph: Graph, env: ProjectEnv, task: str, mode: str = "new") -> str:
     """Собрать Markdown-промпт декомпозиции по графу, окружению и задаче."""
     replacements = {
@@ -224,6 +289,7 @@ def build_decompose_prompt(graph: Graph, env: ProjectEnv, task: str, mode: str =
         "${scenarios}": _facts_block(_scenario_lines(graph)),
         "${models_list}": _facts_block(_model_lines(graph)),
         "${plans}": _facts_block(_plan_lines(graph)),
+        "${pages}": _facts_block(_page_lines(graph)),
         "${task}": task,
     }
     text = load_decompose_template(Path(graph.project_root), mode)
@@ -257,4 +323,61 @@ def load_decompose_template(project_root: Path | None = None, mode: str = "new")
     return standard_decompose_template(mode)
 
 
-__all__ = ["build_decompose_prompt"]
+def parse_decompose_answer(text) -> dict:
+    """Разобрать ответ LLM: ``{"scenarios": […], "pages": […]}`` или массив сценариев.
+
+    Принимает текст целиком (JSON может быть в ```-блоке и среди слов) или уже
+    готовый объект. Вызовы ``calls`` проверяются: нераспознанные отбрасываются с
+    предупреждением. Ошибка структуры — SyncJsonError с понятным текстом.
+    """
+    from studio.agent.sync_json import SyncJsonError, extract_json
+    from studio.frontend.links import normalize_call
+
+    data = text
+    if isinstance(text, str):
+        try:
+            data = json.loads(text)  # чистый JSON, в том числе массив сценариев
+        except ValueError:
+            data = extract_json(text)  # ```-блок или JSON среди слов
+    warnings: list[str] = []
+    if isinstance(data, list):
+        data = {"scenarios": data}
+    if not isinstance(data, dict):
+        raise SyncJsonError("В корне ответа ожидается объект с ключами scenarios и/или pages")
+    if "scenarios" not in data and "pages" not in data:
+        raise SyncJsonError('В ответе нет ни "scenarios", ни "pages"')
+
+    def objects(key: str) -> list[dict]:
+        raw = data.get(key, [])
+        if not isinstance(raw, list):
+            raise SyncJsonError(f'"{key}" должен быть массивом')
+        for index, item in enumerate(raw):
+            if not isinstance(item, dict):
+                raise SyncJsonError(f"{key}[{index}] должен быть объектом")
+        return [dict(item) for item in raw]
+
+    def clean_calls(item: dict, where: str) -> None:
+        kept = []
+        for raw in item.get("calls") or []:
+            call = normalize_call(raw)
+            if call is None:
+                warnings.append(f"{where}: вызов «{raw}» не распознан и пропущен")
+            elif call not in kept:
+                kept.append(call)
+        item["calls"] = kept
+
+    scenarios = objects("scenarios")
+    pages = objects("pages")
+    for index, page in enumerate(pages):
+        where = f"pages[{index}]"
+        clean_calls(page, where)
+        blocks = page.get("blocks") or []
+        if not isinstance(blocks, list) or any(not isinstance(b, dict) for b in blocks):
+            raise SyncJsonError(f"{where}.blocks должен быть массивом объектов")
+        page["blocks"] = [dict(block) for block in blocks]
+        for block_index, block in enumerate(page["blocks"]):
+            clean_calls(block, f"{where}.blocks[{block_index}]")
+    return {"scenarios": scenarios, "pages": pages, "warnings": warnings}
+
+
+__all__ = ["build_decompose_prompt", "parse_decompose_answer"]

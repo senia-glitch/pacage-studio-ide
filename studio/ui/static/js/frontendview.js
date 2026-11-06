@@ -155,8 +155,10 @@ function buildFrontNodes(graph) {
             name: page.name,
             route: page.route,
             file: page.file,
+            domain: page.domain,
             description: page.description,
             acceptance: page.acceptance,
+            calls: page.calls,
             deletion: page.deletion,
             planned: page.planned,
         }, shelf.id);
@@ -166,6 +168,7 @@ function buildFrontNodes(graph) {
                 file: block.file,
                 description: block.description,
                 acceptance: block.acceptance,
+                calls: block.calls,
                 deletion: block.deletion,
                 planned: block.planned,
             }, page.id);
@@ -676,6 +679,20 @@ function propsDomain(node) {
         <div class="insp-actions"><button type="button" class="primary" id="fpDomainSave">Сохранить название</button></div>`};
 }
 
+function callsField(node) {
+    const rows = ((S0.graph || {}).links || {}).rows || [];
+    const mine = rows.filter((row) => row.node === node.id);
+    const status = mine.length
+        ? `<div class="hint calls-status">${mine
+              .map((row) => (row.status === "ok"
+                  ? `✓ ${esc(row.call)} — есть в бэкенде`
+                  : `✗ ${esc(row.call)} — эндпоинта в бэкенде нет`))
+              .join("<br>")}</div>`
+        : "";
+    return `<label>Вызывает эндпоинты бэкенда<textarea id="fpCalls" rows="2" placeholder="GET /lessons&#10;POST /orders/create">${esc((node.calls || []).join("\n"))}</textarea></label>
+        <div class="hint">По одному на строку: «МЕТОД /путь». Префикс API можно не писать.</div>${status}`;
+}
+
 function propsPage(node) {
     const title = node.planned ? "Плановая страница" : "Страница";
     const body = node.planned
@@ -685,6 +702,7 @@ function propsPage(node) {
         <label>Маршрут (path)<input id="fpRoute" value="${esc(node.route)}" maxlength="120" placeholder="/example"></label>
         <label>Описание<textarea id="fpDesc" rows="3">${esc(node.description || "")}</textarea></label>
         <label>Критерии приёмки<textarea id="fpAccept" rows="3">${esc((node.acceptance || []).join("\n"))}</textarea></label>
+        ${callsField(node)}
         <div class="insp-actions"><button type="button" class="primary" id="fpSave">Сохранить страницу</button>
         <button type="button" class="danger" id="fpDeletePlanned">Удалить страницу</button></div>`
         : `
@@ -693,6 +711,7 @@ function propsPage(node) {
         <label>Маршрут (факт router.js, read-only)<input value="${esc(node.route)}" readonly></label>
         <label>Описание (метаданные)<textarea id="fpDesc" rows="3">${esc(node.description || "")}</textarea></label>
         <label>Критерии приёмки<textarea id="fpAccept" rows="3">${esc((node.acceptance || []).join("\n"))}</textarea></label>
+        ${callsField(node)}
         <div class="insp-actions"><button type="button" class="primary" id="fpSave">Сохранить метаданные</button></div>
         ${deletionBlock(node)}`;
     return {title, body};
@@ -707,12 +726,14 @@ function propsBlock(node) {
         <label>Страница<input value="${esc(parent?.name || "")}" readonly></label>
         <label>Описание<textarea id="fpDesc" rows="3">${esc(node.description || "")}</textarea></label>
         <label>Критерии приёмки<textarea id="fpAccept" rows="3">${esc((node.acceptance || []).join("\n"))}</textarea></label>
+        ${callsField(node)}
         <div class="insp-actions"><button type="button" class="primary" id="fpSave">Сохранить блок</button>
         <button type="button" class="danger" id="fpDeletePlanned">Удалить блок</button></div>`
         : `
         <div class="node-origin code-origin"><b>Блок из кода</b><span>${esc(node.file)}</span></div>
         <label>Описание (что блок делает)<textarea id="fpDesc" rows="3">${esc(node.description || "")}</textarea></label>
         <label>Критерии приёмки<textarea id="fpAccept" rows="3">${esc((node.acceptance || []).join("\n"))}</textarea></label>
+        ${callsField(node)}
         <div class="insp-actions"><button type="button" class="primary" id="fpSave">Сохранить метаданные</button></div>
         ${deletionBlock(node)}`;
     return {title, body};
@@ -771,6 +792,7 @@ function wireProps(node) {
             payload.acceptance = linesById("fpAccept");
             payload.domain = valueById("fpDomain");
             payload.route = valueById("fpRoute");
+            payload.calls = linesById("fpCalls");
         } else if (node.kind === "block") {
             payload.action = "save_block";
             payload.pageId = node.parentId;
@@ -778,6 +800,7 @@ function wireProps(node) {
             payload.name = valueById("fpName");
             payload.description = valueById("fpDesc");
             payload.acceptance = linesById("fpAccept");
+            payload.calls = linesById("fpCalls");
         } else {
             const parent = propsById(node);
             payload.action = "save_rule";
@@ -1054,6 +1077,7 @@ function treePageVisible(page, mode) {
 
 const BRIEF_SECTIONS = [
     ["outline", "Область работ"],
+    ["links", "Связи с бэкендом"],
     ["violations", "Нарушения правил"],
     ["verify", "Проверка"],
 ];

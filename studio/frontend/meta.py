@@ -14,6 +14,7 @@ import json
 import uuid
 from pathlib import Path
 
+from studio.frontend.links import normalize_calls
 from studio.store import atomic_write
 
 FRONTEND_META = "frontend.json"
@@ -131,6 +132,8 @@ def save_page_meta(root: Path, data: dict) -> dict:
             page["domain"] = ""
     if "route" in data:
         page["route"] = str(data.get("route") or "").strip()
+    if "calls" in data:
+        page["calls"] = normalize_calls(data.get("calls"))
     if "plannedNew" in data and data.get("plannedNew") and page_id.startswith("page-plan:"):
         page["planned"] = True
         page["name"] = str(data.get("name") or "").strip()
@@ -175,6 +178,8 @@ def save_block_meta(root: Path, data: dict) -> dict:
     if "acceptance" in data:
         raw = data.get("acceptance")
         block["acceptance"] = [str(item) for item in raw] if isinstance(raw, list) else []
+    if "calls" in data:
+        block["calls"] = normalize_calls(data.get("calls"))
     save_meta(root, meta)
     return {"meta": meta}
 
@@ -280,6 +285,7 @@ def move_block(root: Path, data: dict) -> dict:
             "name": name,
             "description": block.get("description") or "",
             "acceptance": block.get("acceptance") or [],
+            "calls": list(block.get("calls") or []),
             "rules": [dict(rule) for rule in block.get("rules") or []],
         }
         to_page.setdefault("blocks", {})[plan_id] = moved

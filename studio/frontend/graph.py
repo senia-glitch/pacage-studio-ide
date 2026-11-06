@@ -22,7 +22,7 @@ from studio.frontend.meta import load_meta
 def _merge_page(graph_page: dict, meta_page: dict | None) -> None:
     if not meta_page:
         return
-    for field in ("description", "acceptance", "domain", "note", "deletion", "name"):
+    for field in ("description", "acceptance", "domain", "note", "deletion", "name", "calls"):
         if field in meta_page:
             graph_page[field] = meta_page[field]
     if str(meta_page.get("route") or ""):
@@ -39,10 +39,11 @@ def _merge_page(graph_page: dict, meta_page: dict | None) -> None:
                 "description": block_meta.get("description") or "",
                 "acceptance": block_meta.get("acceptance") or [],
                 "deletion": block_meta.get("deletion"),
+                "calls": list(block_meta.get("calls") or []),
                 "rules": [dict(rule) for rule in block_meta.get("rules") or []],
             })
             continue
-        for field in ("description", "acceptance", "deletion", "note"):
+        for field in ("description", "acceptance", "deletion", "note", "calls"):
             if field in block_meta:
                 existing[field] = block_meta[field]
         for rule in block_meta.get("rules") or []:
@@ -69,6 +70,7 @@ def build_front_graph(project_root: str | Path) -> dict:
             "description": "",
             "acceptance": [],
             "deletion": None,
+            "calls": [],
             "blocks": [
                 {
                     "id": f"block:{fact['folder']}:{component['name']}",
@@ -79,6 +81,7 @@ def build_front_graph(project_root: str | Path) -> dict:
                     "description": "",
                     "acceptance": [],
                     "deletion": None,
+                    "calls": [],
                     "rules": [],
                 }
                 for component in fact.get("components") or []
@@ -101,6 +104,7 @@ def build_front_graph(project_root: str | Path) -> dict:
                 "acceptance": stored.get("acceptance") or [],
                 "deletion": stored.get("deletion"),
                 "component": stored.get("component") or "",
+                "calls": list(stored.get("calls") or []),
                 "blocks": [
                     {
                         "id": block_id,
@@ -111,6 +115,7 @@ def build_front_graph(project_root: str | Path) -> dict:
                         "description": block.get("description") or "",
                         "acceptance": block.get("acceptance") or [],
                         "deletion": block.get("deletion"),
+                        "calls": list(block.get("calls") or []),
                         "rules": [dict(rule) for rule in block.get("rules") or []],
                     }
                     for block_id, block in (stored.get("blocks") or {}).items()
@@ -142,6 +147,7 @@ def build_front_graph(project_root: str | Path) -> dict:
                 "description": stored.get("description") or "",
                 "acceptance": stored.get("acceptance") or [],
                 "deletion": stored.get("deletion"),
+                "calls": list(stored.get("calls") or []),
                 "blocks": [],
                 "rules": [dict(rule) for rule in stored.get("rules") or []],
             }
@@ -159,6 +165,7 @@ def build_front_graph(project_root: str | Path) -> dict:
                 "description": block_data.get("description") or "",
                 "acceptance": block_data.get("acceptance") or [],
                 "deletion": block_data.get("deletion"),
+                "calls": list(block_data.get("calls") or []),
                 "rules": [dict(rule) for rule in block_data.get("rules") or []],
             })
 
