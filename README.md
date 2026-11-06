@@ -113,4 +113,11 @@ studio                      # скан + интерфейс в браузере
 
 ## Установка полного стека:
 python -m pip install --upgrade --force-reinstall "fastbase[full] @ git+https://github.com/senia-glitch/fastapi-transport.git" "pacage-studio @ git+https://github.com/senia-glitch/pacage-studio-ide.git"
+# инициализация пакетов:
+infra init
+core-init
+fb init
+studio doctor
+# запуск студии
+studio
 
