@@ -24,7 +24,8 @@ from collections import deque
 from pathlib import Path
 
 from studio._atomic import atomic_write
-from studio.agent import projectenv
+from studio.agent import mcpcheck, projectenv
+from studio.agent.redaction import redact, redact_file
 from studio.metadata import MetadataError
 from studio.server import gitops
 from studio.server.settings import Settings
@@ -116,6 +117,7 @@ class Runner:
         self._note: str = ""  # что добавить к запросу следующего запуска (ответ, доработка)
         self._cancel = False
         self._git_note = ""
+        self._mcp: dict = {"ok": None}  # итог последнего рукопожатия с MCP-сервером студии
         self.status: dict = {"state": "idle", "stage": "", "message": ""}
         self._sync_workflow()
 
@@ -236,11 +238,43 @@ class Runner:
         text = json.dumps(config, ensure_ascii=False, indent=2) + "\n"
         if not atomic_write(self.mcp_config_path, text):
             raise MetadataError("not_writable", "Не удалось записать MCP-конфиг студии")
-        self.save_config({"enabled": True})
+        # «Подключён» только после настоящего рукопожатия: иначе агент получил бы пустоту.
+        self.save_config({"enabled": bool(self.probe()["ok"])})
         return self.agent_view()
 
+    def probe(self) -> dict:
+        """Рукопожатие с MCP-сервером теми же командой и окружением, что получит агент."""
+        result = mcpcheck.check(self.root)
+        result["checked_at"] = _now()
+        with self._lock:
+            self._mcp = result
+        return result
+
+    def mcp_state(self) -> dict:
+        """Последний итог рукопожатия (``ok`` пусто, пока проверки не было)."""
+        with self._lock:
+            return dict(self._mcp)
+
+    def probe_async(self) -> None:
+        """Проверка при старте студии: сервер падает тихо, поэтому о сбое лучше знать заранее."""
+        if not self.mcp_config_path.exists():
+            return
+
+        def work() -> None:
+            result = self.probe()
+            if not result["ok"]:
+                print("Внимание: " + _mcp_message(result), flush=True)
+
+        threading.Thread(target=work, name="mcp-probe", daemon=True).start()
+
+    def _uses_mcp(self) -> bool:
+        exe = shutil.which(self.config()["command"][0])
+        return bool(exe) and Path(exe).stem.lower() == "claude" and self.mcp_config_path.exists()
+
     def check(self) -> dict:
-        """Проверка без расхода токенов: claude запускается и называет версию."""
+        """Проверка без расхода токенов: claude запускается, а MCP-сервер студии отвечает.
+
+        ``ok`` — только если успешно и то и другое (рукопожатие ``initialize`` с сервером)."""
         exe = shutil.which("claude")
         if exe is None:
             return {"ok": False, "error": "Команда claude не найдена в PATH"}
@@ -254,12 +288,17 @@ class Runner:
         version = (done.stdout or done.stderr).strip()
         if done.returncode != 0:
             return {"ok": False, "error": version or f"Код выхода {done.returncode}"}
-        return {
-            "ok": True,
+        mcp = self.probe()
+        out = {
+            "ok": bool(mcp["ok"]),
             "version": version,
             "mcp_config": self.mcp_config_path.exists(),
             "enabled": bool(self.config()["enabled"]),
+            "mcp": mcp,
         }
+        if not mcp["ok"]:
+            out["error"] = _mcp_message(mcp)
+        return out
 
     def set_note(self, text: str) -> None:
         """Пожелание человека к следующему запуску (например, доработка после отчёта)."""
@@ -412,6 +451,12 @@ class Runner:
         started = _now()
         entries = self.workflow.data["entries"]
         log = self.root / ".studio" / LOG_FILE
+        if self._uses_mcp():
+            mcp = self.probe()
+            if not mcp["ok"]:
+                # Сервер не запускается: агент остался бы без studio_*, а токены ушли бы впустую.
+                self._finish("failed", stage, started, _mcp_message(mcp))
+                return
         use_git = False
         if stage == "implement" and self.settings.get()["git"]["checkpoints"]:
             began = gitops.begin(self.root, self.workflow.data["cycle"])
@@ -459,6 +504,7 @@ class Runner:
         finally:
             with self._lock:
                 self._proc = None
+            redact_file(log)  # ключ, случайно напечатанный агентом, не должен остаться на диске
         code = proc.returncode
         advanced = self.workflow.data["entries"] != entries
         result = self._read_result(log)
@@ -506,7 +552,9 @@ class Runner:
     def _tail(log: Path, lines: int = 12) -> str:
         try:
             with open(log, encoding="utf-8", errors="replace") as stream:
-                return "\n".join(deque((line.rstrip() for line in stream), maxlen=lines)).strip()
+                return redact(
+                    "\n".join(deque((line.rstrip() for line in stream), maxlen=lines)).strip()
+                )
         except OSError:
             return ""
 
@@ -532,6 +580,7 @@ class Runner:
         return {
             **self.public(),
             "claude_found": shutil.which("claude") is not None,
+            "mcp": self.mcp_state(),
             "venv": venv.name if venv else "",
             "has_session": bool(self.session_id()),
             "log_tail": self._tail(self.root / ".studio" / LOG_FILE, 15),
@@ -543,6 +592,16 @@ class Runner:
             "denied_tools": list(DENIED_TOOLS),
             "settings": self.settings.get(),
         }
+
+
+def _mcp_message(mcp: dict) -> str:
+    """Причина сбоя MCP и готовая команда исправления для статуса и лога."""
+    text = f"MCP-сервер студии не запускается: {mcp.get('reason') or 'причина неизвестна'}"
+    if mcp.get("fix"):
+        text += f"\nЧто сделать: {mcp['fix']}"
+    if mcp.get("fix_command"):
+        text += f"\nКоманда: {mcp['fix_command']}"
+    return text
 
 
 __all__ = ["AGENT_STAGES", "DEFAULT_COMMAND", "PROMPTS", "Runner"]

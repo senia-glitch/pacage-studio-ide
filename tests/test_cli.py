@@ -80,22 +80,23 @@ def test_старые_команды_убраны():
 
 
 def test_install_full_запускает_pip(demo: Path, monkeypatch, capsys):
-    called = {}
+    calls = []
 
     class Result:
         returncode = 0
 
     def fake_run(command):
-        called["command"] = command
+        calls.append(command)
         return Result()
 
     monkeypatch.setattr(cli.subprocess, "run", fake_run)
     assert cli.main(["install-full", "--project", str(demo)]) == 0
-    command = called["command"]
+    command = calls[0]
     assert command[0] == cli.sys.executable
     assert command[1:4] == ["-m", "pip", "install"]
     assert "--upgrade" in command
     assert "fastbase[full] @ git+https://github.com/senia-glitch/fastapi-transport.git" in command
+    assert calls[1][1:4] == ["-m", "pip", "check"]  # после установки — проверка конфликтов
 
 
 def test_brief_map_full_создаёт_документ(demo: Path, capsys):

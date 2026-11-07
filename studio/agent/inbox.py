@@ -16,6 +16,7 @@ import threading
 import time
 from pathlib import Path
 
+from studio.agent.redaction import redact
 from studio.metadata import MetadataError
 from studio.store import atomic_write
 
@@ -58,7 +59,8 @@ def _all(root: Path) -> list[dict]:
 def _write(root: Path, record: dict) -> None:
     folder = reports_dir(root)
     folder.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(record, ensure_ascii=False, indent=2) + "\n"
+    # ключ или токен, случайно попавший в отчёт агента, на диск не пишем
+    payload = redact(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
     if not atomic_write(_path(root, record["id"]), payload):
         raise MetadataError("not_writable", "Не удалось сохранить отчёт агента")
 

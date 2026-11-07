@@ -508,6 +508,21 @@ def _source_stats(root, graph, env) -> list[dict]:
     ]
 
 
+def _print_mcp(mcp: dict) -> None:
+    """Раздел «MCP-сервер» для doctor: результат рукопожатия, причина и команда исправления."""
+    if mcp["ok"]:
+        server = mcp.get("server") or {}
+        name = f"{server.get('name', 'pacage-studio')} {server.get('version', '')}".strip()
+        where = " (команда по умолчанию)" if mcp.get("default") else ""
+        print(f"MCP-сервер: ✓ отвечает на initialize{where} · {name}")
+        return
+    print(f"MCP-сервер: ✗ {mcp.get('reason', 'не отвечает')}")
+    if mcp.get("fix"):
+        print(f"  Что сделать: {mcp['fix']}")
+    if mcp.get("fix_command"):
+        print(f"  Команда:     {mcp['fix_command']}")
+
+
 def cmd_doctor(args) -> int:
     root, explicit = _find_root(args.project)
     slog.start_run(root, "doctor")
@@ -519,7 +534,10 @@ def cmd_doctor(args) -> int:
     errors = [d for d in graph.diagnostics if d.level == "error"]
     warnings = [d for d in graph.diagnostics if d.level == "warning"]
     strict = bool(getattr(args, "strict", False))
-    code = 1 if errors or (strict and warnings) else 0
+    from studio.agent import mcpcheck
+
+    mcp = mcpcheck.check(root, use_default=True)  # настоящее рукопожатие initialize
+    code = 1 if errors or not mcp["ok"] or (strict and warnings) else 0
     if getattr(args, "json", False):
         print(
             json.dumps(
@@ -536,6 +554,7 @@ def cmd_doctor(args) -> int:
                         or ", ".join(path.name for path in env.models_paths),
                     },
                     "graph": _graph_counts(graph),
+                    "mcp": mcp,
                     "brief": {
                         "tasks": sum(
                             1
@@ -580,11 +599,13 @@ def cmd_doctor(args) -> int:
     planned = [node for node in graph.nodes if node.planned]
     ready = sum(1 for node in planned if (node.description or "").strip())
     print(f"К реализации: {ready} · не готово: {len(planned) - ready}")
+    _print_mcp(mcp)
     print(f"Диагностика: {len(errors)} ошибок · {len(warnings)} предупреждений")
     for diagnostic in graph.diagnostics:
         where = f" {diagnostic.file}:{diagnostic.line}" if diagnostic.file else ""
         print(f"  {diagnostic.code}{where} — {diagnostic.message}")
-    print("Итог: есть ошибки" if errors else ("есть предупреждения" if warnings else "порядок"))
+    bad = errors or not mcp["ok"]
+    print("Итог: есть ошибки" if bad else ("есть предупреждения" if warnings else "порядок"))
     if strict and warnings and not errors:
         print("Режим --strict: предупреждения считаются ошибкой")
     return code
@@ -602,6 +623,12 @@ def cmd_install_full(args) -> int:
         raise CliError(f"Не удалось запустить pip: {exc}") from exc
     if result.returncode != 0:
         raise CliError(f"pip завершился с кодом {result.returncode}")
+    check = subprocess.run([sys.executable, "-m", "pip", "check"])  # noqa: S603
+    if check.returncode != 0:
+        print(
+            "Внимание: pip check нашёл конфликты зависимостей (см. выше). Студия и MCP-сервер "
+            "могут не запускаться, пока их не устранить."
+        )
     return 0
 
 
@@ -679,8 +706,7 @@ def cmd_help(_args) -> int:
     print("  skill [--target stdout|claude|agents|all] [--project .]")
     print("                                       руководство для AI-агента: печать или")
     print("                                       установка (скилл Claude Code, AGENTS.md)")
-    print("  mcp                                MCP-сервер для AI-агента (stdio);")
-    print('                                       нужен pip install "pacage-studio[mcp]"')
+    print("  mcp                                MCP-сервер для AI-агента (stdio)")
     print("  doctor [--project .] [--json] [--strict]  диагностика одной командой")
     print("  install-full [--project .]         установить/обновить fastbase[full]")
     print("  help                               этот экран")

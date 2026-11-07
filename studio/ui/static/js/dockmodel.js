@@ -49,6 +49,12 @@ export function dockSteps(flow) {
 export function agentStatus(view) {
   if (!view) return {tone: "off", text: "нет связи со студией", connected: false};
   if (!view.claude_found) return {tone: "bad", text: "Claude Code не найден", connected: false};
+  const mcp = view.mcp || {};
+  if (mcp.ok === false && mcp.code && mcp.code !== "no_config") {
+    // MCP-сервер не отвечает на initialize: агент остался бы без инструментов studio_*.
+    const why = String(mcp.reason || "").split("\n")[0];
+    return {tone: "bad", text: `MCP не запускается: ${why}`.slice(0, 120), connected: false};
+  }
   if (!view.enabled) return {tone: "off", text: "не подключён", connected: false};
   const last = String(view.message || "").trim().split("\n").pop();
   switch (view.state) {
@@ -62,6 +68,8 @@ export function agentStatus(view) {
     case "stalled":
       return {tone: "bad", text: "завершился, этап не продвинулся", connected: true};
     default:
+      // «Готов» только после успешного рукопожатия (initialize) с MCP-сервером студии.
+      if (mcp.ok !== true) return {tone: "wait", text: "проверяю связь с MCP…", connected: true};
       return {tone: "ok", text: "готов, в простое токены не тратит", connected: true};
   }
 }

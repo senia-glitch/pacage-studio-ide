@@ -15,3 +15,6 @@ last-test-run.json
 test-run.log
 tmp/
 diag-baseline.json
+mcp.json
+agent-session.json
+agent-git.json

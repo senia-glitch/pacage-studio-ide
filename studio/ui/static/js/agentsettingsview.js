@@ -25,6 +25,7 @@ function connectionCard(view) {
     <h3>Подключение</h3>
     <p><span class="dock-dot ${esc(status.tone)}"></span> <b>Claude Code</b> — ${esc(status.text)}</p>
     <p class="hint">${found}</p>
+    ${mcpBlock(view.mcp)}
     <p class="hint">${view.venv
       ? `Окружение проекта: <code>${esc(view.venv)}</code>. Агент и тесты запускаются в нём, поэтому видят зависимости проекта.`
       : "Окружение проекта (<code>.venv</code> или <code>venv</code>) не найдено: агент запускается в окружении студии и может не увидеть зависимости проекта."}</p>
@@ -34,8 +35,19 @@ function connectionCard(view) {
       ${view.enabled ? '<button type="button" id="agentDisconnect">Отключить</button>' : ""}
       <button type="button" id="agentManual">Строка подключения вручную…</button>
     </div>
-    <p class="hint" id="agentCheckResult">«Подключить» записывает конфигурацию в <code>.studio/mcp.json</code> (файлы вашего проекта не трогаются) и включает автозапуск. «Проверить связь» запускает <code>claude --version</code> и токенов не тратит.</p>
+    <p class="hint" id="agentCheckResult">«Подключить» записывает конфигурацию в <code>.studio/mcp.json</code> (файлы вашего проекта не трогаются) и включает автозапуск. «Проверить связь» запускает <code>claude --version</code> и выполняет рукопожатие <code>initialize</code> с MCP-сервером студии (теми же командой и окружением, что получит агент); токены не тратятся.</p>
   </section>`;
+}
+
+/* Итог рукопожатия с MCP-сервером: причина сбоя и готовая команда исправления. */
+function mcpBlock(mcp) {
+  if (!mcp || mcp.ok === null || mcp.ok === undefined) return "";
+  if (mcp.ok) return `<p class="hint">MCP-сервер студии отвечает на <code>initialize</code>: агент получит инструменты <code>studio_*</code>.</p>`;
+  if (mcp.code === "no_config") return "";
+  const command = mcp.fix_command
+    ? `<pre class="agent-fix">${esc(mcp.fix_command)}</pre>` : "";
+  return `<div class="agent-error"><p><b>MCP-сервер не запускается.</b> ${esc(mcp.reason || "")}</p>
+    ${mcp.fix ? `<p>${esc(mcp.fix)}</p>` : ""}${command}</div>`;
 }
 
 function howCard() {
@@ -117,16 +129,19 @@ function bind(root, data) {
   };
   const on = (id, job) => { const el = root.querySelector(id); if (el) el.onclick = () => run(el, job); };
   on("#agentConnect", async () => {
-    await api("/api/agent/connect", "POST", {});
-    toast("Claude Code подключён: студия будет запускать его на ваши шаги");
+    const view = await api("/api/agent/connect", "POST", {});
+    toast(view && view.enabled
+      ? "Claude Code подключён: студия будет запускать его на ваши шаги"
+      : "Агент не подключён: MCP-сервер студии не отвечает (причина и команда ниже)");
     await reload();
   });
   on("#agentCheck", async () => {
     const result = await api("/api/agent/check", "POST", {});
     const box = root.querySelector("#agentCheckResult");
     box.textContent = result.ok
-      ? `Связь есть: ${result.version}.${result.mcp_config ? "" : " MCP-конфиг ещё не записан — нажмите «Подключить»."}`
+      ? `Связь есть: ${result.version}; MCP-сервер ответил на initialize.${result.mcp_config ? "" : " MCP-конфиг ещё не записан — нажмите «Подключить»."}`
       : `Проблема: ${result.error}`;
+    await reload();
   });
   on("#agentDisconnect", async () => {
     await api("/api/runner/config", "POST", {enabled: false});

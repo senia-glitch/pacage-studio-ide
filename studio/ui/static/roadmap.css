@@ -246,3 +246,6 @@ body[data-active-tab="agent"] .header-canvas { display: none; }
 .swipeable { user-select: none; }
 .swipeable input, .swipeable textarea { user-select: text; }
 .swipe-grip { cursor: grab; color: var(--dim); font-size: 13px; padding: 0 2px; }
+.agent-error { border: 1px solid var(--bad, #c0392b); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
+.agent-error p { margin: 0 0 6px; }
+.agent-card pre.agent-fix { white-space: pre-wrap; word-break: break-all; user-select: all; }

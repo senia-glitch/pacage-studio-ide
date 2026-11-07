@@ -12,7 +12,7 @@ import {
   gitNote,
 } from "../../studio/ui/static/js/dockmodel.js";
 
-const ready = {claude_found: true, enabled: true, state: "idle"};
+const ready = {claude_found: true, enabled: true, state: "idle", mcp: {ok: true}};
 
 test("семь шагов, у каждого виден чей ход", () => {
   assert.deepEqual(DOCK_STEPS.map((s) => s.id),
@@ -61,6 +61,25 @@ test("индикатор связи: не найден, не подключён,
   const ok = agentStatus(ready);
   assert.equal(ok.tone, "ok");
   assert.equal(ok.connected, true);
+});
+
+test("«готов» только после успешного рукопожатия с MCP-сервером", () => {
+  const unchecked = agentStatus({claude_found: true, enabled: true, state: "idle", mcp: {ok: null}});
+  assert.equal(unchecked.tone, "wait");
+  assert.notEqual(unchecked.tone, "ok");
+  assert.equal(agentStatus({claude_found: true, enabled: true, state: "idle"}).tone, "wait");
+  const broken = agentStatus({claude_found: true, enabled: true, state: "idle",
+    mcp: {ok: false, code: "no_mcp", reason: "Не установлена библиотека mcp.\nПодробности"}});
+  assert.equal(broken.tone, "bad");
+  assert.equal(broken.connected, false);
+  assert.match(broken.text, /MCP не запускается: Не установлена библиотека mcp/);
+  // сбой при подключении: агент не включён, но причина видна
+  const notEnabled = agentStatus({claude_found: true, enabled: false,
+    mcp: {ok: false, code: "python_missing", reason: "Путь устарел"}});
+  assert.equal(notEnabled.tone, "bad");
+  // «нет конфига» — это просто «не подключён»
+  assert.equal(agentStatus({claude_found: true, enabled: false,
+    mcp: {ok: false, code: "no_config"}}).text, "не подключён");
 });
 
 test("кнопки окна зависят от шага и состояния агента", () => {

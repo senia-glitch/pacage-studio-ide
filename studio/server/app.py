@@ -842,6 +842,7 @@ def serve(
     bound_port = int(server.server_address[1])
     url = f"http://{host}:{bound_port}"
     _print_summary(state, url)
+    state.runner.probe_async()  # MCP-сервер агента падает тихо: проверяем рукопожатием заранее
     if not no_open and not os.environ.get("CI"):
         with contextlib.suppress(Exception):
             webbrowser.open(url)

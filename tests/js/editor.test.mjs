@@ -6,13 +6,13 @@ import {buildEditorUrl} from "../../studio/ui/static/js/editor.js";
 test("windows-путь с пробелом и кириллицей", () => {
   const url = buildEditorUrl(
     "vscode",
-    "C:\\Users\\Arseniy\\Desktop\\PACAGE 4 IDE\\app\\x.py",
+    "C:\\Work\\My App\\app\\x.py",
     "app/x.py",
     12,
   );
   assert.equal(
     url,
-    "vscode://file/C:/Users/Arseniy/Desktop/PACAGE%204%20IDE/app/x.py:12",
+    "vscode://file/C:/Work/My%20App/app/x.py:12",
   );
 });
 
@@ -33,7 +33,7 @@ test("неизвестный редактор откатывается на VS C
 test("решётка, процент и кириллица кодируются в пути", () => {
   const url = buildEditorUrl(
     "vscode",
-    "C:\\Users\\Arseniy\\Desktop\\PACAGE 4 IDE\\Проект #1\\a%b.py",
+    "C:\\Work\\My App\\Проект #1\\a%b.py",
     "a#b%c.py",
     3,
   );
@@ -41,7 +41,7 @@ test("решётка, процент и кириллица кодируются 
   assert.ok(url.includes("%23"));
   assert.ok(url.includes("%25"));
   assert.ok(url.includes("%D0%9F"));
-  assert.ok(url.includes("PACAGE%204%20IDE"));
+  assert.ok(url.includes("My%20App"));
   assert.ok(url.endsWith(":3"));
 });
 

@@ -5,13 +5,14 @@
 пересылает вызовы в её HTTP API с токеном нужного режима. Права, этапы дорожной карты и
 журнал остаются на стороне студии, поэтому запрещённое действие вернёт отказ студии.
 
-Нужен пакет ``mcp`` (``pip install "pacage-studio[mcp]"``); поддерживаются версии с
+Пакет ``mcp`` входит в обязательные зависимости; поддерживаются версии с
 ``mcp.server.mcpserver.MCPServer`` (2.x) и ``mcp.server.fastmcp.FastMCP`` (1.x).
 """
 
 from __future__ import annotations
 
 import functools
+import sys
 from typing import Any
 
 from studio.agent import brief_parts
@@ -36,7 +37,8 @@ def _server_class():
         return FastMCP
     except ImportError as exc:
         raise McpUnavailable(
-            'MCP-сервер требует пакет mcp: pip install "pacage-studio[mcp]"'
+            "Не установлен пакет mcp (обязательная зависимость pacage-studio). "
+            f'Исправление: "{sys.executable}" -m pip install --upgrade "mcp>=1.2"'
         ) from exc
 
 

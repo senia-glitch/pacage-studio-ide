@@ -36,6 +36,10 @@ GITIGNORE_ARTIFACTS = (
     "last-test-run.json",
     "test-run.log",
     "tmp/",
+    # Личное и локальное: путь к Python, id сессии агента, состояние чекпоинта.
+    "mcp.json",
+    "agent-session.json",
+    "agent-git.json",
 )
 METADATA_IGNORE = "metadata.json"
 
