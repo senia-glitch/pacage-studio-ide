@@ -66,6 +66,7 @@ from studio.scanner import scan
 from studio.scanner.anchors import AnchorResolver
 from studio.server import access
 from studio.server.runner import Runner
+from studio.server.tester import TestRunner
 from studio.server.workflow import Workflow
 from studio.source import load_sources, stat_fingerprint
 
@@ -114,6 +115,9 @@ class ProjectState:
         # Автозапуск агента на его этапах: включается человеком в интерфейсе.
         self.runner = Runner(self.root, self.workflow)
         self.workflow.listeners.append(self.runner.on_stage)
+        # Независимая проверка тестами проекта (кнопка или этап «Отчёт»).
+        self.tester = TestRunner(self.root, lambda: self.graph)
+        self.workflow.listeners.append(self.tester.on_stage)
 
     # ------------------------------------------------------------------ scan
 

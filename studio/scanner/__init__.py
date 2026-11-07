@@ -42,6 +42,7 @@ from studio.scanner.resolver import (
     resolve_io_and_tables,
     resolve_scenario_calls,
 )
+from studio.scanner.routes_check import add_route_shadow_diagnostics
 from studio.scanner.tests_index import index_tests
 from studio.source import SourceSet, load_sources
 
@@ -236,6 +237,17 @@ def build_scenario_paths(graph: Graph) -> None:
     graph.scenario_paths = paths
 
 
+def _route_shadow(builder, sink: Sink, env, sources) -> None:
+    from studio.env import module_name
+    from studio.scanner.indexer import router_include_sites
+
+    root = env.project_root
+    modules = {src.rel: module_name(root, src.path) for src in sources.all_files()}
+    add_route_shadow_diagnostics(
+        builder, sink, router_include_sites(sources, root), modules
+    )
+
+
 def _phase(sink: Sink, name: str, action):
     try:
         return action()
@@ -338,6 +350,7 @@ def scan(project_root: Path) -> Graph:
     _phase(sink, "metadata", _metadata)
     _phase(sink, "gaps", lambda: _mark_known_gaps(builder, sink))
     _phase(sink, "duplicate_anchors", lambda: add_duplicate_anchor_diagnostics(builder, sink))
+    _phase(sink, "route_shadow", lambda: _route_shadow(builder, sink, env, sources))
 
     graph = builder.build()
     _phase(sink, "plans", lambda: _resolve_plans(graph, metadata, sink))

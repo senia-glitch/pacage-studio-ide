@@ -128,14 +128,21 @@ def test_workflow_долгий_опрос_и_подсказка():
             "steps": [{"id": "ideas", "title": "Идеи агента"}],
             "cards": {"pending": 1, "accepted": 0, "rejected": 2, "total": 3},
             "selected": {"plans": 0}, "briefs": {"backend": None, "frontend": None}}
-    tools, client = _tools({("GET", "/api/workflow"): [flow, {**flow, "revision": 5}]})
+    board = {"ideas": [{"scenarios": [{"id": "c1", "title": "Список", "decision": "pending",
+                                       "source": {"slug": "list_x"}}, {"id": "old", "title": "?"}],
+                        "pages": [{"id": "p1", "name": "x-list", "title": "Стр", "decision": "accepted"}]}]}
+    tools, client = _tools({("GET", "/api/workflow"): [flow, {**flow, "revision": 5}],
+                            ("GET", "/api/ideas"): board})
     first = tools["studio_workflow"]()
+    assert first["my_cards"] == [
+        {"id": "c1", "slug": "list_x", "title": "Список", "decision": "pending"},
+        {"id": "p1", "slug": "x-list", "title": "Стр", "decision": "accepted"}]
     assert first["stage"] == "ideas" and first["action"] == "propose" and first["changed"]
     assert first["stage_title"] == "Идеи агента" and first["cards"]["rejected"] == 2
-    assert client.calls[-1][1] == "/api/workflow"  # первый вызов без ожидания
+    assert [c[1] for c in client.calls if c[1].startswith("/api/workflow")] == ["/api/workflow"]
     again = tools["studio_workflow"](wait_seconds=99)
     assert again["changed"] is False
-    assert client.calls[-1][1] == "/api/workflow?rev=5&wait=25"  # ожидание ограничено 25 с
+    assert "/api/workflow?rev=5&wait=25" in [c[1] for c in client.calls]  # ожидание — до 25 с
 
 
 def test_ideas_ready_идёт_с_токеном_планирования():
@@ -288,21 +295,88 @@ def test_doctor_считает_ошибки_и_строгий_режим():
         {"level": "warning", "code": "W_X", "message": "предупреждение", "file": "a.py", "line": 3},
         {"level": "info", "code": "I_Y", "message": "справка"},
     ]
-    tools, _ = _tools({("GET", "/api/graph"): {"diagnostics": found}})
+    baseline = {"keys": []}
+    tools, _ = _tools({("GET", "/api/graph"): {"diagnostics": found},
+                       ("GET", "/api/baseline"): baseline})
     soft = tools["studio_doctor"]()
     assert soft["ok"] is True and (soft["errors"], soft["warnings"], soft["info"]) == (0, 1, 1)
     assert soft["items"] == [{"level": "warning", "code": "W_X", "message": "предупреждение",
-                              "file": "a.py", "line": 3}]
+                              "file": "a.py", "line": 3, "new": True}]
     assert tools["studio_doctor"](strict=True)["ok"] is False  # как studio doctor --strict
     found.append({"level": "error", "code": "E_Z", "message": "ошибка"})
     broken = tools["studio_doctor"](limit=1)
     assert broken["ok"] is False and broken["errors"] == 1 and len(broken["items"]) == 1
     assert broken["items"][0]["level"] == "error"  # ошибки показываются первыми
+    # давнее предупреждение (было до ТЗ) не мешает: ok_for_changes смотрит только на новое
+    found.pop()
+    baseline["keys"] = [["W_X", "a.py", "предупреждение"]]
+    old = tools["studio_doctor"](strict=True)
+    assert old["ok"] is False and old["ok_for_changes"] is True
+    assert old["verdict"] == "новых проблем нет; давних предупреждений и ошибок: 1"
+    assert (old["new_warnings"], old["items"][0]["new"]) == (0, False)
+    found.append({"level": "warning", "code": "W_NEW", "message": "новое", "file": "b.py"})
+    fresh = tools["studio_doctor"](strict=True)
+    assert fresh["ok_for_changes"] is False and fresh["items"][0]["code"] == "W_NEW"
+    assert fresh["verdict"].startswith("новых проблем: 0 ошибок, 1 предупреждений")
+
+
+def test_tests_отдаёт_итог_независимого_прогона():
+    done = {"state": "done", "total": 5, "passed": 3, "failed": 1, "errors": 1, "skipped": 0,
+            "finished_at": "2026-01-01T10:00:00", "plans": {"list_x": ["test_a"]},
+            "failures": [{"name": "test_a", "file": "tests/test_x.py", "message": "assert"}] * 30}
+    tools, _ = _tools({("GET", "/api/tests"): [done, {"state": "none"}]})
+    result = tools["studio_tests"]()
+    assert (result["total"], result["passed"], result["failed"], result["errors"]) == (5, 3, 1, 1)
+    assert result["failing_plans"] == {"list_x": ["test_a"]} and len(result["failures"]) == 20
+    empty = tools["studio_tests"]()
+    assert empty["state"] == "none" and empty["failures"] == [] and empty["total"] == 0
 
 
 def test_verify_честно_говорит_что_проверка_структурная():
     tools, _ = _tools({("GET", "/api/verify"): {"status": "выполнено", "done": 1, "total": 1}})
     assert "структур" in tools["studio_verify"]()["note"]
+
+
+def test_ideas_одна_идея_целиком_и_graph_с_эндпоинтами_вперёд():
+    board = {"revision": 3, "ideas": [{
+        "id": "i1", "title": "Идея", "description": "полное описание",
+        "scenarios": [{"id": "c1", "title": "Список", "decision": "accepted", "planSlug": "list_x",
+                       "acceptance": ["а"], "source": {"slug": "list_x", "http_method": "GET",
+                                                       "path": "/x"}}, 7],
+        "pages": [{"id": "p1", "name": "x-page", "title": "Стр", "blocks": [{"name": "B"}, 1]}]}]}
+    nodes = [{"id": "m", "kind": "model", "label": "M", "details": {}},
+             {"id": "i", "kind": "io", "label": "_db", "details": {}},
+             {"id": "e", "kind": "endpoint", "label": "GET /x", "details": {}},
+             {"id": "s", "kind": "scenario", "label": "S", "details": {}}]
+    tools, _ = _tools({("GET", "/api/ideas"): board, ("GET", "/api/graph"): {"nodes": nodes}})
+    detail = tools["studio_ideas"](idea_id="i1")
+    assert detail["description"] == "полное описание"
+    assert detail["scenarios"] == [{
+        "id": "c1", "slug": "list_x", "title": "Список", "route": "GET /x", "domain": "",
+        "description": "", "acceptance": ["а"], "decision": "accepted", "plan": "list_x"}]
+    assert detail["pages"][0]["blocks"] == [
+        {"name": "B", "description": "", "acceptance": [], "calls": []}]
+    assert detail["pages"][0]["name"] == "x-page"
+    with pytest.raises(Exception, match="нет"):
+        tools["studio_ideas"](idea_id="нет")
+    assert tools["studio_ideas"]()["ideas"][0]["slugs"] == ["list_x"]
+    assert [n["kind"] for n in tools["studio_graph"]()["nodes"]] == [
+        "endpoint", "scenario", "model", "io"]
+
+
+def test_node_открывает_страницы_и_блоки_фронтенда():
+    graph = {"pages": [{"id": "page:home", "name": "home", "route": "/", "calls": ["GET /x"],
+                        "blocks": [{"id": "block:home:Hero", "name": "Hero", "planned": True,
+                                    "calls": ["GET /y"]}]}]}
+    tools, _ = _tools({("GET", "/api/frontend/graph"): graph, ("GET", "/api/graph"): {"nodes": []}})
+    page = tools["studio_node"]("page:home")
+    assert page["kind"] == "page" and page["route"] == "/" and page["blocks"][0]["name"] == "Hero"
+    block = tools["studio_node"]("block:home:Hero")
+    assert block["kind"] == "block" and block["page"] == "home" and block["planned"] is True
+    with pytest.raises(Exception, match="studio_frontend"):
+        tools["studio_node"]("page:нет")
+    with pytest.raises(Exception, match="studio_frontend"):
+        tools["studio_node"]("endpoint:нет")  # подсказка называет оба источника
 
 
 def test_инструкции_и_набор_инструментов():
@@ -312,6 +386,12 @@ def test_инструкции_и_набор_инструментов():
             "studio_brief", "studio_verify", "studio_report"} <= names
     # прямых записей в карту у агента нет: всё идёт через карточки и валидацию человека
     assert not {"studio_node_add", "studio_page_add", "studio_block_add"} & names
-    assert len(names) == 14
+    assert len(names) == 16
     # клиент получает руководство как инструкции MCP: один источник, без HTTP
     assert getattr(server, "instructions", None) == load_guide()
+
+
+def test_withdraw_идёт_токеном_планирования():
+    tools, client = _tools({("POST", "/api/workflow/withdraw"): {"withdrawn": "i1", "pending": 0}})
+    assert tools["studio_idea_withdraw"]("i1")["withdrawn"] == "i1"
+    assert client.calls[-1][2] == {"idea_id": "i1"} and client.modes[-1] == "plan"

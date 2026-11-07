@@ -373,6 +373,16 @@ def make_handler(ctx):
                 return self._json(chain.info(state))
             if url.path == "/api/workflow/candidates":
                 return self._json(chain.candidates(state))
+            if url.path == "/api/baseline":
+                return self._json(chain.baseline(state))
+            if url.path == "/api/tests":
+                return self._json(
+                    {
+                        **state.tester.public(),
+                        "plans": state.tester.failing_plans(),
+                        **({"config": state.tester.config()} if self._mode == access.FULL else {}),
+                    }
+                )
             if url.path == "/api/runner":
                 return self._json(state.runner.view())
             return self._error(404, "not_found", "Не найдено")
@@ -407,6 +417,8 @@ def make_handler(ctx):
                 )
             if url.path == "/api/workflow/propose":
                 return self._json(chain.propose(state, data))
+            if url.path == "/api/workflow/withdraw":
+                return self._json(chain.withdraw(state, data))
             if url.path == "/api/workflow/ideas-ready":
                 return self._json(chain.ideas_ready(state))
             if url.path == "/api/workflow/start":
@@ -421,6 +433,11 @@ def make_handler(ctx):
                 return self._json(chain.select(state, data, state.check_front_links))
             if url.path == "/api/workflow/finish":
                 return self._json(chain.finish(state))
+            if url.path == "/api/tests/run":
+                return self._json(state.tester.start())
+            if url.path == "/api/tests/config":
+                state.tester.save_config(data)
+                return self._json({**state.tester.public(), "config": state.tester.config()})
             if url.path == "/api/runner/config":
                 state.runner.save_config(data)
                 return self._json(state.runner.view())
@@ -815,6 +832,7 @@ def serve(
     finally:
         discovery.remove(root)
         state.runner.stop()
+        state.tester.stop()
         state.stop_watcher()
         server.server_close()
     return bound_port

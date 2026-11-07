@@ -47,3 +47,14 @@ def test_постраничная_выдача_длинного_текста() -
     assert last["markdown"] == "а" * 5 and last["next_offset"] is None
     assert brief_parts.page(text, -5, limit=100)["offset"] == 0
     assert brief_parts.page("короткий")["next_offset"] is None
+
+
+def test_пустые_разделы_помечаются() -> None:
+    text = (
+        "## 3. Правила проекта\n\nПравила проекта не заданы (файла нет).\n\n"
+        "## 5. Карта\n\n- `GET /x` связан с чем-то и описан достаточно подробно, "
+        "чтобы это было настоящим содержанием раздела, а не заглушкой.\n\n"
+        "## 6. Не готово\n\n(нет)\n\n## 7. Пусто\n"
+    )
+    flags = {s["key"]: s["empty"] for s in brief_parts.outline(text)["sections"]}
+    assert flags == {"3": True, "5": False, "6": True, "7": True}

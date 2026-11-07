@@ -392,6 +392,69 @@ def cmd_verify(args) -> int:
     return int(report["code"])
 
 
+def cmd_migrate(args) -> int:
+    """Убрать записи заглушек старой модели (по умолчанию — только показать)."""
+    from studio.metadata import MetadataError
+    from studio.metadata.migrate import migrate
+
+    root, explicit = _find_root(args.project)
+    slog.start_run(root, "migrate")
+    graph = scan(root)
+    try:
+        result = migrate(root, graph, apply=bool(args.apply))
+    except MetadataError as exc:
+        raise CliError(exc.message, 1) from exc
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    _print_root(root, explicit)
+    if not result["removed"]:
+        print("Хвостов старой модели нет: убирать нечего.")
+        return 0
+    for item in result["removed"][:30]:
+        print(f"  - {item['id']} — {item['reason']}")
+    if len(result["removed"]) > 30:
+        print(f"  … и ещё {len(result['removed']) - 30}")
+    print(f"Записей: {len(result['removed'])} · связей: {result['edges_removed']}")
+    if result["applied"]:
+        print(f"Убрано. Копия файла: .studio/{result['backup']}")
+    else:
+        print("Это пробный запуск. Чтобы убрать: studio migrate --apply")
+    return 0
+
+
+def cmd_test(args) -> int:
+    """Прогнать тесты проекта (команда из `.studio/tests.json`) и привязать итог к узлам."""
+    from studio.server.tester import TestRunner
+
+    root, explicit = _find_root(args.project)
+    slog.start_run(root, "test")
+    graph = scan(root)
+    runner = TestRunner(root, lambda: graph)
+    runner._run()  # noqa: SLF001 — синхронно, без потока
+    result = runner.last() or {}
+    failing = runner.failing_plans()
+    if getattr(args, "json", False):
+        print(json.dumps({**result, "plans": failing}, ensure_ascii=False, indent=2))
+    else:
+        _print_root(root, explicit)
+        if result.get("state") != "done":
+            print(f"Тесты не запустились: {result.get('message') or 'неизвестная ошибка'}")
+        else:
+            print(
+                f"Тесты: прошло {result.get('passed', 0)}, упало {result.get('failed', 0)}, "
+                f"ошибок {result.get('errors', 0)}, пропущено {result.get('skipped', 0)} "
+                f"за {result.get('duration', 0)} с"
+            )
+            for item in (result.get("failures") or [])[:20]:
+                note = (item["message"].splitlines() or [""])[0][:120]
+                print(f"  ✗ {item['file'] or '?'}::{item['name']} — {note}")
+            for slug, names in failing.items():
+                print(f"  план {slug}: упало тестов {len(names)}")
+    bad = result.get("state") != "done" or result.get("failed", 0) or result.get("errors", 0)
+    return 1 if bad else 0
+
+
 def _source_stats(root, graph, env) -> list[dict]:
     routes_files = len(module_files(root, env.routes_package))
     core_files = len(module_files(root, env.core_discover))
@@ -682,6 +745,15 @@ def build_parser() -> argparse.ArgumentParser:
     report_out.add_argument("--json", action="store_true")
     report_p.set_defaults(f=cmd_report)
 
+    migrate_p = sub.add_parser("migrate", help="убрать заглушки старой модели из metadata.json")
+    _add_project(migrate_p)
+    migrate_p.add_argument("--apply", action="store_true", help="убрать (по умолчанию — показать)")
+    migrate_p.add_argument("--json", action="store_true")
+    migrate_p.set_defaults(f=cmd_migrate)
+    test_p = sub.add_parser("test", help="прогнать тесты проекта и привязать итог к узлам")
+    _add_project(test_p)
+    test_p.add_argument("--json", action="store_true")
+    test_p.set_defaults(f=cmd_test)
     verify_p = sub.add_parser("verify", help="проверить выполнение ТЗ")
     _add_project(verify_p)
     verify_p.add_argument("brief", nargs="?", default=None, help="файл, id или last")

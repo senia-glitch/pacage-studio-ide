@@ -31,6 +31,11 @@ GITIGNORE_ARTIFACTS = (
     "workflow.json",
     "runner.json",
     "runner.log",
+    "tests.json",
+    "diag-baseline.json",
+    "last-test-run.json",
+    "test-run.log",
+    "tmp/",
 )
 METADATA_IGNORE = "metadata.json"
 

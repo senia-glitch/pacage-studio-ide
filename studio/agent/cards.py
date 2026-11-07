@@ -113,8 +113,17 @@ def _block(raw: dict, index: int) -> dict:
 
 def page_card(source: dict, index: int) -> dict:
     where = f"pages[{index}]"
-    name = _text(source.get("name"))
+    extends = _text(source.get("extends"))
+    name = extends or _text(source.get("name"))
     title = _text(source.get("title")) or name
+    if extends:
+        if not _PAGE_NAME_RE.match(extends):
+            raise CardError(
+                f"{where}: extends {extends!r} — имя существующей страницы (kebab-case)"
+            )
+        blocks = [b for b in source.get("blocks") or [] if isinstance(b, dict)]
+        if not blocks:
+            raise CardError(f"{where}: extends добавляет блоки на страницу — укажите blocks")
     if not name:
         raise CardError(f"{where}: нужно поле name (папка страницы, kebab-case)")
     if not _PAGE_NAME_RE.match(name):
@@ -128,6 +137,7 @@ def page_card(source: dict, index: int) -> dict:
         "acceptance": _strings(source.get("acceptance")),
         "domain": _text(source.get("domain")),
         "route": _text(source.get("route")),
+        "extends": extends,
         "calls": _strings(source.get("calls")),
         "blocks": [
             _block(b, i)

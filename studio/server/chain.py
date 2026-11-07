@@ -10,8 +10,10 @@ from __future__ import annotations
 import contextlib
 import json
 import re
+import time
 from pathlib import Path
 
+from studio._atomic import atomic_write
 from studio.agent import cards
 from studio.agent.brief import BRIEF_FILENAME, LAST_BRIEF
 from studio.env import read_env
@@ -19,6 +21,7 @@ from studio.frontend import graph as front_graph
 from studio.frontend import meta as front_meta
 from studio.frontend.brief import FRONT_BRIEF_FILENAME, LAST_FRONT_BRIEF, brief_frontend
 from studio.metadata import MetadataError
+from studio.scanner.routes_check import shadow_notes
 
 MAX_TASK = 4000
 
@@ -41,6 +44,7 @@ def info(state) -> dict:
         "briefs": state._briefs_status(),
         "ideas_revision": state._board_revision(board),
         "runner": state.runner.public(),
+        "tests": state.tester.public(),
     }
     return state.workflow.describe(ctx)
 
@@ -50,8 +54,29 @@ def start(state, data: dict) -> dict:
     task = str(data.get("task") or "")
     if len(task) > MAX_TASK:
         raise _invalid(f"Задача длиннее {MAX_TASK} символов")
-    state.workflow.start(mode, task)
+    with state.lock:
+        if state.workflow.data["stage"] != "mode":
+            raise MetadataError(
+                "wrong_stage", "Цепочка уже идёт: сначала завершите или сбросьте её"
+            )
+        # новый цикл начинается с чистого счёта карточек и без старых ТЗ
+        _archive_cards(state)
+        _clear_briefs(state.root)
+        state.workflow.start(mode, task)
     return info(state)
+
+
+def _archive_cards(state) -> None:
+    """Карточки прошлых циклов остаются на доске идей, но из счёта цепочки уходят."""
+
+    def apply(board: dict):
+        changed = False
+        for _idea, _kind, item in list(cards.iter_cards(board)):
+            item.pop("decision", None)
+            changed = True
+        return changed
+
+    state.mutate_ideas(apply)
 
 
 # --------------------------------------------------------------------------- идеи
@@ -107,6 +132,12 @@ def _existing_routes(state, board: dict) -> dict[tuple[str, str], str]:
     return found
 
 
+def _front_pages(state) -> dict[str, str]:
+    """Страницы фронтенда: имя → id."""
+    pages = front_graph.build_front_graph(state.root).get("pages") or []
+    return {str(p.get("name")): str(p["id"]) for p in pages if p.get("name") and p.get("id")}
+
+
 def _existing_pages(state, board: dict) -> dict[str, str]:
     """Имена и маршруты страниц фронтенда и живых карточек: ключ → как называется."""
     found: dict[str, str] = {}
@@ -122,6 +153,78 @@ def _existing_pages(state, board: dict) -> dict[str, str]:
     return found
 
 
+def _strip_prefix(path, prefix: str):
+    text = str(path or "")
+    pre = "/" + str(prefix or "").strip("/")
+    if pre != "/" and (text == pre or text.startswith(pre + "/")):
+        return text[len(pre):] or "/"
+    return path
+
+
+def _full_path(prefix: str, path: str) -> str:
+    return "/" + "/".join(part.strip("/") for part in (prefix, path) if part.strip("/"))
+
+
+def _known_endpoints(state) -> list[tuple[str, str, str]]:
+    """``(метод, полный путь, файл)`` всех эндпоинтов графа: код и планы."""
+    out = []
+    for node in state.ensure_graph().nodes:
+        details = node.details or {}
+        path = details.get("url_path") or details.get("path")
+        if node.kind == "endpoint" and path and details.get("http_method") and node.file_path:
+            out.append((str(details["http_method"]), str(path), node.file_path))
+    return out
+
+
+def _similar_page_notes(card: dict, board: dict) -> list[str]:
+    """Похожие страницы других идей (тот же набор блоков и вызовов): возможный дубль."""
+    mine = (
+        {b["name"] for b in card["blocks"]},
+        set(card["calls"]) | {c for b in card["blocks"] for c in b["calls"]},
+    )
+    if not mine[0] and not mine[1]:
+        return []
+    notes = []
+    for idea in board.get("ideas") or []:
+        for other in idea.get("pages") or []:
+            if not isinstance(other, dict) or other.get("decision") == cards.REJECTED:
+                continue
+            blocks = {b.get("name") for b in other.get("blocks") or [] if isinstance(b, dict)}
+            calls = set(other.get("calls") or []) | {
+                c for b in other.get("blocks") or [] if isinstance(b, dict)
+                for c in b.get("calls") or []
+            }
+            if blocks == mine[0] and calls == mine[1]:
+                notes.append(
+                    f"страница {card['name']!r} похожа на карточку идеи «{idea.get('title')}» "
+                    f"({idea.get('id')}): те же блоки и вызовы. Если это замена, отзовите прежнюю "
+                    "(studio_idea_withdraw)"
+                )
+                break
+    return notes
+
+
+def _card_refs(idea: dict, pages: dict | None = None) -> list[dict]:
+    """Короткие ссылки на карточки идеи: id, slug, название, маршрут (для ответа агенту)."""
+    refs = []
+    for card in idea["scenarios"]:
+        source = card["source"]
+        route = f"{source['http_method']} {source['path']}"
+        refs.append({"id": card["id"], "kind": "scenario", "slug": source["slug"],
+                     "title": card["title"], "route": route})
+    for card in idea["pages"]:
+        ref = {"id": card["id"], "kind": "page", "slug": card["name"],
+               "title": card["title"], "route": card["route"]}
+        if card.get("extends"):
+            ref.update(
+                extends=card["extends"],
+                attached_to=(pages or {}).get(card["extends"], ""),
+                new_blocks=[b["name"] for b in card["blocks"]],
+            )
+        refs.append(ref)
+    return refs
+
+
 def propose(state, data: dict) -> dict:
     """Идея от агента (или человека) со сценариями и страницами → карточки ``pending``."""
     actor = str(data.get("_actor") or "")
@@ -129,10 +232,19 @@ def propose(state, data: dict) -> dict:
     pages = data.get("pages") or []
     if not isinstance(scenarios, list) or not isinstance(pages, list):
         raise _invalid("scenarios и pages — массивы объектов")
+    prefix = read_env(state.root).api_prefix
     try:
         parsed = state.decompose_parse(
             {"text": json.dumps({"scenarios": scenarios, "pages": pages}, ensure_ascii=False)}
         )
+        for scenario in parsed["scenarios"]:
+            stripped = _strip_prefix(scenario.get("path"), prefix)
+            if stripped != scenario.get("path"):
+                parsed["warnings"].append(
+                    f"путь {scenario.get('path')!r} записан без префикса API {prefix}: "
+                    f"{stripped!r} (пути в сценариях пишут без префикса)"
+                )
+                scenario["path"] = stripped
         idea = cards.idea_from_answer(
             str(data.get("title") or ""), str(data.get("description") or ""), parsed
         )
@@ -140,6 +252,8 @@ def propose(state, data: dict) -> dict:
         raise _invalid(str(exc)) from exc
     if actor == "agent":
         idea["created_by"] = "agent"
+    idea["cycle"] = state.workflow.data["cycle"]
+    warnings = list(parsed.get("warnings") or [])
 
     with state.lock:
         taken = {
@@ -150,7 +264,7 @@ def propose(state, data: dict) -> dict:
         problems = []
         board = state.load_ideas()
         routes = _existing_routes(state, board)
-        prefix = read_env(state.root).api_prefix
+        known = _known_endpoints(state)
         for card in idea["scenarios"]:
             slug = card["source"]["slug"]
             if slug in taken:
@@ -167,15 +281,57 @@ def propose(state, data: dict) -> dict:
             preview = state.plan_preview(_plan_data(card))
             for conflict in preview.get("conflicts") or []:
                 problems.append(f"сценарий {slug!r}: {conflict.get('message', conflict)}")
+            endpoint_file = next(
+                (
+                    layer.get("target_file")
+                    for layer in preview.get("layers") or []
+                    if layer.get("layer") == "endpoint"
+                ),
+                "",
+            )
+            if endpoint_file:
+                full = _full_path(prefix, source["path"])
+                for note in shadow_notes(source["http_method"], full, endpoint_file, known):
+                    warnings.append(
+                        f"сценарий {slug!r}: {note}. Файлы роутов подключаются по алфавиту — "
+                        "выберите slug, при котором файл встанет раньше (или позже) нужного"
+                    )
         pages_taken = _existing_pages(state, board)
+        known_pages = _front_pages(state)
         for card in idea["pages"]:
+            if card["extends"]:
+                ignored = [
+                    key for key in ("description", "acceptance", "calls", "domain")
+                    if card.get(key)
+                ]
+                if ignored:
+                    warnings.append(
+                        f"страница {card['extends']!r} (extends): поля страницы "
+                        f"({', '.join(ignored)}) не применяются — в ТЗ идут только blocks; "
+                        "перенесите описание, критерии и calls в блоки"
+                    )
+                if card["extends"] not in known_pages:
+                    have = ", ".join(sorted(known_pages)[:12]) or "нет страниц"
+                    problems.append(
+                        f"страница {card['extends']!r} для extends не найдена "
+                        f"(есть: {have}; см. studio_frontend)"
+                    )
+                continue
+            if not card["route"]:
+                warnings.append(
+                    f"страница {card['name']!r}: пустой route. Если это блок на существующей "
+                    "странице, а не отдельный экран, используйте extends с именем страницы"
+                )
+            warnings.extend(_similar_page_notes(card, board))
             keys = [("имя", f"name:{card['name']}")]
             if card["route"]:
                 keys.append(("маршрут", f"route:{card['route']}"))
             for label, key in keys:
                 if key in pages_taken:
                     problems.append(
-                        f"страница {card['name']!r}: {label} уже занято — {pages_taken[key]}"
+                        f"страница {card['name']!r}: {label} уже занято — {pages_taken[key]}. "
+                        "Чтобы добавить блоки на существующую страницу, укажите "
+                        'extends="<имя страницы>" и blocks'
                     )
         if problems:
             raise _invalid("Идея отклонена, исправьте и отправьте снова: " + "; ".join(problems))
@@ -191,9 +347,41 @@ def propose(state, data: dict) -> dict:
         "idea_id": idea["id"],
         "scenarios": len(idea["scenarios"]),
         "pages": len(idea["pages"]),
-        "warnings": parsed.get("warnings") or [],
+        "cards": _card_refs(idea, known_pages),
+        "warnings": warnings,
         "pending": counts[cards.PENDING],
     }
+
+
+def withdraw(state, data: dict) -> dict:
+    """Агент отзывает СВОЮ идею, пока по ней нет принятых и перенесённых карточек."""
+    idea_id = str(data.get("idea_id") or "")
+    actor = str(data.get("_actor") or "")
+    found: dict = {}
+
+    def apply(board: dict):
+        for idea in board.get("ideas") or []:
+            if isinstance(idea, dict) and idea.get("id") == idea_id:
+                found.update(idea)
+                break
+        else:
+            return False
+        if actor == "agent" and found.get("created_by") != "agent":
+            raise MetadataError("mode_forbidden", "Идея создана человеком: агент её не отзывает")
+        for _idea, kind, item in cards.iter_cards({"ideas": [found]}):
+            if item.get("decision") == cards.ACCEPTED or cards.mapped(kind, item):
+                raise _invalid(
+                    "По идее уже есть принятые или перенесённые карточки: решает человек"
+                )
+        board["ideas"] = [i for i in board["ideas"] if i is not idea]
+        return True
+
+    with state.lock:
+        changed = state.mutate_ideas(apply)
+        if changed is False:
+            raise MetadataError("node_not_found", f"Идеи {idea_id} нет: см. studio_ideas()")
+        counts = cards.counts(state.load_ideas())
+    return {"withdrawn": idea_id, "pending": counts[cards.PENDING]}
 
 
 def ideas_ready(state) -> dict:
@@ -298,23 +486,31 @@ def _transfer_scenario(state, item: dict) -> str:
 
 
 def _transfer_page(state, item: dict) -> dict:
-    page_id = f"page-plan:{_uid()}"
+    """Карточка страницы → плановая страница с блоками; extends — только блоки на существующую."""
     root = state.root
+    extends = str(item.get("extends") or "")
+    if extends:
+        page_id = _front_pages(state).get(extends, "")
+        if not page_id:
+            raise MetadataError("node_not_found", f"Страница {extends!r} не найдена во фронтенде")
+    else:
+        page_id = f"page-plan:{_uid()}"
+    block_ids: dict[str, str] = {}
     with front_meta.META_LOCK:
-        front_meta.save_page_meta(
-            root,
-            {
-                "id": page_id,
-                "plannedNew": True,
-                "name": item.get("name") or item.get("title"),
-                "description": item.get("description") or "",
-                "acceptance": item.get("acceptance") or [],
-                "domain": item.get("domain") or "",
-                "route": item.get("route") or "",
-                "calls": item.get("calls") or [],
-            },
-        )
-        block_ids: dict[str, str] = {}
+        if not extends:
+            front_meta.save_page_meta(
+                root,
+                {
+                    "id": page_id,
+                    "plannedNew": True,
+                    "name": item.get("name") or item.get("title"),
+                    "description": item.get("description") or "",
+                    "acceptance": item.get("acceptance") or [],
+                    "domain": item.get("domain") or "",
+                    "route": item.get("route") or "",
+                    "calls": item.get("calls") or [],
+                },
+            )
         for block in item.get("blocks") or []:
             block_id = f"block-plan:{_uid()}"
             front_meta.save_block_meta(
@@ -421,10 +617,16 @@ def candidates(state) -> dict:
             "route": page.get("route") or "",
             "description": page.get("description") or "",
             "blocks": len(page.get("blocks") or []),
-            "ready": bool(str(page.get("description") or "").strip()),
+            "planned_blocks": [
+                b.get("name") for b in page.get("blocks") or [] if b.get("planned")
+            ],
+            "new": bool(page.get("planned")),
+            "ready": bool(str(page.get("description") or "").strip())
+            or any(b.get("planned") and str(b.get("description") or "").strip()
+                   for b in page.get("blocks") or []),
         }
         for page in front.get("pages") or []
-        if page.get("planned")
+        if page.get("planned") or any(b.get("planned") for b in page.get("blocks") or [])
     ]
     return {"plans": plans, "nodes": nodes, "pages": pages}
 
@@ -448,9 +650,18 @@ def select(state, data: dict, check_links=None) -> dict:
         if state.workflow.data["stage"] != "select":
             raise MetadataError("wrong_stage", "ТЗ собирается на этапе «Выбор задач»")
         _clear_briefs(state.root)
+        save_baseline(state)
         brief = {}
         if plans or nodes:
-            brief = state.save_brief({"only": nodes, "plans": plans, "map": "related"})
+            # формат якорей metadata.json агенту не нужен (он его не пишет): раздел опускаем
+            brief = state.save_brief(
+                {
+                    "only": nodes,
+                    "plans": plans,
+                    "map": "related",
+                    "sections": ["map", "unready", "diagnostics"],
+                }
+            )
         front = {}
         if pages:
             try:
@@ -470,6 +681,35 @@ def select(state, data: dict, check_links=None) -> dict:
             "frontend": front.get("tasks") if front else None,
         },
     }
+
+
+BASELINE_FILE = "diag-baseline.json"
+
+
+def _diag_key(item) -> list[str]:
+    return [
+        str(item.get("code") or ""),
+        str(item.get("file") or ""),
+        str(item.get("message") or ""),
+    ]
+
+
+def save_baseline(state) -> None:
+    """Запомнить предупреждения проекта на момент передачи ТЗ: «новыми» будут только последующие."""
+    graph = state.ensure_graph()
+    keys = [_diag_key(d.model_dump()) for d in graph.diagnostics]
+    payload = {"saved_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "keys": keys}
+    target = Path(state.root) / ".studio" / BASELINE_FILE
+    target.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(target, json.dumps(payload, ensure_ascii=False, indent=1) + "\n")
+
+
+def baseline(state) -> dict:
+    try:
+        data = json.loads((Path(state.root) / ".studio" / BASELINE_FILE).read_text("utf-8"))
+    except (OSError, ValueError):
+        return {"saved_at": "", "keys": []}
+    return data if isinstance(data, dict) else {"saved_at": "", "keys": []}
 
 
 def finish(state) -> dict:

@@ -10,3 +10,8 @@ server.json
 workflow.json
 runner.json
 runner.log
+tests.json
+last-test-run.json
+test-run.log
+tmp/
+diag-baseline.json

@@ -67,6 +67,8 @@ test("cardsOf: только карточки цепочки, с готовыми
   assert.equal(first.slug, "list_x");
   assert.deepEqual(first.acceptance, ["a"]);
   assert.deepEqual(first.extras, ["работает с БД"]);
+  assert.equal(first.mapped, false);
+  assert.equal(cardsOf({ideas: [{scenarios: [{id: "m", decision: "accepted", planSlug: "x", source: {}}]}]})[0].mapped, true);
   assert.equal(first.idea, "Каталог");
   const page = cards[2];
   assert.equal(page.kindLabel, "Страница фронтенда");
@@ -74,6 +76,16 @@ test("cardsOf: только карточки цепочки, с готовыми
   assert.deepEqual(page.calls, ["GET /x"]);
   assert.deepEqual(page.blocks, [{name: "Row", description: "строка"}]);
   assert.deepEqual(cardsOf(null), []);
+});
+
+test("карточка-расширение показывает, на какую страницу добавляются блоки", () => {
+  const board = {ideas: [{title: "И", pages: [{id: "p", title: "Сводка", name: "home", extends: "home",
+    decision: "pending", blocks: [{name: "SiteStats", description: "d"}]}]}]};
+  const [card] = cardsOf(board);
+  assert.equal(card.kindLabel, "Блоки на существующей странице");
+  assert.equal(card.route, "страница home");
+  assert.equal(card.extends, "home");
+  assert.deepEqual(card.blocks.map((b) => b.name), ["SiteStats"]);
 });
 
 test("pendingQueue и tally считают решения", () => {

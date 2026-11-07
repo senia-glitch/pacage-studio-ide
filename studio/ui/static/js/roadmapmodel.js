@@ -35,6 +35,7 @@ function view(idea, kind, item) {
     acceptance: list(item.acceptance),
     domain: String(item.domain || ""),
     decision: String(item.decision || ""),
+    mapped: Boolean(item.planSlug || item.mapPageId || item.mapNodeId),
   };
   if (kind === "scenario") {
     const method = String(source.http_method || "").toUpperCase();
@@ -47,10 +48,13 @@ function view(idea, kind, item) {
       blocks: [],
     };
   }
+  const extendsPage = String(item.extends || "");
   return {
     ...base,
-    route: String(item.route || ""),
+    kindLabel: extendsPage ? "Блоки на существующей странице" : base.kindLabel,
+    route: extendsPage ? `страница ${extendsPage}` : String(item.route || ""),
     slug: String(item.name || ""),
+    extends: extendsPage,
     extras: [],
     calls: list(item.calls),
     blocks: (Array.isArray(item.blocks) ? item.blocks : []).map((block) => ({
@@ -111,6 +115,26 @@ export function runnerNote(flow) {
   };
   const text = messages[runner.state] || "";
   return text ? {text, retry: runner.state === "stalled" || runner.state === "failed", state: runner.state} : null;
+}
+
+/* Итог прогона тестов проекта для отчёта: тон (ok/bad/run/none), строка и список упавших. */
+export function testsView(tests) {
+  const state = tests && tests.state;
+  if (!state || state === "none") {
+    return {tone: "none", text: "Тесты проекта студия ещё не запускала.", failures: []};
+  }
+  if (state === "running") return {tone: "run", text: "Тесты проекта выполняются…", failures: []};
+  if (state === "error") {
+    const last = String((tests && tests.message) || "").trim().split("\n").pop();
+    return {tone: "bad", text: `Тесты не запустились: ${last || "неизвестная ошибка"}`, failures: []};
+  }
+  const bad = (Number(tests.failed) || 0) + (Number(tests.errors) || 0);
+  const skipped = Number(tests.skipped) ? `, пропущено ${tests.skipped}` : "";
+  return {
+    tone: bad ? "bad" : "ok",
+    text: `Тесты проекта: прошло ${tests.passed || 0} из ${tests.total || 0}` + (bad ? `, упало ${bad}` : "") + skipped,
+    failures: (tests.failures || []).slice(0, 10),
+  };
 }
 
 const NOTES = {

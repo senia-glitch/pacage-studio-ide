@@ -67,6 +67,15 @@ def page(text: str, offset: int = 0, limit: int = PAGE_LIMIT) -> dict:
     }
 
 
+_EMPTY_MARKERS = ("(нет)", "не заданы", "нет:", "нет.")
+
+
+def _is_empty(text: str) -> bool:
+    """Раздел без содержания (заголовок и «(нет)» или короткая заглушка): читать нечего."""
+    body = text.split("\n", 1)[1].strip() if "\n" in text else ""
+    return not body or (len(body) < 140 and any(mark in body for mark in _EMPTY_MARKERS))
+
+
 def outline(markdown: str, records: list[dict] | None = None) -> dict:
     """Оглавление: задачи и разделы с размерами; записи задач сжимаются до имени."""
     parts = split_brief(markdown)
@@ -93,7 +102,12 @@ def outline(markdown: str, records: list[dict] | None = None) -> dict:
             for t in parts["tasks"]
         ],
         "sections": [
-            {"key": s["key"], "title": s["title"], "chars": len(s["text"])}
+            {
+                "key": s["key"],
+                "title": s["title"],
+                "chars": len(s["text"]),
+                "empty": _is_empty(s["text"]),
+            }
             for s in parts["sections"]
         ],
     }

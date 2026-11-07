@@ -71,6 +71,72 @@ def _links_for(response: dict, ids: set[str]) -> list[dict]:
     ]
 
 
+def _front_node(graph: dict, node_id: str) -> dict:
+    """Страница или блок фронтенда со связями (вызовами эндпоинтов) и описанием."""
+    for page in graph.get("pages") or []:
+        if page.get("id") == node_id:
+            return {
+                "id": node_id, "kind": "page", "name": page.get("name"),
+                "route": page.get("route") or "", "planned": bool(page.get("planned")),
+                "description": page.get("description") or "",
+                "acceptance": page.get("acceptance") or [], "calls": page.get("calls") or [],
+                "file": page.get("file") or "",
+                "blocks": [
+                    {"id": b.get("id"), "name": b.get("name"), "planned": bool(b.get("planned"))}
+                    for b in page.get("blocks") or []
+                ],
+            }
+        for block in page.get("blocks") or []:
+            if block.get("id") == node_id:
+                return {
+                    "id": node_id, "kind": "block", "name": block.get("name"),
+                    "page": page.get("name"), "planned": bool(block.get("planned")),
+                    "description": block.get("description") or "",
+                    "acceptance": block.get("acceptance") or [], "calls": block.get("calls") or [],
+                    "file": block.get("file") or "",
+                }
+    raise StudioError(
+        "node_not_found", f"Страница или блок {node_id} не найдены: см. studio_frontend"
+    )
+
+
+def _scenario_view(card: dict) -> dict:
+    source = card.get("source") or {}
+    return {
+        "id": card.get("id"),
+        "slug": source.get("slug", ""),
+        "title": card.get("title"),
+        "route": f"{source.get('http_method', '')} {source.get('path', '')}".strip(),
+        "domain": card.get("domain") or "",
+        "description": card.get("description") or "",
+        "acceptance": card.get("acceptance") or [],
+        "decision": card.get("decision") or "",
+        "plan": card.get("planSlug") or "",
+    }
+
+
+def _page_view(card: dict) -> dict:
+    return {
+        "id": card.get("id"),
+        "name": card.get("name"),
+        "extends": card.get("extends") or "",
+        "title": card.get("title"),
+        "route": card.get("route") or "",
+        "calls": card.get("calls") or [],
+        "blocks": [
+            {
+                "name": b.get("name"),
+                "description": b.get("description") or "",
+                "acceptance": b.get("acceptance") or [],
+                "calls": b.get("calls") or [],
+            }
+            for b in card.get("blocks") or []
+            if isinstance(b, dict)
+        ],
+        "decision": card.get("decision") or "",
+    }
+
+
 def _part(part: str) -> str:
     if part not in ("backend", "frontend"):
         raise StudioError("invalid_input", "part: backend или frontend")
@@ -172,6 +238,20 @@ def create_server(session: Session | None = None):
         session.rev = flow.get("revision") or 0
         hint = flow.get("hint") or {}
         cards = flow.get("cards") or {}
+        mine: list[dict] = []
+        if flow.get("stage") in ("ideas", "review", "confirm"):
+            for idea in client.get("/api/ideas").get("ideas") or []:
+                for card in [*(idea.get("scenarios") or []), *(idea.get("pages") or [])]:
+                    if isinstance(card, dict) and card.get("decision"):
+                        source = card.get("source") or {}
+                        mine.append(
+                            {
+                                "id": card.get("id"),
+                                "slug": source.get("slug") or card.get("name") or "",
+                                "title": card.get("title"),
+                                "decision": card.get("decision"),
+                            }
+                        )
         return {
             "stage": flow.get("stage"),
             "stage_title": next(
@@ -185,8 +265,18 @@ def create_server(session: Session | None = None):
             "cards": {k: cards.get(k, 0) for k in ("pending", "accepted", "rejected")},
             "selected": flow.get("selected"),
             "briefs": flow.get("briefs"),
+            "my_cards": mine[:40],
             "changed": changed,
         }
+
+    @tool
+    def studio_idea_withdraw(idea_id: str) -> dict:
+        """Отозвать СВОЮ идею (например, заменённую или присланную по ошибке).
+
+        Возможно, пока по ней нет принятых и перенесённых на карту карточек; идеи человека и
+        решённые карточки не отзываются. Потом можно прислать исправленную studio_idea_add.
+        """
+        return session.need().post("/api/workflow/withdraw", {"idea_id": idea_id}, mode="plan")
 
     @tool
     def studio_ideas_ready(note: str = "") -> dict:
@@ -224,9 +314,11 @@ def create_server(session: Session | None = None):
     def studio_graph(
         kind: str = "", query: str = "", planned_only: bool = False, limit: int = 80
     ) -> dict:
-        """Узлы бэкенда (endpoint, scenario, io, model, test, nested) в сжатом виде.
+        """Узлы бэкенда в сжатом виде: эндпоинты и сценарии первыми, потом остальные.
 
-        Фильтры: kind, query (подстрока в имени, id, домене, описании), planned_only.
+        kind — endpoint, scenario, model, test, io или nested. query — подстрока в имени, id,
+        домене или описании (для эндпоинта это и его путь: query="/news"). planned_only —
+        только плановые. Чтобы увидеть существующие маршруты, начни с kind="endpoint".
         """
         graph = session.need().get("/api/graph")
         needle = query.strip().lower()
@@ -252,15 +344,24 @@ def create_server(session: Session | None = None):
                     "created_by": (node.get("details") or {}).get("created_by", ""),
                 }
             )
+        order = {"endpoint": 0, "scenario": 1, "model": 2, "test": 3, "io": 4}
+        nodes.sort(key=lambda item: order.get(item["kind"], 9))
         return {"total": len(nodes), "shown": min(len(nodes), limit), "nodes": nodes[:limit]}
 
     @tool
     def studio_node(node_id: str) -> dict:
         """Один узел бэкенда целиком (описание, критерии, файл) и его связи."""
-        graph = session.need().get("/api/graph")
+        client = session.need()
+        if node_id.startswith(("page:", "page-plan:", "block:", "block-plan:")):
+            return _front_node(client.get("/api/frontend/graph"), node_id)
+        graph = client.get("/api/graph")
         node = next((n for n in graph.get("nodes") or [] if n.get("id") == node_id), None)
         if node is None:
-            raise StudioError("node_not_found", f"Узел {node_id} не найден: см. studio_graph")
+            raise StudioError(
+                "node_not_found",
+                f"Узел {node_id} не найден: бэкенд — studio_graph, страницы и блоки — "
+                "studio_frontend",
+            )
         edges = [
             {"from": e["from_node"], "to": e["to_node"], "kind": e.get("kind")}
             for e in graph.get("edges") or []
@@ -316,9 +417,28 @@ def create_server(session: Session | None = None):
         }
 
     @tool
-    def studio_ideas() -> dict:
-        """Доска идей: идеи (кратко) и ревизия доски."""
+    def studio_ideas(idea_id: str = "") -> dict:
+        """Доска идей: идеи кратко (со slug сценариев) или одна идея целиком (idea_id).
+
+        Для идеи целиком — все сценарии и страницы с критериями и решением человека
+        (decision: pending, accepted, rejected). Так проверяют свои записи и не дублируют чужие.
+        """
         board = session.need().get("/api/ideas")
+        ideas = [idea for idea in board.get("ideas") or [] if isinstance(idea, dict)]
+        if idea_id:
+            idea = next((i for i in ideas if i.get("id") == idea_id), None)
+            if idea is None:
+                raise StudioError("idea_not_found", f"Идеи {idea_id} нет: см. studio_ideas()")
+            return {
+                "revision": board.get("revision", 0),
+                "id": idea.get("id"),
+                "title": idea.get("title"),
+                "description": idea.get("description"),
+                "scenarios": [
+                    _scenario_view(c) for c in idea.get("scenarios") or [] if isinstance(c, dict)
+                ],
+                "pages": [_page_view(c) for c in idea.get("pages") or [] if isinstance(c, dict)],
+            }
         return {
             "revision": board.get("revision", 0),
             "ideas": [
@@ -327,11 +447,23 @@ def create_server(session: Session | None = None):
                     "title": idea.get("title"),
                     "description": _short(idea.get("description")),
                     "created_by": idea.get("created_by") or "",
+                    "cycle": idea.get("cycle"),
                     "scenarios": len(idea.get("scenarios") or []),
                     "pages": len(idea.get("pages") or []),
+                    "decisions": sorted(
+                        {
+                            c.get("decision") or "—"
+                            for c in [*(idea.get("scenarios") or []), *(idea.get("pages") or [])]
+                            if isinstance(c, dict)
+                        }
+                    ),
+                    "slugs": [
+                        (c.get("source") or {}).get("slug", "")
+                        for c in idea.get("scenarios") or []
+                        if isinstance(c, dict)
+                    ],
                 }
-                for idea in board.get("ideas") or []
-                if isinstance(idea, dict)
+                for idea in ideas
             ],
         }
 
@@ -349,9 +481,11 @@ def create_server(session: Session | None = None):
         scenarios — сценарии бэкенда: {title, slug (snake_case, латиница — обязателен как
         имя будущего кода), description, acceptance[], domain, http_method, path, uses_db,
         with_test}. pages — страницы фронтенда: {title, name (kebab-case), description,
-        acceptance[], domain, route, calls[«GET /path»], blocks[{name, description,
-        acceptance[], calls[]}]}. Студия проверяет slug и конфликты сразу: при ошибке
-        исправь и отправь снова. Можно вызывать несколько раз; в конце — studio_ideas_ready.
+        acceptance[], domain, route (обязателен у новой страницы), calls[«GET /path», без
+        префикса API], blocks[{name, description, acceptance[], calls[]}]}. Чтобы добавить
+        блоки на СУЩЕСТВУЮЩУЮ страницу, вместо name укажи extends="<имя страницы>" и blocks.
+        Студия проверяет slug, конфликты и дубли сразу: при ошибке исправь и отправь снова.
+        Можно вызывать несколько раз; в конце — studio_ideas_ready.
         """
         body = {
             "title": title,
@@ -427,20 +561,60 @@ def create_server(session: Session | None = None):
         }
 
     @tool
+    def studio_tests() -> dict:
+        """Итог последнего прогона тестов проекта, который сделала студия (независимо от тебя).
+
+        Студия запускает тесты по кнопке человека или на этапе «Отчёт»; state=none — прогонов ещё
+        не было. failing_plans — планы, у которых упал тест. Это то, что видит человек в отчёте.
+        """
+        data = session.need().get("/api/tests")
+        return {
+            "state": data.get("state"),
+            "finished_at": data.get("finished_at"),
+            "total": data.get("total", 0),
+            "passed": data.get("passed", 0),
+            "failed": data.get("failed", 0),
+            "errors": data.get("errors", 0),
+            "skipped": data.get("skipped", 0),
+            "failures": (data.get("failures") or [])[:20],
+            "failing_plans": data.get("plans") or {},
+            "message": data.get("message") or "",
+        }
+
+    @tool
     def studio_doctor(strict: bool = False, limit: int = 40) -> dict:
         """Диагностика проекта (как `studio doctor [--strict]`): ошибки и предупреждения.
 
-        ok=false, если есть ошибки (а при strict=true — и предупреждения).
+        ok=false, если есть ошибки (а при strict=true — и предупреждения). Предупреждения,
+        которые были в проекте ещё до передачи ТЗ, помечены new=false: ok_for_changes говорит,
+        чисто ли после ТЗ, то есть нет ли НОВЫХ проблем — чужие давние исправлять не нужно.
         """
-        graph = session.need().get("/api/graph")
-        found = graph.get("diagnostics") or []
+        client = session.need()
+        found = client.get("/api/graph").get("diagnostics") or []
+        old = {tuple(k) for k in (client.get("/api/baseline").get("keys") or [])}
+
+        def fresh(item: dict) -> bool:
+            return (item.get("code"), item.get("file") or "", item.get("message")) not in old
+
         errors = [d for d in found if d.get("level") == "error"]
         warnings = [d for d in found if d.get("level") == "warning"]
-        shown = [*errors, *warnings][: max(0, int(limit))]
+        new_errors = [d for d in errors if fresh(d)]
+        new_warnings = [d for d in warnings if fresh(d)]
+        shown = [*new_errors, *new_warnings, *[d for d in errors + warnings if not fresh(d)]]
+        old_count = len(errors) + len(warnings) - len(new_errors) - len(new_warnings)
+        if new_errors or new_warnings:
+            verdict = f"новых проблем: {len(new_errors)} ошибок, {len(new_warnings)} предупреждений"
+        else:
+            verdict = "новых проблем нет" + (f"; давних предупреждений и ошибок: {old_count}"
+                                            if old_count else "")
         return {
+            "verdict": verdict,
             "ok": not errors and not (strict and warnings),
+            "ok_for_changes": not new_errors and not (strict and new_warnings),
             "errors": len(errors),
             "warnings": len(warnings),
+            "new_errors": len(new_errors),
+            "new_warnings": len(new_warnings),
             "info": len(found) - len(errors) - len(warnings),
             "items": [
                 {
@@ -449,8 +623,9 @@ def create_server(session: Session | None = None):
                     "message": d.get("message"),
                     "file": d.get("file") or "",
                     "line": d.get("line") or 0,
+                    "new": fresh(d),
                 }
-                for d in shown
+                for d in shown[: max(0, int(limit))]
             ],
         }
 
@@ -487,7 +662,8 @@ def create_server(session: Session | None = None):
             "counts": result.get("counts"),
             "rejected": result.get("rejected") or [],
             "warnings": result.get("warnings") or [],
-            "next": "Человек читает отчёт в студии. Вернись к studio_workflow.",
+            "next": "Отчёт у человека. Если тебя запустила студия — заверши работу; "
+            "иначе вернись к studio_workflow.",
         }
 
     @tool

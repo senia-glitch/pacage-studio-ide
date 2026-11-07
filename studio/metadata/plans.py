@@ -411,6 +411,11 @@ def validate_plan(plan: Plan, graph_index: GraphIndex | None) -> list[Diagnostic
     other_plans = list(getattr(graph_index, "plans", []) or []) if graph_index is not None else []
     other_plans = [item for item in other_plans if _plan_slug(item) != plan.slug]
 
+    # Файл, где слой плана уже реализован, принадлежит плану: остальные узлы в нём
+    # (io, вложенные, другие тесты) — его содержимое, а не чужой захват.
+    own_code_files = {
+        node.file_path for node in nodes if node.plan == plan.slug and not node.planned
+    }
     occupied_names: dict[str, str] = {}
     occupied_files: dict[str, str] = {}
     for node in nodes:
@@ -418,7 +423,7 @@ def validate_plan(plan: Plan, graph_index: GraphIndex | None) -> list[Diagnostic
             continue
         for name in _node_names(node):
             occupied_names.setdefault(name, f"узлом {node.id}")
-        if node.file_path:
+        if node.file_path and node.file_path not in own_code_files:
             occupied_files.setdefault(node.file_path, f"узлом {node.id}")
     for other in other_plans:
         slug = _plan_slug(other)

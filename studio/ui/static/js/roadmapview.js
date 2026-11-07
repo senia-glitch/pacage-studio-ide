@@ -2,7 +2,7 @@ import {api} from "./api.js";
 import {$, esc, toast} from "./core.js";
 import {
   agentReady, autoKey, autoOpen, cardsOf, defaultSelection, primaryAction, progressOf,
-  runnerNote, selectionCount, selectionPayload, stageNote, steps,
+  runnerNote, selectionCount, selectionPayload, stageNote, steps, testsView,
 } from "./roadmapmodel.js";
 import {closeSwipe, isSwipeOpen, openSwipe, refreshSwipe} from "./swipeview.js";
 
@@ -86,7 +86,10 @@ function openConnectHelp() {
 
 async function openRunnerDialog() {
   let view;
-  try { view = await api("/api/runner"); } catch (error) { toast(error.message); return; }
+  try {
+    view = await api("/api/runner");
+    view.tests = await api("/api/tests");
+  } catch (error) { toast(error.message); return; }
   const win = dialog("Автозапуск агента", `
     <p>Агент не висит в ожидании: студия сама запускает его на этапах «Идеи агента» и «Реализация», а после
     выполнения этапа процесс агента завершается. Лимиты не тратятся, пока от агента ничего не нужно.</p>
@@ -98,6 +101,9 @@ async function openRunnerDialog() {
       <input id="rmRunTimeout" type="number" min="1" max="240" value="${esc(view.timeout_minutes)}"></label>
     <p class="rm-warn">Студия запустит эту программу в папке проекта с правами, указанными в команде (по умолчанию —
     правка файлов и запуск тестов). Включайте, только если доверяете команде. Вывод — в .studio/runner.log.</p>
+    <label class="rm-check"><input type="checkbox" id="rmTestsEnabled"${view.tests && view.tests.config.enabled ? " checked" : ""}>
+      <span><b>Запускать тесты проекта, когда агент прислал отчёт</b>
+      <small>независимая проверка поведения; команда — .studio/tests.json (по умолчанию pytest)</small></span></label>
     ${view.status && view.status.message ? `<p class="hint">Последний запуск: ${esc(view.status.message.trim().split("\n").pop())}</p>` : ""}`);
   win.button("Вернуть стандартную команду", () => {
     win.body.querySelector("#rmRunCommand").value = view.default_command.join("\n");
@@ -110,6 +116,7 @@ async function openRunnerDialog() {
       timeout_minutes: Number(win.body.querySelector("#rmRunTimeout").value),
     });
     if (!result) return;
+    await post("/api/tests/config", {enabled: win.body.querySelector("#rmTestsEnabled").checked});
     win.close();
     toast(result.enabled ? "Автозапуск включён: агент запускается по этапам" : "Автозапуск выключен");
     await refreshRoadmap();
@@ -155,7 +162,7 @@ async function backToReview() {
 async function openConfirm() {
   let board = null;
   try { board = await api("/api/ideas"); } catch (error) { toast(error.message); return; }
-  const accepted = cardsOf(board).filter((card) => card.decision === "accepted");
+  const accepted = cardsOf(board).filter((card) => card.decision === "accepted" && !card.mapped);
   const rejected = cardsOf(board).filter((card) => card.decision === "rejected").length;
   if (!accepted.length) {
     const win = dialog("Ничего не принято", `<p>Все карточки отклонены. Попросите агента о новых идеях или вернитесь к карточкам.</p>`);
@@ -222,7 +229,9 @@ async function openSelect() {
     ${group("Другие плановые узлы", candidates.nodes, "nodes", "id",
       (n) => `<b>${esc(n.label)}</b> <small>${esc(n.kind)}</small>`, selection)}
     ${group("Страницы фронтенда", candidates.pages, "pages", "id",
-      (p) => `<b>${esc(p.name)}</b> <small>${esc(p.route)}${p.blocks ? ` · блоков: ${p.blocks}` : ""}</small>`, selection)}
+      (p) => (p.new
+        ? `<b>${esc(p.name)}</b> <small>${esc(p.route)}${p.blocks ? ` · блоков: ${p.blocks}` : ""}</small>`
+        : `<b>${esc(p.name)}</b> <small>новые блоки: ${esc((p.planned_blocks || []).join(", "))}</small>`), selection)}
     <div class="rm-selected" id="rmSelected"></div>`);
   const go = win.button("Отдать агенту", async (button) => {
     button.disabled = true;
@@ -292,11 +301,36 @@ async function openReport() {
     } catch (_) { /* отчёта может не быть: работа принята вручную */ }
   }
   const summary = (flow && flow.summary) || "Агент не оставил текста отчёта.";
+  let tests = null;
+  try { tests = await api("/api/tests"); } catch (_) { /* нет связи: блок покажет «не запускала» */ }
   const win = dialog("Отчёт агента", `
     <div class="rm-summary">${esc(summary)}</div>
     ${done.total ? `<div class="rm-progress${done.complete ? " ok" : ""}">Проверка по коду: выполнено ${done.done} из ${done.total}</div>` : ""}
     ${rows ? `<ul class="rm-results">${rows}</ul>` : ""}
+    <div id="rmTests"></div>
     ${changes ? `<p class="hint">Агент предложил обновить описания узлов (${changes}). Проверьте и примите нужное — ничего не записано без вашего «Применить».</p>` : ""}`, "rm-report");
+  const drawTests = async () => {
+    const box = win.body.querySelector("#rmTests");
+    if (!box || !document.body.contains(box)) return;
+    const view = testsView(tests);
+    const bad = (view.failures || []).map((item) =>
+      `<li><b>${esc(item.name)}</b> <small>${esc(item.file || "")}${item.message ? " — " + esc(String(item.message).split("\n")[0]) : ""}</small></li>`).join("");
+    const plans = Object.entries((tests && tests.plans) || {}).map(([slug, names]) =>
+      `<li>план <b>${esc(slug)}</b>: упало тестов ${names.length}</li>`).join("");
+    box.innerHTML = `<div class="rm-tests ${view.tone}"><b>${esc(view.text)}</b>${bad ? `<ul>${bad}</ul>` : ""}${plans ? `<ul>${plans}</ul>` : ""}
+      <button type="button" id="rmRunTests"${view.tone === "run" ? " disabled" : ""}>Запустить тесты проекта</button></div>`;
+    box.querySelector("#rmRunTests").onclick = async () => {
+      tests = await post("/api/tests/run") || tests;
+      await drawTests();
+    };
+    if (view.tone === "run") {
+      setTimeout(async () => {
+        try { tests = await api("/api/tests"); } catch (_) { return; }
+        await drawTests();
+      }, 2000);
+    }
+  };
+  await drawTests();
   if (changes) {
     win.button(`Описания от агента (${changes})…`, async () => {
       win.close();
@@ -359,6 +393,9 @@ function render() {
     ? `Агент реализует · выполнено ${progress.done} из ${progress.total}`
     : stageNote(flow);
   if (auto && !(auto.state === "running" && progress && progress.total)) note = auto.text;
+  if (flow.stage === "report" && flow.tests && flow.tests.state === "running") {
+    note = "Студия проверяет результат тестами проекта…";
+  }
   root.hidden = false;
   root.dataset.stage = flow.stage;
   const html = `

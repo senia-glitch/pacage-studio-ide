@@ -444,10 +444,14 @@ def brief_frontend(
         lines.append("## 5. Проверка")
         lines.append("")
         lines.append(
-            "- вкладка «Фронтенд» в студии → «⟳ Пересканировать»; нарушения должны исчезнуть;"
+            "- вкладка «Фронтенд» в студии → «⟳ Пересканировать» (через MCP — "
+            '`studio_verify(part="frontend")`); нарушения должны исчезнуть;'
         )
         lines.append("- тесты frontend: vitest run (прогон в frontend/);")
-        lines.append("- studio doctor — диагностика бэкенд-части не должна регрессировать.")
+        lines.append(
+            "- studio doctor (через MCP — `studio_doctor`) — диагностика бэкенд-части не "
+            "должна регрессировать."
+        )
         lines.append("")
     lines.append("## 6. Итоговый отчёт (JSON)")
     lines.append("")

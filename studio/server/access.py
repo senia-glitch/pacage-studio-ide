@@ -41,6 +41,8 @@ _GET_READ = frozenset(
         "/api/frontend/verify",
         "/api/agent/reports",
         "/api/workflow",
+        "/api/tests",
+        "/api/baseline",
     }
 )
 # POST, которые ничего не меняют в плане и коде проекта (отчёты, промпты,
@@ -68,6 +70,7 @@ _POST_PLAN = frozenset(
         "/api/frontend/meta",
         "/api/workflow/propose",
         "/api/workflow/ideas-ready",
+        "/api/workflow/withdraw",
     }
 )
 # Отчёт по реализации: только режим реализации.
