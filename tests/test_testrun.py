@@ -178,6 +178,113 @@ def test_start_не_запускает_второй_прогон_паралле�
     thread.join(timeout=5)
 
 
+def test_python_проекта_берётся_из_его_окружения(tmp_path: Path) -> None:
+    assert testrun.project_python(None) == sys.executable
+    assert testrun.project_python(tmp_path) == sys.executable  # окружения нет
+    for rel in ("venv/bin/python", ".venv/Scripts/python.exe"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("", encoding="utf-8")
+    assert testrun.project_python(tmp_path) == str(tmp_path / ".venv" / "Scripts" / "python.exe")
+    assert _runner(tmp_path).config()["command"][0] == testrun.project_python(tmp_path)
+
+
+# ------------------------------------------------------------ тесты фронтенда
+
+VITEST = """<?xml version="1.0"?>
+<testsuites><testsuite name="vitest">
+<testcase classname="src/blocks/Card.test.js" name="Card > renders" time="0.1"/>
+<testcase classname="src/blocks/Card.test.js" name="Card > clicks" time="0.1">
+  <failure message="expected 1 to be 2">trace</failure></testcase>
+</testsuite></testsuites>
+"""
+
+
+def _writer(text: str) -> list[str]:
+    body = text.replace('"', '\\"').replace("\n", "")
+    return _script(f"import sys; open(sys.argv[1], 'w', encoding='utf-8').write(\"{body}\")")
+
+
+def _front_project(tmp_path: Path, scripts: dict | None = None) -> None:
+    (tmp_path / "frontend").mkdir()
+    package = {"name": "x", "scripts": scripts if scripts is not None else {"test": "vitest run"}}
+    (tmp_path / "frontend" / "package.json").write_text(json.dumps(package), encoding="utf-8")
+
+
+def test_команда_фронтенда_находится_по_package_json(tmp_path: Path, monkeypatch) -> None:
+    assert testrun.frontend_command(tmp_path) == []  # нет frontend/
+    monkeypatch.setattr(testrun.shutil, "which", lambda name: "/usr/bin/npm")
+    _front_project(tmp_path, scripts={})
+    assert testrun.frontend_command(tmp_path) == []  # нет скрипта test
+    _front_project_file = tmp_path / "frontend" / "package.json"
+    _front_project_file.write_text(json.dumps({"scripts": {"test": "vitest run"}}), encoding="utf-8")
+    command = testrun.frontend_command(tmp_path)
+    assert command[:5] == ["/usr/bin/npm", "--prefix", "frontend", "test", "--"]
+    assert "--reporter=junit" in command and "--outputFile={junit}" in command
+    monkeypatch.setattr(testrun.shutil, "which", lambda name: None)
+    assert testrun.frontend_command(tmp_path) == []  # npm не установлен
+    _front_project_file.write_text("не json", encoding="utf-8")
+    assert testrun.frontend_command(tmp_path) == []
+
+
+def test_файлы_тестов_фронтенда() -> None:
+    mapped = testrun.map_frontend([
+        {"classname": "src\\a.test.js", "name": "x", "outcome": "passed"},
+        {"classname": "", "name": "y", "outcome": "passed"}])
+    assert mapped[0]["file"] == "frontend/src/a.test.js" and mapped[0]["node_id"] == ""
+    assert mapped[1]["file"] == ""
+
+
+def test_настройка_фронтенда(tmp_path: Path) -> None:
+    run = _runner(tmp_path)
+    assert run.config()["frontend_command"] is None  # по умолчанию — автоопределение
+    saved = run.save_config({"frontend_command": "npm\n--prefix\nfrontend\ntest"})
+    assert saved["frontend_command"] == ["npm", "--prefix", "frontend", "test"]
+    assert run.config()["frontend_command"] == ["npm", "--prefix", "frontend", "test"]
+    assert run.save_config({"enabled": True})["frontend_command"] == [
+        "npm", "--prefix", "frontend", "test"]  # прежняя настройка не теряется
+    assert run.save_config({"frontend_command": []})["frontend_command"] == []
+    assert run.parts()[0]["name"] == "backend" and len(run.parts()) == 1  # [] — не запускать
+    with pytest.raises(MetadataError):
+        run.save_config({"frontend_command": ["", "x"]})
+
+
+def test_прогон_бэкенда_и_фронтенда_складывается(tmp_path: Path) -> None:
+    run = _runner(tmp_path)
+    run.save_config({"command": _writer(JUNIT), "frontend_command": _writer(VITEST)})
+    assert [p["name"] for p in run.parts()] == ["backend", "frontend"]
+    run._run()
+    last = run.last()
+    assert last["state"] == "done" and (last["total"], last["passed"]) == (7, 3)
+    assert (last["failed"], last["errors"], last["skipped"]) == (2, 1, 1)
+    by_part = {f["name"]: f for f in last["failures"]}
+    assert by_part["test_method"]["part"] == "backend"
+    assert by_part["Card > clicks"]["part"] == "frontend"
+    assert by_part["Card > clicks"]["file"] == "frontend/src/blocks/Card.test.js"
+    assert [(p["name"], p["total"], p["failed"]) for p in last["parts"]] == [
+        ("backend", 5, 1), ("frontend", 2, 1)]
+    assert run.public()["parts"] == last["parts"]
+
+
+def test_не_запустившийся_фронтенд_виден_как_ошибка(tmp_path: Path) -> None:
+    run = _runner(tmp_path)
+    run.save_config({"command": _writer(JUNIT), "frontend_command": ["нет-такого-xyz", "{junit}"]})
+    run._run()
+    last = run.last()
+    assert last["state"] == "done" and last["errors"] == 2  # error в бэкенде + фронтенд не запустился
+    broken = [f for f in last["failures"] if f["part"] == "frontend"]
+    assert broken and "не запустились" in broken[0]["name"] and "Не удалось" in broken[0]["message"]
+
+
+def test_обе_части_не_запустились_одна_ошибка(tmp_path: Path) -> None:
+    run = _runner(tmp_path)
+    run.save_config({"command": _script("raise SystemExit(2)"),
+                     "frontend_command": _script("raise SystemExit(3)")})
+    run._run()
+    last = run.last()
+    assert last["state"] == "error"
+    assert "backend:" in last["message"] and "frontend:" in last["message"]
+
+
 # --------------------------------------------------------------------- CLI
 
 

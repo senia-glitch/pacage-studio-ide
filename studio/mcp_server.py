@@ -80,6 +80,7 @@ def _front_node(graph: dict, node_id: str) -> dict:
                 "route": page.get("route") or "", "planned": bool(page.get("planned")),
                 "description": page.get("description") or "",
                 "acceptance": page.get("acceptance") or [], "calls": page.get("calls") or [],
+                "calls_in_code": page.get("inferred_calls") or [],
                 "file": page.get("file") or "",
                 "blocks": [
                     {"id": b.get("id"), "name": b.get("name"), "planned": bool(b.get("planned"))}
@@ -93,6 +94,7 @@ def _front_node(graph: dict, node_id: str) -> dict:
                     "page": page.get("name"), "planned": bool(block.get("planned")),
                     "description": block.get("description") or "",
                     "acceptance": block.get("acceptance") or [], "calls": block.get("calls") or [],
+                    "calls_in_code": block.get("inferred_calls") or [],
                     "file": block.get("file") or "",
                 }
     raise StudioError(
@@ -577,6 +579,7 @@ def create_server(session: Session | None = None):
             "errors": data.get("errors", 0),
             "skipped": data.get("skipped", 0),
             "failures": (data.get("failures") or [])[:20],
+            "parts": data.get("parts") or [],
             "failing_plans": data.get("plans") or {},
             "message": data.get("message") or "",
         }

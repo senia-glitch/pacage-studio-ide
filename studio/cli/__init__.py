@@ -446,6 +446,12 @@ def cmd_test(args) -> int:
                 f"ошибок {result.get('errors', 0)}, пропущено {result.get('skipped', 0)} "
                 f"за {result.get('duration', 0)} с"
             )
+            for part in result.get("parts") or []:
+                print(
+                    f"  {part['name']}: "
+                    + (f"прошло {part.get('passed', 0)} из {part.get('total', 0)}"
+                       if part.get("state") == "done" else "не запустились")
+                )
             for item in (result.get("failures") or [])[:20]:
                 note = (item["message"].splitlines() or [""])[0][:120]
                 print(f"  ✗ {item['file'] or '?'}::{item['name']} — {note}")

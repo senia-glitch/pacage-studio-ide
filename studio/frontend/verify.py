@@ -49,6 +49,18 @@ def _link_problems(task: dict, links: dict | None) -> list[str]:
     ]
 
 
+def _code_note(task: dict, item: dict | None) -> str:
+    """Заметка: объявленный вызов не найден в коде узла (поиск по тексту, не приговор)."""
+    declared = list(task.get("calls") or [])
+    if item is None or not declared:
+        return ""
+    found = set(item.get("inferred_calls") or [])
+    absent = [call for call in declared if call not in found]
+    if not absent:
+        return ""
+    return f"; вызов {', '.join(absent)} в коде не найден (поиск по тексту)"
+
+
 def _result(task: dict, status: str, message: str) -> dict:
     return {
         "number": task.get("number"),
@@ -75,7 +87,7 @@ def _verify_page(task: dict, front: dict, links: dict | None) -> dict:
     problems += _link_problems(task, links)
     if problems:
         return _result(task, STATUS_PARTIAL, "; ".join(problems))
-    return _result(task, STATUS_DONE, "страница есть в коде")
+    return _result(task, STATUS_DONE, "страница есть в коде" + _code_note(task, page))
 
 
 def _page_of_block(task: dict, front: dict) -> dict | None:
@@ -90,14 +102,17 @@ def _verify_block(task: dict, front: dict, links: dict | None) -> dict:
     page = _page_of_block(task, front)
     if page is None:
         return _result(task, STATUS_NOT_DONE, "страницы блока в коде нет")
-    if not any(block.get("name") == task.get("name") for block in _fact_blocks(page)):
+    block = next(
+        (b for b in _fact_blocks(page) if b.get("name") == task.get("name")), None
+    )
+    if block is None:
         return _result(
             task, STATUS_NOT_DONE, f"компонент {task.get('name')} не используется на странице"
         )
     problems = _link_problems(task, links)
     if problems:
         return _result(task, STATUS_PARTIAL, "; ".join(problems))
-    return _result(task, STATUS_DONE, "блок есть на странице")
+    return _result(task, STATUS_DONE, "блок есть на странице" + _code_note(task, block))
 
 
 def _verify_block_deletion(task: dict, front: dict) -> dict:

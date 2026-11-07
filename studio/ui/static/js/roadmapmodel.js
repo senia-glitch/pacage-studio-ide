@@ -130,9 +130,15 @@ export function testsView(tests) {
   }
   const bad = (Number(tests.failed) || 0) + (Number(tests.errors) || 0);
   const skipped = Number(tests.skipped) ? `, пропущено ${tests.skipped}` : "";
+  const names = {backend: "бэкенд", frontend: "фронтенд"};
+  const parts = Array.isArray(tests.parts) && tests.parts.length > 1
+    ? " (" + tests.parts.map((p) => p.state === "done"
+      ? `${names[p.name] || p.name}: ${p.passed || 0} из ${p.total || 0}`
+      : `${names[p.name] || p.name}: не запустились`).join("; ") + ")"
+    : "";
   return {
     tone: bad ? "bad" : "ok",
-    text: `Тесты проекта: прошло ${tests.passed || 0} из ${tests.total || 0}` + (bad ? `, упало ${bad}` : "") + skipped,
+    text: `Тесты проекта: прошло ${tests.passed || 0} из ${tests.total || 0}` + (bad ? `, упало ${bad}` : "") + skipped + parts,
     failures: (tests.failures || []).slice(0, 10),
   };
 }

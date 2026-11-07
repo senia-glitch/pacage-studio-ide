@@ -62,7 +62,7 @@ def test_старые_метаданные_фронтенда_читаются_�
     state = ProjectState(root)
     state.rescan("start")
     links = state.check_front_links(graph)
-    assert links == {"rows": [], "ok": 0, "missing": 0}
+    assert links == {"rows": [], "ok": 0, "missing": 0, "in_code": [], "in_code_missing": 0}
 
 
 def test_старое_тз_фронтенда_без_маркера_даёт_понятную_ошибку_и_пересобирается(

@@ -1,7 +1,9 @@
 """Прогон тестов проекта по кнопке или при отчёте агента (``.studio/last-test-run.json``).
 
 Настройка — ``.studio/tests.json``: ``enabled`` (запускать при отчёте агента; по умолчанию
-выключено), ``command`` (аргументы; ``{junit}`` — путь отчёта JUnit), ``timeout_seconds``.
+выключено), ``command`` (аргументы; ``{junit}`` — путь отчёта JUnit), ``timeout_seconds``,
+``frontend_command`` (тесты фронтенда; не задано — ``npm test`` с отчётом JUnit, если в
+``frontend/package.json`` есть скрипт ``test``; пустой список — не запускать).
 Вручную тесты запускает человек кнопкой «Запустить тесты» (агенту этот маршрут закрыт).
 """
 
@@ -24,6 +26,7 @@ CONFIG_FILE = "tests.json"
 RESULT_FILE = "last-test-run.json"
 LOG_FILE = "test-run.log"
 JUNIT_FILE = "tmp/junit.xml"
+FRONT_JUNIT_FILE = "tmp/junit-frontend.xml"
 
 
 def _now() -> str:
@@ -36,6 +39,45 @@ def _valid_seconds(value) -> bool:
         and not isinstance(value, bool)
         and 5 <= value <= testrun.MAX_TIMEOUT
     )
+
+
+def _valid_command(value) -> bool:
+    return isinstance(value, list) and bool(value) and all(isinstance(i, str) and i for i in value)
+
+
+def _lines(value) -> list:
+    """Команда из строки (по аргументу на строку) или списка."""
+    if isinstance(value, str):
+        return [line.strip() for line in value.splitlines() if line.strip()]
+    return value if isinstance(value, list) else []
+
+
+def _merge(parts: list[dict]) -> dict:
+    """Итог по частям (бэкенд, фронтенд): сумма счётчиков; не запустившаяся часть — ошибка."""
+    done = [p for p in parts if p.get("state") == "done"]
+    if not done:
+        first = parts[0] if parts else {"message": "Нечего запускать"}
+        more = [f"{p['name']}: {p.get('message', '')}" for p in parts] if len(parts) > 1 else []
+        result = {"state": "error", "message": "\n".join(more) or first.get("message", "")}
+        if "exit_code" in first:
+            result["exit_code"] = first["exit_code"]
+        return result
+    total = {key: sum(p.get(key, 0) for p in done)
+             for key in ("total", "passed", "failed", "errors", "skipped")}
+    failures = [{**f, "part": p["name"]} if len(parts) > 1 else f
+                for p in done for f in p.get("failures") or []]
+    for p in parts:
+        if p.get("state") != "done":
+            total["errors"] += 1
+            failures.append({"name": f"тесты ({p['name']}) не запустились", "file": "",
+                             "node_id": "", "outcome": "error", "message": p.get("message", ""),
+                             "part": p["name"]})
+    result = {"state": "done", "exit_code": max(p.get("exit_code", 0) for p in done), **total,
+              "failures": failures[:50]}
+    if len(parts) > 1:
+        keys = ("name", "state", "total", "passed", "failed", "errors", "skipped", "message")
+        result["parts"] = [{k: p[k] for k in keys if k in p} for p in parts]
+    return result
 
 
 class TestRunner:
@@ -61,8 +103,9 @@ class TestRunner:
     def config(self) -> dict:
         data = {
             "enabled": False,
-            "command": testrun.default_command(),
+            "command": testrun.default_command(self.root),
             "timeout_seconds": testrun.DEFAULT_TIMEOUT,
+            "frontend_command": None,
         }
         try:
             raw = json.loads((self._dir / CONFIG_FILE).read_text(encoding="utf-8"))
@@ -72,8 +115,11 @@ class TestRunner:
             return data
         data["enabled"] = raw.get("enabled") is True
         command = raw.get("command")
-        if isinstance(command, list) and command and all(isinstance(i, str) and i for i in command):
+        if _valid_command(command):
             data["command"] = list(command)
+        front = raw.get("frontend_command")
+        if front == [] or _valid_command(front):
+            data["frontend_command"] = list(front)
         if _valid_seconds(raw.get("timeout_seconds")):
             data["timeout_seconds"] = raw["timeout_seconds"]
         return data
@@ -81,15 +127,11 @@ class TestRunner:
     def save_config(self, data: dict) -> dict:
         current = self.config()
         enabled = data.get("enabled", current["enabled"])
-        command = data.get("command", current["command"])
+        command = _lines(data.get("command", current["command"]))
         seconds = data.get("timeout_seconds", current["timeout_seconds"])
         if not isinstance(enabled, bool):
             raise MetadataError("invalid_input", "enabled: true или false")
-        if isinstance(command, str):
-            command = [line.strip() for line in command.splitlines() if line.strip()]
-        if not isinstance(command, list) or not command or not all(
-            isinstance(i, str) and i.strip() for i in command
-        ):
+        if not command or not all(isinstance(i, str) and i.strip() for i in command):
             raise MetadataError("invalid_input", "command: список аргументов, первый — программа")
         if not _valid_seconds(seconds):
             raise MetadataError(
@@ -100,11 +142,28 @@ class TestRunner:
             "command": [i.strip() for i in command],
             "timeout_seconds": seconds,
         }
+        front = data.get("frontend_command", current["frontend_command"])
+        if front is not None:
+            front = _lines(front)
+            if not all(isinstance(i, str) and i.strip() for i in front):
+                raise MetadataError("invalid_input", "frontend_command: список аргументов")
+            payload["frontend_command"] = [i.strip() for i in front]
         self._dir.mkdir(parents=True, exist_ok=True)
         text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
         if not atomic_write(self._dir / CONFIG_FILE, text):
             raise MetadataError("not_writable", "Не удалось сохранить настройку тестов")
         return payload
+
+    def parts(self) -> list[dict]:
+        """Что запускать: бэкенд всегда, фронтенд — по настройке или если он найден в проекте."""
+        config = self.config()
+        found = [{"name": "backend", "command": config["command"], "junit": JUNIT_FILE}]
+        front = config["frontend_command"]
+        if front is None:
+            front = testrun.frontend_command(self.root)
+        if front:
+            found.append({"name": "frontend", "command": front, "junit": FRONT_JUNIT_FILE})
+        return found
 
     # ----------------------------------------------------------------------- запуск
 
@@ -132,25 +191,37 @@ class TestRunner:
             with contextlib.suppress(OSError):
                 proc.kill()
 
-    def _argv(self) -> list[str]:
-        junit = self._dir / JUNIT_FILE
-        junit.parent.mkdir(parents=True, exist_ok=True)
-        with contextlib.suppress(OSError):
-            junit.unlink()
-        return [
-            item.replace(testrun.JUNIT_PLACEHOLDER, str(junit)) for item in self.config()["command"]
-        ]
-
     def _run(self) -> None:
         started = _now()
         began = time.monotonic()
-        command = self.config()["command"]
-        log = self._dir / LOG_FILE
-        result: dict = {"started_at": started, "command": command}
+        config = self.config()
+        result: dict = {"started_at": started, "command": config["command"]}
+        parts: list[dict] = []
+        for part in self.parts():
+            if self._cancel:
+                break
+            parts.append(self._run_part(part, config["timeout_seconds"]))
+        if self._cancel:
+            result.update(state="error", message="Прогон остановлен")
+        else:
+            result.update(_merge(parts))
+        result["finished_at"] = _now()
+        result["duration"] = round(time.monotonic() - began, 1)
+        self._save_result(result)
+        with self._lock:
+            self.state = "idle"
+
+    def _run_part(self, part: dict, seconds: int) -> dict:
+        junit = self._dir / part["junit"]
+        name = part["name"]
+        log = self._dir / (LOG_FILE if name == "backend" else f"test-run-{name}.log")
+        out: dict = {"name": name}
         try:
-            argv = self._argv()
-            env = {**os.environ, "STUDIO_TEST_RUN": "1"}
-            self._dir.mkdir(parents=True, exist_ok=True)
+            junit.parent.mkdir(parents=True, exist_ok=True)
+            with contextlib.suppress(OSError):
+                junit.unlink()
+            argv = [item.replace(testrun.JUNIT_PLACEHOLDER, str(junit)) for item in part["command"]]
+            env = {"PYTHONIOENCODING": "utf-8", **os.environ, "STUDIO_TEST_RUN": "1", "CI": "1"}
             with open(log, "wb") as stream:
                 proc = subprocess.Popen(  # noqa: S603 — команду задал человек
                     argv, cwd=self.root, env=env, stdout=stream, stderr=subprocess.STDOUT,
@@ -158,36 +229,33 @@ class TestRunner:
                 )
                 with self._lock:
                     self._proc = proc
-                limit = began + self.config()["timeout_seconds"]
+                limit = time.monotonic() + seconds
                 while proc.poll() is None:
                     if self._cancel:
                         proc.kill()
-                        result.update(state="error", message="Прогон остановлен")
-                        break
+                        return {**out, "state": "error", "message": "Прогон остановлен"}
                     if time.monotonic() > limit:
                         proc.kill()
-                        result.update(state="error", message="Превышено время прогона тестов")
-                        break
+                        return {**out, "state": "error",
+                                "message": "Превышено время прогона тестов"}
                     time.sleep(0.4)
-            if "state" not in result:
-                result.update(self._collect(proc.returncode or 0, log))
+            out.update(self._collect(name, proc.returncode or 0, junit, log))
         except (OSError, ValueError) as exc:
-            result.update(state="error", message=f"Не удалось запустить тесты: {exc}")
+            out.update(state="error", message=f"Не удалось запустить тесты: {exc}")
         finally:
             with self._lock:
                 self._proc = None
-        result["finished_at"] = _now()
-        result["duration"] = round(time.monotonic() - began, 1)
-        self._save_result(result)
-        with self._lock:
-            self.state = "idle"
+        return out
 
-    def _collect(self, code: int, log: Path) -> dict:
-        junit = self._dir / JUNIT_FILE
+    def _collect(self, name: str, code: int, junit: Path, log: Path) -> dict:
         if not junit.is_file():
             tail = self._tail(log)
             return {"state": "error", "exit_code": code, "message": tail or f"Код выхода {code}"}
-        tests = testrun.map_to_nodes(testrun.parse_junit(junit), self._nodes())
+        tests = testrun.parse_junit(junit)
+        if name == "frontend":
+            tests = testrun.map_frontend(tests)
+        else:
+            tests = testrun.map_to_nodes(tests, self._nodes())
         return {"state": "done", "exit_code": code, **testrun.summarize(tests)}
 
     def _nodes(self):
@@ -220,7 +288,7 @@ class TestRunner:
         """Состояние и итог последнего прогона (без полной команды): для интерфейса и агента."""
         last = self.last() or {}
         keep = ("state", "started_at", "finished_at", "duration", "total", "passed", "failed",
-                "errors", "skipped", "failures", "exit_code", "message")
+                "errors", "skipped", "failures", "exit_code", "message", "parts")
         summary = {k: last[k] for k in keep if k in last}
         summary["state"] = "running" if self.state == "running" else summary.get("state", "none")
         summary["enabled"] = bool(self.config()["enabled"])

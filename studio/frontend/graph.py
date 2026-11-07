@@ -16,6 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from studio.frontend import scan_frontend
+from studio.frontend.infer import infer_calls
 from studio.frontend.meta import load_meta
 
 
@@ -176,6 +177,12 @@ def build_front_graph(project_root: str | Path) -> dict:
                 "created_by": block_data.get("created_by") or "",
                 "rules": [dict(rule) for rule in block_data.get("rules") or []],
             })
+
+    found = infer_calls(root / scan.get("root", "frontend"), scan.get("files", []))
+    for page in pages:
+        for item in (page, *(page.get("blocks") or [])):
+            if item.get("file") and not item.get("planned"):
+                item["inferred_calls"] = found.get(item["file"], [])
 
     graph = {
         "present": scan.get("present", False),

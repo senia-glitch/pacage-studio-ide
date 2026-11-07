@@ -9,7 +9,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+import shutil
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -20,9 +22,24 @@ JUNIT_PLACEHOLDER = "{junit}"
 _PARAMS_RE = re.compile(r"\[.*\]$")
 
 
-def default_command() -> list[str]:
+def project_python(root: Path | None) -> str:
+    """Python проекта: из его виртуального окружения (``.venv``, ``venv``), иначе — студии.
+
+    Тесты проекта нужно гонять в его окружении: в окружении студии нет ни зависимостей проекта,
+    ни самого проекта, и сборка тестов падает.
+    """
+    if root is not None:
+        for folder in (".venv", "venv"):
+            for rel in ("Scripts/python.exe", "bin/python"):
+                candidate = Path(root) / folder / rel
+                if candidate.is_file():
+                    return str(candidate)
+    return sys.executable
+
+
+def default_command(root: Path | None = None) -> list[str]:
     return [
-        sys.executable,
+        project_python(root),
         "-m",
         "pytest",
         "-q",
@@ -31,6 +48,36 @@ def default_command() -> list[str]:
         "no:cacheprovider",
         f"--junitxml={JUNIT_PLACEHOLDER}",
     ]
+
+
+def frontend_command(root: Path) -> list[str]:
+    """Команда тестов фронтенда: ``npm test`` с отчётом JUnit (Vitest), если он есть в проекте.
+
+    Пусто — у проекта нет ``frontend/package.json`` со скриптом ``test`` (или нет npm).
+    """
+    try:
+        package = json.loads((Path(root) / "frontend" / "package.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    scripts = package.get("scripts") if isinstance(package, dict) else None
+    if not isinstance(scripts, dict) or not isinstance(scripts.get("test"), str):
+        return []
+    npm = shutil.which("npm")
+    if npm is None:
+        return []
+    return [
+        npm, "--prefix", "frontend", "test", "--",
+        "--reporter=junit", f"--outputFile={JUNIT_PLACEHOLDER}",
+    ]
+
+
+def map_frontend(tests: list[dict]) -> list[dict]:
+    """Тесты фронтенда: ``classname`` у Vitest — путь файла относительно ``frontend/``."""
+    out = []
+    for test in tests:
+        name = test["classname"].replace("\\", "/").lstrip("./")
+        out.append({**test, "file": f"frontend/{name}" if name else "", "node_id": ""})
+    return out
 
 
 def parse_junit(path: Path) -> list[dict]:
@@ -151,6 +198,9 @@ __all__ = [
     "MAX_TIMEOUT",
     "default_command",
     "failing_plans",
+    "frontend_command",
+    "map_frontend",
+    "project_python",
     "map_to_nodes",
     "parse_junit",
     "summarize",

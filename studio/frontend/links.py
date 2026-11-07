@@ -1,14 +1,18 @@
 """Связи «узел фронтенда → эндпоинт бэкенда».
 
 Связь — это объявление на странице или блоке: поле ``calls`` со строками вида
-``GET /lessons/{id}``. Сканер кода вызовы не ищет (это эвристика); студия только
-хранит объявленное и сверяет его с графом бэкенда, чтобы показать, какого
-эндпоинта ещё нет. Путь можно писать с префиксом API или без него.
+``GET /lessons/{id}``. Студия хранит объявленное и сверяет его с графом бэкенда, чтобы
+показать, какого эндпоинта ещё нет. Отдельно (``studio.frontend.infer``) по тексту кода
+находятся вызовы, которые страница или блок реально делают через composables и действия
+(``inferred_calls``); это эвристика, поэтому объявленное и найденное не смешиваются.
+Путь можно писать с префиксом API или без него.
 """
 
 from __future__ import annotations
 
 import re
+
+from studio.frontend.contract import describe, endpoint_contract
 
 METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 _CALL_RE = re.compile(r"^\s*([A-Za-z]+)\s+(/\S*)\s*$")
@@ -84,6 +88,16 @@ def endpoint_index(backend_graph, api_prefix: str = "") -> dict[str, str]:
     return index
 
 
+def _iter_inferred(front_graph: dict):
+    """Вызовы, найденные в коде, но не объявленные в ``calls`` узла."""
+    for page in front_graph.get("pages") or []:
+        for item in (page, *(page.get("blocks") or [])):
+            declared = set(item.get("calls") or [])
+            for call in item.get("inferred_calls") or []:
+                if call not in declared:
+                    yield page, item, call
+
+
 def _iter_calls(front_graph: dict):
     for page in front_graph.get("pages") or []:
         for item in (page, *(page.get("blocks") or [])):
@@ -94,27 +108,42 @@ def _iter_calls(front_graph: dict):
 def check_links(front_graph: dict, backend_graph, api_prefix: str = "") -> dict:
     """Сверить объявленные вызовы с эндпоинтами бэкенда.
 
-    Ответ: ``rows`` (узел, вызов, статус ok/missing, id эндпоинта) и счётчики.
+    Ответ: ``rows`` (узел, вызов, статус ok/missing, id эндпоинта, ``contract`` — запрос и ответ
+    эндпоинта по коду бэкенда) и счётчики.
     """
     index = endpoint_index(backend_graph, api_prefix)
-    rows = []
-    for page, item, call in _iter_calls(front_graph):
+    contracts: dict[str, str] = {}
+
+    def contract_of(endpoint: str) -> str:
+        if endpoint and endpoint not in contracts:
+            contracts[endpoint] = describe(endpoint_contract(backend_graph, endpoint))
+        return contracts.get(endpoint, "")
+
+    def row_of(page: dict, item: dict, call: str) -> dict:
         method, _, path = call.partition(" ")
         endpoint = next(
             (index[key] for key in _keys(method, path, api_prefix) if key in index), ""
         )
-        rows.append(
-            {
-                "node": item["id"],
-                "name": item.get("name") or item["id"],
-                "page": page.get("name") or page["id"],
-                "call": call,
-                "endpoint": endpoint,
-                "status": "ok" if endpoint else "missing",
-            }
-        )
+        return {
+            "contract": contract_of(endpoint),
+            "node": item["id"],
+            "name": item.get("name") or item["id"],
+            "page": page.get("name") or page["id"],
+            "call": call,
+            "endpoint": endpoint,
+            "status": "ok" if endpoint else "missing",
+        }
+
+    rows = [row_of(*parts) for parts in _iter_calls(front_graph)]
+    found = [row_of(*parts) for parts in _iter_inferred(front_graph)]
     missing = sum(1 for row in rows if row["status"] == "missing")
-    return {"rows": rows, "ok": len(rows) - missing, "missing": missing}
+    return {
+        "rows": rows,
+        "ok": len(rows) - missing,
+        "missing": missing,
+        "in_code": found,
+        "in_code_missing": sum(1 for row in found if row["status"] == "missing"),
+    }
 
 
 __all__ = [

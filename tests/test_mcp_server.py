@@ -323,11 +323,13 @@ def test_doctor_считает_ошибки_и_строгий_режим():
 def test_tests_отдаёт_итог_независимого_прогона():
     done = {"state": "done", "total": 5, "passed": 3, "failed": 1, "errors": 1, "skipped": 0,
             "finished_at": "2026-01-01T10:00:00", "plans": {"list_x": ["test_a"]},
+            "parts": [{"name": "backend", "state": "done"}],
             "failures": [{"name": "test_a", "file": "tests/test_x.py", "message": "assert"}] * 30}
     tools, _ = _tools({("GET", "/api/tests"): [done, {"state": "none"}]})
     result = tools["studio_tests"]()
     assert (result["total"], result["passed"], result["failed"], result["errors"]) == (5, 3, 1, 1)
     assert result["failing_plans"] == {"list_x": ["test_a"]} and len(result["failures"]) == 20
+    assert result["parts"] == [{"name": "backend", "state": "done"}]
     empty = tools["studio_tests"]()
     assert empty["state"] == "none" and empty["failures"] == [] and empty["total"] == 0
 
@@ -366,13 +368,16 @@ def test_ideas_одна_идея_целиком_и_graph_с_эндпоинтам
 
 def test_node_открывает_страницы_и_блоки_фронтенда():
     graph = {"pages": [{"id": "page:home", "name": "home", "route": "/", "calls": ["GET /x"],
+                        "inferred_calls": ["GET /x", "GET /z"],
                         "blocks": [{"id": "block:home:Hero", "name": "Hero", "planned": True,
-                                    "calls": ["GET /y"]}]}]}
+                                    "inferred_calls": ["GET /w"], "calls": ["GET /y"]}]}]}
     tools, _ = _tools({("GET", "/api/frontend/graph"): graph, ("GET", "/api/graph"): {"nodes": []}})
     page = tools["studio_node"]("page:home")
     assert page["kind"] == "page" and page["route"] == "/" and page["blocks"][0]["name"] == "Hero"
+    assert page["calls_in_code"] == ["GET /x", "GET /z"]
     block = tools["studio_node"]("block:home:Hero")
     assert block["kind"] == "block" and block["page"] == "home" and block["planned"] is True
+    assert block["calls_in_code"] == ["GET /w"]
     with pytest.raises(Exception, match="studio_frontend"):
         tools["studio_node"]("page:нет")
     with pytest.raises(Exception, match="studio_frontend"):

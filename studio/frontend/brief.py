@@ -111,6 +111,15 @@ def _calls_line(item: dict, prefix: str = "") -> str:
     return f"{prefix}Вызывает эндпоинты: {', '.join(calls)}" if calls else ""
 
 
+def _found_line(item: dict, prefix: str = "") -> str:
+    """Строка «В коде найдены вызовы: …» (по тексту кода, без объявленных); иначе пусто."""
+    declared = set(item.get("calls") or [])
+    found = [call for call in item.get("inferred_calls") or [] if call not in declared]
+    if not found:
+        return ""
+    return f"{prefix}В коде уже есть вызовы (по тексту, может быть неполно): {', '.join(found)}"
+
+
 def _plan_tasks(graph: dict, pages: list[dict]) -> tuple[list[str], int, list[dict]]:
     """Плановые задачи: не готовые правила, плановые узлы, удаления.
 
@@ -236,12 +245,16 @@ def _branch_outline(graph: dict, pages: list[dict]) -> list[str]:
             )
             if page.get("calls"):
                 lines.append("  " + _calls_line(page, "- "))
+            if _found_line(page):
+                lines.append("  " + _found_line(page, "- "))
             for block in page.get("blocks") or []:
                 block_mark = "[ПЛАН] " if block.get("planned") else ""
                 file = block.get("file") or "файл после реализации"
                 lines.append(f"  - {block_mark}блок `{block.get('name')}` — `{file}`")
                 if block.get("calls"):
                     lines.append("    " + _calls_line(block, "- "))
+                if _found_line(block):
+                    lines.append("    " + _found_line(block, "- "))
                 for rule in block.get("rules") or []:
                     state = "готово" if rule.get("done") else "не готово"
                     lines.append(f"    - правило `{rule.get('name')}` — {state}")
@@ -291,8 +304,10 @@ def load_front_brief(project_root: str | Path, target: str | None = None) -> dic
 def _link_lines(pages: list[dict], links: dict | None) -> list[str]:
     """Объявленные вызовы эндпоинтов в области ТЗ и результат сверки с бэкендом."""
     status = {}
+    contract = {}
     for row in (links or {}).get("rows") or []:
         status[(row["node"], row["call"])] = row["status"]
+        contract[(row["node"], row["call"])] = row.get("contract") or ""
     lines: list[str] = []
     for page in pages:
         owners = [(page, f"страница «{page.get('name')}»")]
@@ -310,6 +325,9 @@ def _link_lines(pages: list[dict], links: dict | None) -> list[str]:
                 else:
                     note = "не проверено"
                 lines.append(f"- {where} → `{call}` — {note}")
+                if contract.get((item["id"], call)):
+                    text = contract[(item["id"], call)]
+                    lines.append(f"  - контракт эндпоинта (по коду бэкенда): {text}")
     return lines
 
 

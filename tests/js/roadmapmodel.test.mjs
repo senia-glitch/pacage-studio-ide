@@ -17,6 +17,7 @@ import {
   swipeDecision,
   swipeProgress,
   tally,
+  testsView,
 } from "../../studio/ui/static/js/roadmapmodel.js";
 
 test("swipeDecision: вверх принимает, вниз отклоняет, короткий жест возвращает", () => {
@@ -166,4 +167,26 @@ test("runnerNote: состояние автозапуска на этапах а
   assert.equal(runnerNote({...base, runner: {enabled: false, state: "running"}}), null);
   assert.equal(runnerNote({...base, runner: {enabled: true, state: "idle"}}), null);
   assert.equal(runnerNote(null), null);
+});
+
+test("testsView: итог независимого прогона, части бэкенда и фронтенда", () => {
+  assert.equal(testsView(null).tone, "none");
+  assert.equal(testsView({state: "running"}).tone, "run");
+  const broken = testsView({state: "error", message: "a\nнет pytest"});
+  assert.equal(broken.tone, "bad");
+  assert.match(broken.text, /нет pytest$/);
+  const ok = testsView({state: "done", total: 3, passed: 3, failed: 0, errors: 0});
+  assert.equal(ok.tone, "ok");
+  assert.equal(ok.text, "Тесты проекта: прошло 3 из 3");
+  const both = testsView({
+    state: "done", total: 7, passed: 5, failed: 1, errors: 1, skipped: 0,
+    failures: [{name: "x"}],
+    parts: [{name: "backend", state: "done", passed: 3, total: 5},
+      {name: "frontend", state: "done", passed: 2, total: 2}],
+  });
+  assert.equal(both.tone, "bad");
+  assert.match(both.text, /упало 2 \(бэкенд: 3 из 5; фронтенд: 2 из 2\)$/);
+  const half = testsView({state: "done", total: 5, passed: 5, errors: 1,
+    parts: [{name: "backend", state: "done", passed: 5, total: 5}, {name: "frontend", state: "error"}]});
+  assert.match(half.text, /фронтенд: не запустились/);
 });
