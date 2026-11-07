@@ -686,6 +686,23 @@ def create_server(session: Session | None = None):
             ],
         }
 
+    @tool
+    def studio_ask(question: str, options: list[str] | None = None) -> dict:
+        """Спросить человека, когда без его ответа продолжать нельзя.
+
+        Если тебя запустила студия: после вызова заверши работу. Студия покажет вопрос
+        человеку и сама запустит тебя снова (с тем же контекстом) с его ответом. Не задавай
+        вопросов, на которые можно ответить, изучив проект. options — готовые варианты ответа.
+        """
+        client = session.need()
+        stage = (client.get("/api/workflow") or {}).get("stage")
+        mode = "implement" if stage in ("select", "implement", "report") else "plan"
+        client.post("/api/agent/ask", {"question": question, "options": options or []}, mode=mode)
+        return {
+            "asked": True,
+            "next": "Вопрос у человека. Заверши работу: студия вернёт тебя с ответом.",
+        }
+
     server.studio_tools = registry
     return server
 

@@ -13,7 +13,7 @@ export function blockFrom(raw,index){
 
 export function pageFrom(raw,index){
   const source=raw.source&&typeof raw.source==="object"&&!Array.isArray(raw.source)?raw.source:{...raw};
-  return {id:text(raw.id)||id(),source,title:text(raw.title||raw.name)||`Страница ${index+1}`,name:text(raw.name),description:text(raw.description),acceptance:strings(raw.acceptance),domain:text(raw.domain),route:text(raw.route),calls:strings(raw.calls),blocks:(Array.isArray(raw.blocks)?raw.blocks:[]).map(blockFrom),mapPageId:text(raw.mapPageId),decision:text(raw.decision)};
+  return {id:text(raw.id)||id(),source,title:text(raw.title||raw.name)||`Страница ${index+1}`,name:text(raw.name),description:text(raw.description),acceptance:strings(raw.acceptance),domain:text(raw.domain),route:text(raw.route),calls:strings(raw.calls),blocks:(Array.isArray(raw.blocks)?raw.blocks:[]).map(blockFrom),mapPageId:text(raw.mapPageId),decision:text(raw.decision),implemented:raw.implemented===true};
 }
 
 export function pagesFrom(list){
@@ -32,3 +32,43 @@ export function railCounts(idea){
 }
 
 export function railLabel(idea){return railCounts(idea)+(idea.created_by==="agent"?" · от агента":"")}
+
+/* ---------- группы идей в левой панели ---------- */
+
+/* Карточка (сценарий или страница) реализована: её пометили при приёмке или узел на карте уже не плановый. */
+export function isCardDone(card,findNode){
+  if(!card)return false;
+  if(card.implemented===true)return true;
+  const node=card.mapNodeId&&findNode?findNode(card.mapNodeId):null;
+  return !!(node&&node.planned===false);
+}
+
+export function ideaCards(idea){return [...(idea.scenarios||[]),...(idea.pages||[])]}
+
+/* Идея реализована, когда в ней есть карточки и все они реализованы. */
+export function isIdeaDone(idea,findNode){
+  const cards=ideaCards(idea);
+  return cards.length>0&&cards.every(card=>isCardDone(card,findNode));
+}
+
+/* Идея попадает в «Backend» (сценарии или пустая) и/или «Frontend» (страницы); реализованные — отдельно, в конце. */
+export function groupIdeas(ideas,findNode){
+  const groups={backend:[],frontend:[],done:[]};
+  for(const idea of ideas){
+    if(isIdeaDone(idea,findNode)){groups.done.push(idea);continue}
+    const hasPages=(idea.pages||[]).length>0,hasScenarios=(idea.scenarios||[]).length>0;
+    if(hasScenarios||!hasPages)groups.backend.push(idea);
+    if(hasPages)groups.frontend.push(idea);
+  }
+  return groups;
+}
+
+/* Карточку принёс агент: у неё есть решение цепочки или идея создана агентом. */
+export function isAgentCard(card,idea){
+  return !!(card&&card.decision)||!!(idea&&idea.created_by==="agent");
+}
+
+/* Жест над карточкой: вверх — на карту, вниз — удалить (иначе возвращается на место). */
+export function swipeAction(verdict){
+  return verdict==="accepted"?"to-map":verdict==="rejected"?"delete":null;
+}

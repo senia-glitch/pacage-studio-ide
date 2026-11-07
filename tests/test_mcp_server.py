@@ -391,7 +391,7 @@ def test_инструкции_и_набор_инструментов():
             "studio_brief", "studio_verify", "studio_report"} <= names
     # прямых записей в карту у агента нет: всё идёт через карточки и валидацию человека
     assert not {"studio_node_add", "studio_page_add", "studio_block_add"} & names
-    assert len(names) == 16
+    assert len(names) == 17
     # клиент получает руководство как инструкции MCP: один источник, без HTTP
     assert getattr(server, "instructions", None) == load_guide()
 

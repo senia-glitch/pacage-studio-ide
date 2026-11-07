@@ -1,17 +1,23 @@
 import {api} from "./api.js";
-import {$, esc, toast} from "./core.js";
+import {$, esc, setTab, toast} from "./core.js";
 import {
-  agentReady, autoKey, autoOpen, cardsOf, defaultSelection, primaryAction, progressOf,
-  runnerNote, selectionCount, selectionPayload, stageNote, steps, testsView,
+  autoKey, defaultSelection, progressOf,
+  selectionCount, selectionPayload, testsView,
 } from "./roadmapmodel.js";
+import {
+  agentStatus, canRollback, dockActions, dockNote, dockSteps, gitNote,
+} from "./dockmodel.js";
 import {closeSwipe, isSwipeOpen, openSwipe, refreshSwipe} from "./swipeview.js";
 
-/* Дорожная карта: полоса этапов под шапкой и окна, которые человек проходит по цепочке
-   «синхронизация → режим → идеи → валидация → перенос → выбор → реализация → отчёт». */
+/* Окно агента: связь, 7 шагов цепочки («чей ход»), главная кнопка шага и окна выбора задач и отчёта.
+   Разбор карточек идёт свайпом на странице «Генератор идей», подключение — в «Настройках агента». */
 
 const POLL_MS = 4000;
 const OPENED_KEY = "studio:roadmap-opened";
 let flow = null;
+let agent = null; // GET /api/agent/status: связь, состояние запуска, вопрос, git
+let goalDraft = {text: "", skipIdeas: false};
+let answerDraft = "";
 let timer = null;
 let progress = null;
 let busy = false;
@@ -65,141 +71,6 @@ async function post(path, body = {}) {
 async function apply(result) {
   if (result) { flow = result; render(); }
   await refreshRoadmap();
-}
-
-/* --- этап 1: помощь с подключением агента */
-
-function openConnectHelp() {
-  const win = dialog("Подключите AI-агента", `
-    <p>Студия сама сообщает агенту, где она запущена, — копировать токен не нужно.</p>
-    <ol class="rm-steps-list">
-      <li>Один раз подключите MCP-сервер студии клиенту агента:<pre>claude mcp add pacage-studio -- studio mcp</pre></li>
-      <li>Один раз установите руководство в проект: <pre>studio skill --target all</pre></li>
-      <li>Запустите агента в папке этого проекта и попросите: <i>«Работай со студией: вызови studio_connect и studio_workflow»</i>.</li>
-    </ol>
-    <p class="hint">Как только агент обратится к студии, этап «Синхронизация» отметится как выполненный. Агент общается только через MCP; чужой адрес для него закрыт.</p>`);
-  win.button("Строка подключения вручную", () => { win.close(); const manual = $("agentBtn"); if (manual) manual.click(); });
-  win.button("Закрыть", win.close, "primary");
-}
-
-/* --- автозапуск агента по этапам */
-
-async function openRunnerDialog() {
-  let view;
-  try {
-    view = await api("/api/runner");
-    view.tests = await api("/api/tests");
-  } catch (error) { toast(error.message); return; }
-  const win = dialog("Автозапуск агента", `
-    <p>Агент не висит в ожидании: студия сама запускает его на этапах «Идеи агента» и «Реализация», а после
-    выполнения этапа процесс агента завершается. Лимиты не тратятся, пока от агента ничего не нужно.</p>
-    <label class="rm-check"><input type="checkbox" id="rmRunEnabled"${view.enabled ? " checked" : ""}>
-      <span><b>Запускать агента автоматически</b></span></label>
-    <label class="rm-task">Команда (по аргументу на строку; <code>{prompt}</code> — текст запроса агенту)
-      <textarea id="rmRunCommand" rows="9" spellcheck="false">${esc(view.command.join("\n"))}</textarea></label>
-    <label class="rm-task">Предел одного запуска, минут
-      <input id="rmRunTimeout" type="number" min="1" max="240" value="${esc(view.timeout_minutes)}"></label>
-    <p class="rm-warn">Студия запустит эту программу в папке проекта с правами, указанными в команде (по умолчанию —
-    правка файлов и запуск тестов). Включайте, только если доверяете команде. Вывод — в .studio/runner.log.</p>
-    <label class="rm-check"><input type="checkbox" id="rmTestsEnabled"${view.tests && view.tests.config.enabled ? " checked" : ""}>
-      <span><b>Запускать тесты проекта, когда агент прислал отчёт</b>
-      <small>независимая проверка поведения; команда — .studio/tests.json (по умолчанию pytest)</small></span></label>
-    ${view.status && view.status.message ? `<p class="hint">Последний запуск: ${esc(view.status.message.trim().split("\n").pop())}</p>` : ""}`);
-  win.button("Вернуть стандартную команду", () => {
-    win.body.querySelector("#rmRunCommand").value = view.default_command.join("\n");
-  });
-  win.button("Закрыть", win.close);
-  win.button("Сохранить", async () => {
-    const result = await post("/api/runner/config", {
-      enabled: win.body.querySelector("#rmRunEnabled").checked,
-      command: win.body.querySelector("#rmRunCommand").value,
-      timeout_minutes: Number(win.body.querySelector("#rmRunTimeout").value),
-    });
-    if (!result) return;
-    await post("/api/tests/config", {enabled: win.body.querySelector("#rmTestsEnabled").checked});
-    win.close();
-    toast(result.enabled ? "Автозапуск включён: агент запускается по этапам" : "Автозапуск выключен");
-    await refreshRoadmap();
-  }, "primary");
-}
-
-/* --- этап 2: выбор режима */
-
-function openModeDialog() {
-  const connected = agentReady(flow);
-  const win = dialog("С чего начнём?", `
-    <div class="rm-choices">
-      <button type="button" class="rm-choice" data-mode="plan"><b>Планирование</b>
-        <span>Агент придумает идеи и сразу разберёт их на сценарии. Вы свайпом решите, что оставить.</span></button>
-      <button type="button" class="rm-choice" data-mode="implement"><b>Реализация</b>
-        <span>Агент напишет код по тому, что уже запланировано на карте. Вы отметите нужные задачи.</span></button>
-    </div>
-    <label class="rm-task">Что нужно сделать? <span class="hint">(для планирования; необязательно)</span>
-      <textarea id="rmTask" rows="3" placeholder="Например: личный сайт с портфолио, новостями и формой заявок"></textarea></label>
-    ${connected ? "" : '<p class="rm-warn">Агент пока не подключён: он подхватит работу, как только появится.</p>'}`);
-  win.body.querySelectorAll(".rm-choice").forEach((button) => {
-    button.onclick = async () => {
-      const task = win.body.querySelector("#rmTask").value;
-      const mode = button.dataset.mode;
-      win.close();
-      remember(autoKey(flow));
-      await apply(await post("/api/workflow/start", {mode, task: mode === "plan" ? task : ""}));
-    };
-  });
-  win.button("Позже", win.close);
-}
-
-/* --- этап 5: перенос на карту */
-
-async function backToReview() {
-  const result = await post("/api/workflow/stage", {to: "review"});
-  if (!result) return;
-  remember(autoKey(result));
-  await apply(result);
-  void openSwipe({onStage: apply});
-}
-
-async function openConfirm() {
-  let board = null;
-  try { board = await api("/api/ideas"); } catch (error) { toast(error.message); return; }
-  const accepted = cardsOf(board).filter((card) => card.decision === "accepted" && !card.mapped);
-  const rejected = cardsOf(board).filter((card) => card.decision === "rejected").length;
-  if (!accepted.length) {
-    const win = dialog("Ничего не принято", `<p>Все карточки отклонены. Попросите агента о новых идеях или вернитесь к карточкам.</p>`);
-    win.button("К карточкам", () => { win.close(); void backToReview(); });
-    win.button("Попросить новые идеи", async () => { win.close(); await apply(await post("/api/workflow/stage", {to: "ideas"})); }, "primary");
-    return;
-  }
-  const rows = accepted.slice(0, 14).map((card) =>
-    `<li><b>${esc(card.title)}</b> <span class="hint">${esc(card.route || card.slug)}</span></li>`).join("");
-  const more = accepted.length > 14 ? `<li class="hint">…и ещё ${accepted.length - 14}</li>` : "";
-  const win = dialog("Принять все запланированные идеи и их сценарии?", `
-    <p>Принято: <b>${accepted.length}</b> · отклонено: ${rejected}. После «Да» они появятся на карте как планы (латинские имена по slug); отклонённые на карту не попадут.</p>
-    <ul class="rm-list">${rows}${more}</ul>
-    <div id="rmConfirmError" class="rm-error" hidden></div>`);
-  const no = win.button("Нет, вернуться к валидации", () => { win.close(); void backToReview(); });
-  win.button("Да, перенести на карту", async (yes) => {
-    yes.disabled = true;
-    no.disabled = true;
-    yes.textContent = "Переношу…";
-    const result = await post("/api/workflow/transfer");
-    const errors = (result && result.transfer && result.transfer.errors) || [];
-    if (result && !errors.length) {
-      win.close();
-      toast(`Перенесено на карту: сценариев ${result.transfer.plans}, страниц ${result.transfer.pages}`);
-      await apply(result);
-      return;
-    }
-    yes.disabled = false;
-    no.disabled = false;
-    yes.textContent = "Повторить";
-    if (errors.length) {
-      const box = win.body.querySelector("#rmConfirmError");
-      box.hidden = false;
-      box.innerHTML = "<b>Не удалось перенести:</b><ul>" + errors.map((item) => `<li>${esc(item.title)} — ${esc(item.message)}</li>`).join("") + "</ul>Остальное перенесено. Исправьте карточки (вернитесь к валидации) или повторите.";
-    }
-    await refreshRoadmap();
-  }, "primary");
 }
 
 /* --- этап 6: выбор задач на реализацию */
@@ -339,10 +210,9 @@ async function openReport() {
   }
   win.button("Вернуть к выбору задач", async () => { win.close(); await apply(await post("/api/workflow/stage", {to: "select"})); });
   win.button("Закрыть", win.close);
-  win.button("Всё хорошо — начать заново", async () => {
+  win.button("Всё хорошо — принять", async () => {
     win.close();
-    await apply(await post("/api/workflow/finish"));
-    toast("Цикл завершён. Можно начинать заново.");
+    await finishCycle();
   }, "primary");
 }
 
@@ -360,24 +230,96 @@ function confirmManual() {
 
 /* -------------------------------------------------------------- действия */
 
-function run(id) {
-  if (id === "mode") openModeDialog();
-  else if (id === "help") openConnectHelp();
-  else if (id === "review") post("/api/workflow/stage", {to: "review"}).then(apply);
-  else if (id === "swipe") openSwipe({onStage: apply});
-  else if (id === "runner") openRunnerDialog();
-  else if (id === "retry") post("/api/runner/run").then(() => refreshRoadmap());
-  else if (id === "confirm") openConfirm();
-  else if (id === "select") openSelect();
-  else if (id === "manual") confirmManual();
-  else if (id === "report") openReport();
+const COLLAPSE_KEY = "studio:dock-collapsed";
+
+function collapsed() {
+  try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch (_) { return false; }
 }
 
-function stepAction(step) {
-  if (!flow || step.state !== "active") return null;
-  if (step.id === "sync") return "help";
-  const map = {mode: "mode", review: "swipe", confirm: "confirm", select: "select", report: "report"};
-  return map[step.id] || null;
+function setCollapsed(value) {
+  try { localStorage.setItem(COLLAPSE_KEY, value ? "1" : "0"); } catch (_) { /* без хранилища */ }
+}
+
+async function toSelect() {
+  if (flow && flow.stage === "review") {
+    const moved = await post("/api/workflow/stage", {to: "confirm"});
+    if (!moved) return;
+  }
+  const result = await post("/api/workflow/transfer");
+  const errors = (result && result.transfer && result.transfer.errors) || [];
+  if (errors.length) {
+    toast("Не удалось перенести: " + errors.map((item) => `${item.title} — ${item.message}`).join("; "));
+    await refreshRoadmap();
+    return;
+  }
+  await apply(result);
+}
+
+function openRework() {
+  const win = dialog("Вернуть на доработку", `
+    <p>Агент заново возьмёт то же ТЗ и учтёт ваше пожелание. Если оставить пустым, он сам разберёт результаты тестов.</p>
+    <label class="rm-task">Что поправить
+      <textarea id="rmReworkNote" rows="4" placeholder="Например: не хватает проверки пустого запроса"></textarea></label>`);
+  win.button("Отмена", win.close);
+  win.button("Вернуть агенту", async () => {
+    const note = win.body.querySelector("#rmReworkNote").value;
+    win.close();
+    await apply(await post("/api/workflow/rework", {note}));
+  }, "primary");
+}
+
+function openRollback() {
+  const win = dialog("Откатить работу агента?", `
+    <p>Проект вернётся к состоянию до запуска агента: правки агента и созданные им файлы исчезнут.
+    Откат работает только в ветке <code>studio/*</code>; ваши коммиты в других ветках не затрагиваются.</p>`);
+  win.button("Отмена", win.close);
+  win.button("Откатить", async () => {
+    win.close();
+    const result = await post("/api/git/rollback");
+    if (result) toast("Проект возвращён к состоянию до работы агента");
+    await refreshRoadmap();
+  }, "primary");
+}
+
+async function finishCycle() {
+  if (hooks.onAccepted) {
+    try { await hooks.onAccepted(); } catch (_) { /* пометка «реализовано» не должна мешать приёмке */ }
+  }
+  await apply(await post("/api/workflow/finish"));
+  toast("Цикл завершён. Можно ставить новую цель.");
+}
+
+async function answerAgent(text) {
+  const reply = String(text || "").trim();
+  if (!reply) { toast("Напишите ответ"); return; }
+  answerDraft = "";
+  const result = await post("/api/agent/answer", {text: reply});
+  if (result) toast("Ответ отправлен: студия запускает агента");
+  await refreshRoadmap();
+}
+
+function run(id) {
+  if (id === "start") {
+    const task = goalDraft.text.trim();
+    const mode = goalDraft.skipIdeas ? "implement" : "plan";
+    if (mode === "plan" && !task) { toast("Опишите цель: что нужно сделать"); return; }
+    remember(autoKey(flow));
+    post("/api/workflow/start", {mode, task: mode === "plan" ? task : ""}).then((result) => {
+      goalDraft = {text: "", skipIdeas: false};
+      return apply(result);
+    });
+  } else if (id === "settings") void setTab("agent");
+  else if (id === "retry") post("/api/runner/run").then(() => refreshRoadmap());
+  else if (id === "stop") post("/api/runner/stop").then(() => refreshRoadmap());
+  else if (id === "to-review") post("/api/workflow/stage", {to: "review"}).then(apply);
+  else if (id === "goto-ideas") void setTab("ideas");
+  else if (id === "to-select") void toSelect();
+  else if (id === "select") openSelect();
+  else if (id === "report") openReport();
+  else if (id === "rework") openRework();
+  else if (id === "rollback") openRollback();
+  else if (id === "finish") void finishCycle();
+  else if (id === "reset") confirmReset();
 }
 
 /* ----------------------------------------------------------------- вид */
@@ -385,51 +327,77 @@ function stepAction(step) {
 function render() {
   const root = $("roadmap");
   if (!root || !flow) return;
-  const list = steps(flow);
-  const action = primaryAction(flow);
-  const connected = !!(flow.agent && flow.agent.connected);
-  const auto = runnerNote(flow);
-  let note = flow.stage === "implement" && progress && progress.total
-    ? `Агент реализует · выполнено ${progress.done} из ${progress.total}`
-    : stageNote(flow);
-  if (auto && !(auto.state === "running" && progress && progress.total)) note = auto.text;
-  if (flow.stage === "report" && flow.tests && flow.tests.state === "running") {
-    note = "Студия проверяет результат тестами проекта…";
+  const status = agentStatus(agent);
+  const list = dockSteps(flow);
+  const actions = dockActions(flow, agent);
+  let note = dockNote(flow, agent);
+  if (flow.stage === "implement" && progress && progress.total) {
+    note = `Агент реализует · выполнено ${progress.done} из ${progress.total}`;
   }
+  const open = !collapsed();
+  const ask = agent && agent.ask;
+  const goal = list.find((step) => step.state === "active" && step.id === "goal") && status.connected;
+  const tail = agent && agent.log_tail && status.connected
+    ? `<details class="dock-log"><summary>Лог агента</summary><pre>${esc(agent.log_tail)}</pre></details>` : "";
+  const html = `
+    <div class="dock-head" data-dock="toggle" title="${open ? "Свернуть" : "Развернуть"}">
+      <span class="dock-dot ${esc(status.tone)}"></span>
+      <b>Агент · Claude Code</b>
+      <span class="dock-status">${esc(status.text)}</span>
+      <span class="dock-toggle">${open ? "—" : "▢"}</span>
+    </div>
+    ${open ? `<div class="dock-body">
+      <ol class="dock-steps">${list.map((step, index) => `<li class="dock-step ${esc(step.state)}" title="${esc(step.title)}: ${esc(step.turnLabel)}">
+        <span class="dock-num">${step.state === "done" ? "✓" : step.state === "skipped" ? "–" : index + 1}</span>
+        <span class="dock-name">${esc(step.title)}</span>
+        ${step.state === "active" ? `<small>${esc(step.turnLabel)}</small>` : ""}</li>`).join("")}</ol>
+      <div class="dock-note">${esc(note)}</div>
+      ${goal ? `<label class="dock-goal"><span>Цель</span><textarea id="dockGoal" rows="3" placeholder="Например: личный сайт с портфолио, новостями и формой заявок">${esc(goalDraft.text)}</textarea>
+        <label class="rm-check"><input type="checkbox" id="dockSkip"${goalDraft.skipIdeas ? " checked" : ""}><span>Без идей: сразу к реализации того, что уже на карте</span></label></label>` : ""}
+      ${ask ? `<div class="dock-ask"><b>${esc(ask.question)}</b>
+        ${(ask.options || []).length ? `<div class="dock-options">${ask.options.map((option) => `<button type="button" data-answer="${esc(option)}">${esc(option)}</button>`).join("")}</div>` : ""}
+        <textarea id="dockAnswer" rows="2" placeholder="Ваш ответ">${esc(answerDraft)}</textarea>
+        <button type="button" class="primary" data-dock="send-answer">Ответить</button></div>` : ""}
+      <div class="dock-actions">${actions.map((action) => `<button type="button" class="${action.primary ? "primary" : ""}" data-rm="${esc(action.id)}">${esc(action.label)}</button>`).join("")}</div>
+      ${tail}
+      <div class="dock-foot">
+        <span class="hint">${esc(gitNote(agent))}</span>
+        <span class="dock-tools">
+          ${status.tone === "run" ? '<button type="button" data-rm="stop" title="Остановить агента">■ Стоп</button>' : ""}
+          ${canRollback(agent) ? '<button type="button" data-rm="rollback" title="Вернуть проект к состоянию до работы агента">↩ Откат</button>' : ""}
+          ${flow.stage !== "mode" ? '<button type="button" data-rm="reset" title="Сбросить цепочку и начать заново">⟲ Заново</button>' : ""}
+          <button type="button" data-rm="settings" title="Настройки агента">⚙</button>
+        </span>
+      </div>
+    </div>` : ""}`;
   root.hidden = false;
   root.dataset.stage = flow.stage;
-  const html = `
-    <ol class="rm-track">${list.map((step, index) => `<li class="rm-step ${esc(step.state)}${stepAction(step) ? " click" : ""}" data-step="${esc(step.id)}" title="${esc(step.title)}">
-        <span class="rm-dot">${step.state === "done" ? "✓" : step.state === "skipped" ? "–" : index + 1}</span><span class="rm-name">${esc(step.title)}</span></li>`).join("")}</ol>
-    <div class="rm-side">
-      <span class="rm-note">${esc(note)}</span>
-      ${action ? `<button type="button" class="primary rm-main" data-rm="${esc(action.id)}">${esc(action.label)}</button>` : ""}
-      ${auto && auto.retry ? '<button type="button" data-rm="retry" title="Запустить агента на этом этапе ещё раз">↻ Запустить агента</button>' : ""}
-      ${flow.stage !== "mode" ? '<button type="button" class="rm-reset" data-rm="reset" title="Сбросить цепочку и начать заново">⟲ Заново</button>' : ""}
-      <button type="button" class="rm-reset" data-rm="runner" title="Автозапуск агента по этапам">⚙ Автозапуск: ${flow.runner && flow.runner.enabled ? "вкл" : "выкл"}</button>
-      <span class="rm-agent ${connected ? "on" : "off"}" title="${connected ? "Агент обращался к студии недавно" : "Агент не подключён"}">● агент</span>
-    </div>`;
   // Перерисовка только при изменении: иначе опрос заменяет кнопку между нажатием и отпусканием.
   if (root.dataset.html === html) return;
   root.dataset.html = html;
   root.innerHTML = html;
-  root.querySelectorAll("[data-rm]").forEach((button) => {
-    button.onclick = () => (button.dataset.rm === "reset" ? confirmReset() : run(button.dataset.rm));
-  });
-  root.querySelectorAll(".rm-step.click").forEach((element) => {
-    const step = list.find((item) => item.id === element.dataset.step);
-    element.onclick = () => run(stepAction(step));
-  });
+  root.querySelectorAll("[data-rm]").forEach((button) => { button.onclick = () => run(button.dataset.rm); });
+  root.querySelector("[data-dock=toggle]").onclick = () => { setCollapsed(!collapsed()); root.dataset.html = ""; render(); };
+  const goalBox = root.querySelector("#dockGoal");
+  if (goalBox) goalBox.oninput = () => { goalDraft.text = goalBox.value; };
+  const skip = root.querySelector("#dockSkip");
+  if (skip) skip.onchange = () => { goalDraft.skipIdeas = skip.checked; };
+  const answerBox = root.querySelector("#dockAnswer");
+  if (answerBox) answerBox.oninput = () => { answerDraft = answerBox.value; };
+  root.querySelectorAll("[data-answer]").forEach((button) => { button.onclick = () => answerAgent(button.dataset.answer); });
+  const send = root.querySelector("[data-dock=send-answer]");
+  if (send) send.onclick = () => answerAgent(answerDraft);
 }
 
+/* Модальное окно само открываем только для выбора задач и отчёта: остальное — на страницах. */
 function maybeAutoOpen() {
-  const kind = autoOpen(flow);
+  const kind = flow && flow.stage === "select" ? "select" : flow && flow.stage === "report" ? "report" : "";
   const key = autoKey(flow);
   if (!kind || opened().has(key)) return;
   if (document.querySelector(".studio-modal") || isSwipeOpen()) return;
+  if (!agentStatus(agent).connected) return;
   remember(key);
-  if (kind === "swipe") openSwipe({onStage: apply});
-  else run(kind);
+  run(kind);
 }
 
 export async function refreshRoadmap() {
@@ -437,6 +405,7 @@ export async function refreshRoadmap() {
   busy = true;
   try {
     flow = await api("/api/workflow");
+    try { agent = await api("/api/agent/status"); } catch (_) { agent = null; }
     await updateProgress();
     render();
     if (isSwipeOpen()) {
@@ -444,7 +413,7 @@ export async function refreshRoadmap() {
       else closeSwipe();
     }
     maybeAutoOpen();
-  } catch (_error) { /* нет связи: полосу не трогаем, живой индикатор покажет */ }
+  } catch (_error) { /* нет связи: окно не трогаем, живой индикатор покажет */ }
   finally { busy = false; }
 }
 

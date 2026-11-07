@@ -17,10 +17,34 @@ def test_две_рабочие_области_одного_окна():
     assert 'data-tab="map"' in HTML
     assert 'data-tab="ideas"' in HTML
     assert 'data-tab="scenario"' not in HTML
-    assert "Карта проекта" in HTML
+    assert "Карта backend" in HTML
     assert "Генератор идей" in HTML
     assert 'data-map-mode="fact"' in HTML
     assert 'data-map-mode="plan"' in HTML
+
+
+def test_пять_страниц_в_согласованном_порядке():
+    tabs = re.findall(r'<button class="tabbtn[^"]*" id="tab-[a-z]+-button" data-tab="([a-z]+)"', HTML)
+    assert tabs == ["map", "frontend", "ideas", "settings", "agent"]
+    for title in ("Карта backend", "Карта frontend", "Генератор идей",
+                  "Настройки промптов", "Настройки агента"):
+        assert title in HTML
+
+
+def test_верхняя_панель_без_лишнего():
+    assert 'id="zIn"' not in HTML and 'id="zOut"' not in HTML  # есть колесо мыши
+    assert 'id="editorChoice"' not in HTML  # поддерживается только VS Code
+    header = HTML[HTML.index("<header>"):HTML.index("</header>")]
+    assert 'id="searchBox"' not in header and 'id="frontSearch"' not in header
+    assert 'data-ui-mode="agent"' in header and 'data-ui-mode="manual"' in header
+
+
+def test_поиск_узлов_в_левых_панелях_карт():
+    tree = HTML[HTML.index('id="treePanel"'):HTML.index('id="treeBody"')]
+    assert 'id="searchBox"' in tree
+    front = HTML[HTML.index('class="front-tree"'):HTML.index('id="frontTreeBody"')]
+    assert 'id="frontSearch"' in front
+    assert 'id="ideaSearch"' in HTML
 
 
 def test_интерфейс_на_русском():

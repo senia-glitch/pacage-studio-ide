@@ -272,3 +272,158 @@ def test_маршруты_автозапуска_только_для_челов�
         assert srv.post("/api/runner/stop", {})[1]["state"] == "idle"
         with srv.get("/api/runner", {"X-Studio-Token": srv.token}) as response:
             assert json.loads(response.read())["enabled"] is False
+
+
+# --------------------------------------------------- сессия, вопросы, чекпоинты
+
+
+def _claude_popen(monkeypatch, outputs: list[tuple[int, str]], seen: list):
+    """Поддельный claude: пишет в лог заранее заданный вывод и код выхода."""
+
+    def popen(argv, **kwargs):
+        code, text = outputs[len(seen)]
+        seen.append(argv)
+        kwargs["stdout"].write(text.encode("utf-8"))
+        kwargs["stdout"].flush()
+        return _Proc(code, polls=0)
+
+    monkeypatch.setattr(runner.subprocess, "Popen", popen)
+    monkeypatch.setattr(runner.shutil, "which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(runner.time, "sleep", lambda _s: None)
+
+
+def test_claude_получает_json_и_продолжает_сессию(tmp_path: Path, monkeypatch) -> None:
+    run, wf = _runner(tmp_path)
+    run.save_config({"enabled": True})
+    wf.start("plan")
+    seen: list = []
+    first = json.dumps({"session_id": "sess-1", "result": "ok"})
+    _claude_popen(monkeypatch, [(0, first), (0, first)], seen)
+    run._run("ideas")
+    assert "--output-format" in seen[0] and "--resume" not in seen[0]
+    assert run.session_id() == "sess-1"
+    run._run("ideas")
+    assert seen[1][seen[1].index("--resume") + 1] == "sess-1"  # тот же контекст, без перечитывания
+
+
+def test_потерянная_сессия_перезапускается_без_resume(tmp_path: Path, monkeypatch) -> None:
+    run, wf = _runner(tmp_path)
+    run.save_config({"enabled": True})
+    wf.start("plan")
+    run._save_session("old")
+    seen: list = []
+    fresh = json.dumps({"session_id": "new-1"})
+    _claude_popen(monkeypatch, [(1, "No conversation found"), (0, fresh)], seen)
+    run._run("ideas")
+    assert "--resume" in seen[0] and "--resume" not in seen[1]
+    assert run.session_id() == "new-1"
+
+
+def test_чужая_команда_не_получает_флагов_claude(tmp_path: Path, monkeypatch) -> None:
+    run, wf = _runner(tmp_path)
+    run.save_config({"enabled": True, "command": ["agent", "{prompt}"]})
+    wf.start("plan")
+    seen: list = []
+    _claude_popen(monkeypatch, [(0, "")], seen)
+    run._run("ideas")
+    assert "--output-format" not in seen[0] and "--resume" not in seen[0]
+
+
+def test_вопрос_агента_ждёт_человека_и_ответ_будит_его(tmp_path: Path, monkeypatch) -> None:
+    run, wf = _runner(tmp_path)
+    run.save_config({"enabled": True})
+    wf.start("plan")
+    with pytest.raises(MetadataError):
+        run.ask("  ")
+    with pytest.raises(MetadataError):
+        run.ask("вопрос", options=[1])
+    run.ask("Какую БД брать?", ["sqlite", "postgres"])
+    seen: list = []
+    _claude_popen(monkeypatch, [(0, json.dumps({"session_id": "s"}))], seen)
+    run._run("ideas")
+    assert run.public()["state"] == "waiting_user"
+    monkeypatch.undo()  # дальше git и файлы настоящие: подмена Popen действует на весь subprocess
+    view = run.agent_view()
+    assert view["ask"] == {"question": "Какую БД брать?", "options": ["sqlite", "postgres"]}
+    with pytest.raises(MetadataError):
+        run.answer("")
+    requested: list = []
+    monkeypatch.setattr(run, "request", lambda stage: requested.append(stage))
+    run.answer("sqlite")
+    assert requested == ["ideas"] and run.pending_ask() is None
+    assert "sqlite" in run._note and "Какую БД брать?" in run._note
+    with pytest.raises(MetadataError):
+        run.answer("ещё раз")  # спрашивать больше нечего
+
+
+def test_ответ_без_подключённого_агента_отклоняется(tmp_path: Path) -> None:
+    run, wf = _runner(tmp_path)
+    wf.start("plan")
+    run.ask("Вопрос?")
+    with pytest.raises(MetadataError) as error:
+        run.answer("да")
+    assert error.value.code == "invalid_input"
+
+
+def test_вопрос_прошлого_этапа_и_сессия_сбрасываются(tmp_path: Path) -> None:
+    run, wf = _runner(tmp_path)
+    run.save_config({"enabled": True})
+    wf.start("plan")
+    run.ask("Старый вопрос")
+    run._save_session("abc")
+    run.on_stage("review", 3)
+    assert run.pending_ask() is None and run.session_id() == "abc"
+    run.on_stage("mode", 4)
+    assert run.session_id() == ""  # новый цикл — новый контекст
+
+
+def test_запрещённые_команды_в_запуске_по_умолчанию() -> None:
+    assert "--disallowedTools" in DEFAULT_COMMAND
+    denied = DEFAULT_COMMAND[DEFAULT_COMMAND.index("--disallowedTools") + 1 :]
+    assert "Bash(git push:*)" in denied and "Bash(pip install:*)" in denied
+    assert not set(denied) & set(DEFAULT_COMMAND[: DEFAULT_COMMAND.index("--disallowedTools")])
+
+
+def test_чекпоинт_git_после_реализации(tmp_path: Path, monkeypatch) -> None:
+    import shutil as _shutil
+    import subprocess as _subprocess
+
+    if _shutil.which("git") is None:
+        pytest.skip("нужен git")
+    for args in (["init", "-q"], ["config", "user.email", "t@e.x"], ["config", "user.name", "T"],
+                 ["config", "commit.gpgsign", "false"]):
+        _subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "a.txt").write_text("1\n", encoding="utf-8")
+    _subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True, capture_output=True)
+    _subprocess.run(["git", "commit", "-qm", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    run, wf = _runner(tmp_path)
+    run.save_config({"enabled": True})
+    wf.start("implement")
+    wf.advance("implement")
+    seen: list = []
+    result = json.dumps({"session_id": "s1"})
+
+    real_popen = _subprocess.Popen
+
+    def popen(argv, **kwargs):
+        if Path(argv[0]).stem == "git":
+            return real_popen(argv, **kwargs)  # git студии — настоящий
+        seen.append(argv)
+        kwargs["stdout"].write(result.encode("utf-8"))
+        kwargs["stdout"].flush()
+        (tmp_path / "feature.py").write_text("x = 1\n", encoding="utf-8")  # работа агента
+        wf.report_received("r", "готово")
+        return _Proc(0, polls=0)
+
+    monkeypatch.setattr(runner.subprocess, "Popen", popen)
+    git_exe = _shutil.which("git")
+    monkeypatch.setattr(
+        runner.shutil, "which", lambda name: git_exe if name == "git" else f"/bin/{name}"
+    )
+    monkeypatch.setattr(runner.time, "sleep", lambda _s: None)
+    run._run("implement")
+    status = run.public()
+    assert status["state"] == "done" and "Чекпоинт" in status["message"]
+    git_state = run.agent_view()["git"]
+    assert git_state["branch"].startswith("studio/") and git_state["clean"] is True

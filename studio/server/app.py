@@ -24,7 +24,7 @@ from studio.frontend import scan_frontend
 from studio.frontend import sync as front_sync
 from studio.frontend import verify as front_verify
 from studio.metadata import MetadataError
-from studio.server import access, chain, discovery
+from studio.server import access, chain, discovery, gitops
 from studio.server.security import (
     CSP,
     SECURITY_HEADERS,
@@ -385,6 +385,10 @@ def make_handler(ctx):
                 )
             if url.path == "/api/runner":
                 return self._json(state.runner.view())
+            if url.path == "/api/agent/status":
+                return self._json(state.runner.agent_view())
+            if url.path == "/api/ui":
+                return self._json(state.settings.get())
             return self._error(404, "not_found", "Не найдено")
 
         # --------------------------------------------------------------- POST
@@ -433,6 +437,24 @@ def make_handler(ctx):
                 return self._json(chain.select(state, data, state.check_front_links))
             if url.path == "/api/workflow/finish":
                 return self._json(chain.finish(state))
+            if url.path == "/api/workflow/rework":
+                return self._json(chain.rework(state, data))
+            if url.path == "/api/agent/ask":
+                return self._json(state.runner.ask(data.get("question"), data.get("options")))
+            if url.path == "/api/agent/answer":
+                return self._json(state.runner.answer(data.get("text")))
+            if url.path == "/api/agent/connect":
+                return self._json(state.runner.connect())
+            if url.path == "/api/agent/check":
+                return self._json(state.runner.check())
+            if url.path == "/api/ui":
+                return self._json(state.settings.save(data))
+            if url.path == "/api/git/rollback":
+                result = gitops.rollback(state.root)
+                if not result["ok"]:
+                    return self._error(409, "git_failed", result["reason"])
+                state.rescan("rollback")
+                return self._json({**result, "git": gitops.status(state.root)})
             if url.path == "/api/tests/run":
                 return self._json(state.tester.start())
             if url.path == "/api/tests/config":

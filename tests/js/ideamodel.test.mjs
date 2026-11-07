@@ -82,3 +82,46 @@ test("railCounts и railLabel: счётчики и метка агента", () 
   assert.equal(railLabel(idea), "1 сценарий · 2 страницы");
   assert.equal(railLabel({scenarios: [], pages: [], created_by: "agent"}), "0 сценариев · от агента");
 });
+
+import {
+  groupIdeas, isAgentCard, isCardDone, isIdeaDone, swipeAction,
+} from "../../studio/ui/static/js/ideamodel.js";
+
+test("карточка реализована по флагу приёмки или по фактическому узлу на карте", () => {
+  const nodes = {n1: {planned: false}, n2: {planned: true}};
+  const find = (id) => nodes[id];
+  assert.equal(isCardDone({implemented: true}, find), true);
+  assert.equal(isCardDone({mapNodeId: "n1"}, find), true);
+  assert.equal(isCardDone({mapNodeId: "n2"}, find), false);
+  assert.equal(isCardDone({mapNodeId: "нет"}, find), false);
+  assert.equal(isCardDone({}, find), false);
+  assert.equal(isCardDone(null, find), false);
+});
+
+test("идея реализована только когда есть карточки и все готовы", () => {
+  const done = {scenarios: [{implemented: true}], pages: [{implemented: true}]};
+  assert.equal(isIdeaDone(done), true);
+  assert.equal(isIdeaDone({scenarios: [{implemented: true}, {}], pages: []}), false);
+  assert.equal(isIdeaDone({scenarios: [], pages: []}), false);
+});
+
+test("группы: Backend, Frontend и реализованные в конце", () => {
+  const back = {id: "b", scenarios: [{}], pages: []};
+  const front = {id: "f", scenarios: [], pages: [{}]};
+  const both = {id: "x", scenarios: [{}], pages: [{}]};
+  const empty = {id: "e", scenarios: [], pages: []};
+  const ready = {id: "d", scenarios: [{implemented: true}], pages: []};
+  const groups = groupIdeas([back, front, both, empty, ready]);
+  assert.deepEqual(groups.backend.map((i) => i.id), ["b", "x", "e"]);
+  assert.deepEqual(groups.frontend.map((i) => i.id), ["f", "x"]);
+  assert.deepEqual(groups.done.map((i) => i.id), ["d"]);
+});
+
+test("пометка «агент» и действие по жесту", () => {
+  assert.equal(isAgentCard({decision: "pending"}, {}), true);
+  assert.equal(isAgentCard({}, {created_by: "agent"}), true);
+  assert.equal(isAgentCard({}, {created_by: "human"}), false);
+  assert.equal(swipeAction("accepted"), "to-map");
+  assert.equal(swipeAction("rejected"), "delete");
+  assert.equal(swipeAction(null), null);
+});

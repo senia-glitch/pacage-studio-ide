@@ -147,3 +147,102 @@
   .rm-choices { grid-template-columns: 1fr; }
   .rm-box { min-width: 0; }
 }
+
+/* ---------- Окно агента: сквозное, поверх всех страниц ---------- */
+#roadmap.roadmap {
+  position: fixed; right: 16px; bottom: 16px; z-index: 40; display: block; width: 348px;
+  max-height: calc(100vh - 96px); overflow-y: auto; padding: 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
+}
+#roadmap.roadmap[hidden] { display: none; }
+body[data-ui-mode="manual"] #roadmap.roadmap { display: none; }
+.dock-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: pointer; user-select: none; }
+.dock-head b { font-size: 12px; }
+.dock-status { flex: 1; min-width: 0; color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-toggle { color: var(--dim); }
+.dock-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #666; }
+.dock-dot.ok { background: var(--green); }
+.dock-dot.run { background: var(--acc); animation: dock-pulse 1.2s ease-in-out infinite; }
+.dock-dot.wait { background: var(--blue); }
+.dock-dot.bad { background: #e5534b; }
+@keyframes dock-pulse { 50% { opacity: .35; } }
+.dock-body { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+.dock-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.dock-step { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 12px; }
+.dock-step small { margin-left: auto; color: var(--acc); font-size: 10px; text-transform: uppercase; letter-spacing: .4px; }
+.dock-num {
+  flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 10px; font-weight: 700; background: var(--panel2); border: 1px solid var(--line);
+}
+.dock-step.done { color: var(--txt); }
+.dock-step.done .dock-num { background: #2f4a33; border-color: var(--green); color: var(--green); }
+.dock-step.active { color: #fff; font-weight: 700; }
+.dock-step.active .dock-num { background: var(--acc); border-color: var(--acc); color: #171510; box-shadow: 0 0 0 3px rgba(232, 131, 58, .22); }
+.dock-step.skipped { opacity: .45; text-decoration: line-through; }
+.dock-note { color: var(--txt); font-size: 12px; line-height: 1.45; }
+.dock-goal { display: flex; flex-direction: column; gap: 5px; }
+.dock-goal textarea, .dock-ask textarea { width: 100%; resize: vertical; }
+.dock-ask { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--blue); border-radius: 8px; }
+.dock-options { display: flex; flex-wrap: wrap; gap: 5px; }
+.dock-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.dock-actions button { flex: 1 1 auto; }
+.dock-log summary { cursor: pointer; color: var(--dim); font-size: 11px; }
+.dock-log pre { max-height: 130px; overflow: auto; margin: 6px 0 0; padding: 6px; background: var(--bg); border-radius: 6px; font-size: 10.5px; white-space: pre-wrap; word-break: break-word; }
+.dock-foot { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.dock-foot .hint { flex: 1; min-width: 0; font-size: 10.5px; }
+.dock-tools { display: flex; gap: 5px; flex: none; }
+.dock-tools button { padding: 2px 7px; }
+
+/* ---------- Режимы «Агент / Ручной» ---------- */
+.ui-mode { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.ui-mode button { border: 0; border-radius: 0; padding: 4px 11px; background: transparent; }
+.ui-mode button.on { background: var(--acc); color: #171510; font-weight: 700; }
+body[data-ui-mode="agent"] .manual-only { display: none !important; }
+body[data-ui-mode="manual"] .agent-only { display: none !important; }
+
+/* ---------- Страница «Настройки агента» ---------- */
+.agent-workspace { padding: 22px 28px; overflow-y: auto; height: 100%; max-width: 980px; }
+.agent-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 0 0 14px; }
+.agent-card h3 { margin: 0 0 8px; font-size: 14px; }
+.agent-card p { margin: 0 0 8px; }
+.agent-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; }
+.agent-card pre { background: var(--bg); padding: 8px 10px; border-radius: 6px; overflow: auto; margin: 6px 0; }
+.agent-card ul, .agent-card ol { margin: 4px 0 8px 18px; padding: 0; }
+.agent-list { columns: 2; column-gap: 24px; }
+.agent-scenario { border-left: 3px solid var(--acc); padding: 2px 0 2px 10px; margin: 8px 0; }
+.agent-scenario b { display: block; }
+
+/* ---------- «Генератор идей»: свайп и группы ---------- */
+.rail-group { margin: 10px 0 4px; }
+.rail-group-head { display: flex; align-items: center; gap: 6px; width: 100%; background: transparent; border: 0; color: var(--dim); font-size: 11px; letter-spacing: .6px; text-transform: uppercase; padding: 4px 2px; }
+.rail-group-head span { margin-left: auto; }
+.rail-group-head:hover { color: var(--txt); }
+.rail-group.closed .rail-group-body { display: none; }
+.idea-rail-item.done { opacity: .6; }
+.idea-scenario-card.swipeable, .idea-page-card.swipeable { touch-action: pan-x; position: relative; transition: transform .18s ease, opacity .18s ease; }
+.idea-scenario-card.swiping, .idea-page-card.swiping { transition: none; cursor: grabbing; z-index: 3; }
+.idea-scenario-card.swipe-up, .idea-page-card.swipe-up { box-shadow: 0 0 0 2px var(--green); }
+.idea-scenario-card.swipe-down, .idea-page-card.swipe-down { box-shadow: 0 0 0 2px #e5534b; }
+.swipe-hint { color: var(--dim); font-size: 11px; margin: 0 0 8px; }
+.agent-badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 9px; background: var(--blue); color: #0d1626; font-size: 10px; font-weight: 700; }
+.search-box-left { margin: 6px 0; display: block; }
+.search-box-left input { width: 100%; }
+.search-box-left .hint { display: block; margin-top: 2px; }
+
+/* ---------- Верхняя панель: компактные вкладки и меню «Вид» ---------- */
+.tab-index { display: none; }
+.view-menu-wrap { position: relative; display: inline-flex; }
+.view-menu-panel {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 80; display: grid; gap: 9px;
+  min-width: 220px; padding: 10px; border: 1px solid var(--line); border-radius: 9px;
+  background: #1a222c; box-shadow: 0 14px 32px #0008;
+}
+.view-menu-panel[hidden] { display: none; }
+.view-menu-panel .zoom-tools { border: 0; padding: 0; }
+body[data-active-tab="ideas"] .header-canvas,
+body[data-active-tab="settings"] .header-canvas,
+body[data-active-tab="agent"] .header-canvas { display: none; }
+.swipeable { user-select: none; }
+.swipeable input, .swipeable textarea { user-select: text; }
+.swipe-grip { cursor: grab; color: var(--dim); font-size: 13px; padding: 0 2px; }

@@ -59,6 +59,7 @@ _POST_SAFE = frozenset(
         "/api/sync/apply",
         "/api/frontend/sync/apply",
         "/api/decompose/parse",
+        "/api/agent/ask",  # вопрос человеку: единственная запись агента вне своих этапов
     }
 )
 # Запись плана: только режим планирования. Файлы кода эти маршруты не пишут.

@@ -88,6 +88,28 @@ def test_отчёт_вне_реализации_не_двигает_этап(tmp
     assert wf.data["stage"] == "mode" and wf.data["summary"] == "текст"
 
 
+def test_отчёт_агента_будит_слушателей_этапа_отчёт(tmp_path: Path) -> None:
+    wf = _wf(tmp_path)
+    seen: list[tuple[str, int]] = []
+    wf.listeners.append(lambda stage, entries: seen.append((stage, entries)))
+    wf.start("implement")
+    wf.advance("implement")
+    seen.clear()
+    wf.report_received("r-1", "готово")
+    assert [stage for stage, _ in seen] == ["report"]
+    seen.clear()
+    wf.report_received("r-2", "повтор")  # этап уже «Отчёт»: переходов нет, слушатели молчат
+    assert seen == []
+
+
+def test_touch_поднимает_ревизию_без_смены_этапа(tmp_path: Path) -> None:
+    wf = _wf(tmp_path)
+    wf.start("plan")
+    before, stage = wf.data["revision"], wf.data["stage"]
+    wf.touch()
+    assert wf.data["revision"] == before + 1 and wf.data["stage"] == stage
+
+
 def test_состояние_читается_из_файла_и_битое_игнорируется(tmp_path: Path) -> None:
     wf = _wf(tmp_path)
     wf.start("plan", "Т")

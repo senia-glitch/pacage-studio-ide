@@ -1011,7 +1011,8 @@ function renderTree(graph) {
         return;
     }
     const mode = S0.treeMode;
-    const collapsed = S0.treeCollapsed;
+    const query = String(($("frontSearch") || {}).value || "").trim().toLocaleLowerCase("ru");
+    const collapsed = query ? new Set() : S0.treeCollapsed; // при поиске ветки раскрыты
     const rows = [];
     const twist = (id, hasKids, open) =>
         hasKids
@@ -1071,6 +1072,27 @@ function renderTree(graph) {
         }
     }
     body.innerHTML = rows.join("");
+    if (query) filterTreeRows(body, query);
+}
+
+/* Поиск по узлам фронтенда: остаются совпавшие строки и их родители (домен, страница). */
+function filterTreeRows(body, query) {
+    const items = [...body.querySelectorAll(".front-tree-row")];
+    const depthOf = (el) => parseInt(el.style.paddingLeft, 10) || 0;
+    const keep = new Set();
+    items.forEach((el, index) => {
+        if (!el.textContent.toLocaleLowerCase("ru").includes(query)) return;
+        keep.add(index);
+        let depth = depthOf(el);
+        for (let up = index - 1; up >= 0 && depth > 6; up -= 1) {
+            const parent = depthOf(items[up]);
+            if (parent < depth) { keep.add(up); depth = parent; }
+        }
+    });
+    items.forEach((el, index) => { if (!keep.has(index)) el.style.display = "none"; });
+    const count = $("frontSearchCount");
+    if (count) count.textContent = `найдено: ${[...keep].filter((i) => items[i].textContent.toLocaleLowerCase("ru").includes(query)).length}`;
+    if (!keep.size) body.insertAdjacentHTML("beforeend", '<p class="hint">Ничего не найдено</p>');
 }
 
 function treePageVisible(page, mode) {
@@ -1540,6 +1562,10 @@ function initFrontend() {
                 saveFrontUi();
             }
         }
+    });
+    document.getElementById("frontSearch")?.addEventListener("input", () => {
+        if (!$("frontSearch").value.trim() && $("frontSearchCount")) $("frontSearchCount").textContent = "";
+        renderTree(S0.graph);
     });
     document.getElementById("frontRescan")?.addEventListener("click", async () => {
         await loadFrontGraph();

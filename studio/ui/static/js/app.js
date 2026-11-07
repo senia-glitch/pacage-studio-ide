@@ -8,12 +8,14 @@ import {refreshBriefStatus, scheduleBriefStatus, updateBriefBadge, initTodoChip}
 import {openDiagnostics, updateDiagBadge} from "./diagnosticsview.js";
 import {renderInspector} from "./inspectorview.js";
 import {renderMap} from "./mapview.js";
-import {initIdeas, renderIdeas, refreshIdeas} from "./ideaview.js";
+import {initIdeas, renderIdeas, refreshIdeas, markImplemented} from "./ideaview.js";
 import {initSync} from "./syncview.js";
 import {initReport} from "./reportview.js";
 import {initAgent, openReport, refreshAgentReports} from "./agentview.js";
 import {initRoadmap, refreshRoadmap} from "./roadmapview.js";
 import {renderSettings} from "./settingsview.js";
+import {renderAgentSettings} from "./agentsettingsview.js";
+import {initUiMode} from "./uimode.js";
 import {bindViewport, fitView} from "./viewport.js";
 import {initTree, renderTree} from "./treeview.js";
 import {initFrontend, renderFrontend} from "./frontendview.js";
@@ -22,6 +24,7 @@ hooks.renderMap = renderMap;
 hooks.renderTree = renderTree;
 hooks.renderIdeas = renderIdeas;
 hooks.renderSettings = renderSettings;
+hooks.renderAgentSettings = renderAgentSettings;
 hooks.renderInspector = renderInspector;
 hooks.renderFrontend = renderFrontend;
 hooks.refreshAux = () => {
@@ -52,8 +55,8 @@ async function boot(){
   initSync();
   initReport();
   initAgent();
-  initRoadmap({openReport});
-  initEditorChoice();
+  initRoadmap({openReport, onAccepted: markImplemented});
+  void initUiMode();
   initTree();
   initFrontend();
   document.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
@@ -70,7 +73,7 @@ async function boot(){
     if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==="k"){ev.preventDefault();openPalette();return}
     if(typing)return;
     if(S.tab==="ideas"&&["f","+","=","-","h"].includes(ev.key.toLowerCase()))return;
-    if(ev.key==="/") {ev.preventDefault();const box=$("searchBox");if(box){box.focus();box.select()}}
+    if(ev.key==="/") {ev.preventDefault();const box=$(S.tab==="frontend"?"frontSearch":S.tab==="ideas"?"ideaSearch":"searchBox");if(box){box.focus();box.select()}}
     if(ev.key.toLowerCase()==="o"&&S.selectedNode){ev.preventDefault();openEditorForNode(S.byId[S.selectedNode])}
     if(ev.key.toLowerCase()==="f"&&!ev.ctrlKey&&!ev.metaKey){ev.preventDefault();const a=activeView();fitView(a.canvas,a.view,()=>applyTransform(a.id,a.view))}
     if(ev.key==="+"||ev.key==="=") {ev.preventDefault();const a=activeView();a.view.k=Math.min(2.5,a.view.k*1.15);applyTransform(a.id,a.view)}
@@ -78,8 +81,6 @@ async function boot(){
     if(ev.key.toLowerCase()==="h") {ev.preventDefault();S.hideMeta=!S.hideMeta;if($("hideMeta"))$("hideMeta").checked=S.hideMeta;renderMap();schedulePersist()}
     if(ev.key==="?") {ev.preventDefault();modal("Горячие клавиши","<div class=hotkeys><div><b>Esc</b> снять выделение</div><div><b>/</b> поиск</div><div><b>Ctrl+K</b> палитра узлов</div><div><b>O</b> открыть в редакторе</div><div><b>F</b> вписать</div><div><b>+ / −</b> зум</div><div><b>H</b> скрыть метаданные</div><div><b>Ctrl+Enter</b> сохранить поле</div></div>",[{label:"Сбросить раскладку",action:()=>{try{if(S.uiStorage)S.uiStorage.reset()}catch(_){ }location.reload()}},{label:"Закрыть",cls:"primary",action:()=>{}}])}
   });
-  $("zIn").onclick=()=>{const a=activeView();a.view.k=Math.min(2.5,a.view.k*1.15);applyTransform(a.id,a.view);schedulePersist()};
-  $("zOut").onclick=()=>{const a=activeView();a.view.k=Math.max(.2,a.view.k*.87);applyTransform(a.id,a.view);schedulePersist()};
   $("zReset").onclick=()=>{const a=activeView();a.view.k=1;a.view.x=30;a.view.y=30;applyTransform(a.id,a.view);schedulePersist()};
   $("zFit").onclick=()=>{const a=activeView();fitView(a.canvas,a.view,()=>applyTransform(a.id,a.view));schedulePersist()};
   $("hideMeta").onchange=()=>{S.hideMeta=$("hideMeta").checked;renderMap();schedulePersist()};
@@ -89,6 +90,13 @@ async function boot(){
   $("inspectorToggle")?.addEventListener("click",toggleInspector);$("collapseInspector")?.addEventListener("click",toggleInspector);
   const resize=$("inspectorResize");if(resize){let startX=0,startW=0;resize.addEventListener("pointerdown",ev=>{startX=ev.clientX;startW=S.inspectorWidth;resize.setPointerCapture(ev.pointerId);document.body.classList.add("resizing-inspector")});resize.addEventListener("pointermove",ev=>{if(!resize.hasPointerCapture(ev.pointerId))return;S.inspectorWidth=Math.max(280,Math.min(520,startW-(ev.clientX-startX)));document.documentElement.style.setProperty("--inspector-width",`${S.inspectorWidth}px`)});resize.addEventListener("pointerup",ev=>{if(resize.hasPointerCapture(ev.pointerId))resize.releasePointerCapture(ev.pointerId);document.body.classList.remove("resizing-inspector");schedulePersist()})}
   document.documentElement.style.setProperty("--inspector-width",`${S.inspectorWidth}px`);document.body.classList.toggle("inspector-hidden",!S.inspectorOpen);document.querySelectorAll("[data-map-mode]").forEach(button=>button.classList.toggle("on",button.dataset.mapMode===S.mapMode));
+  const viewBtn=$("viewMenuBtn"),viewPanel=$("viewMenuPanel");
+  if(viewBtn&&viewPanel){
+    const setView=open=>{viewPanel.hidden=!open;viewBtn.setAttribute("aria-expanded",String(open))};
+    viewBtn.onclick=ev=>{ev.stopPropagation();setView(viewPanel.hidden)};
+    document.addEventListener("click",ev=>{if(!viewPanel.hidden&&!viewPanel.contains(ev.target))setView(false)});
+    document.addEventListener("keydown",ev=>{if(ev.key==="Escape")setView(false)});
+  }
   $("rescan").onclick=async()=>{
     await flushPending();
     try{
@@ -110,7 +118,7 @@ async function boot(){
   document.addEventListener("click",schedulePersist);
   document.addEventListener("change",schedulePersist);
   const initial=location.hash.replace(/^#/,"");
-  setTab(["map","ideas"].includes(initial)?initial:S.tab);
+  setTab(["map","ideas","frontend","settings","agent"].includes(initial)?initial:S.tab);
 }
 boot();
 

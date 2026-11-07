@@ -128,9 +128,9 @@ async function setTab(name){
   document.body.dataset.activeTab=name;
   document.querySelectorAll(".tabbtn").forEach(b=>{const active=b.dataset.tab===name;b.classList.toggle("on",active);b.setAttribute("aria-selected",String(active))});
   document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="tab-"+(name==="ideas"?"ideas":name)));
-  const search=$("searchBox");if(search){search.placeholder=name==="ideas"?"Поиск по идеям и сценариям":"Поиск — метод, URL, имя, домен";search.setAttribute("aria-label",name==="ideas"?"Поиск по идеям и сценариям":"Поиск по проекту")}
   if(name==="map"){hooks.renderMap();hooks.renderInspector()}
   else if(name==="settings"){if(hooks.renderSettings)hooks.renderSettings()}
+  else if(name==="agent"){if(hooks.renderAgentSettings)hooks.renderAgentSettings()}
   else if(name==="frontend"){hooks.renderFrontend&&hooks.renderFrontend()}
   else hooks.renderIdeas();
   schedulePersist();
@@ -340,11 +340,11 @@ function initSearch(){
     const all=S.G.nodes||[];
     const found=all.filter(n=>!S.lastSearchQuery||matchesAll(S.lastSearchQuery,[n.label,n.kind,methodOfEndpoint(n),urlOfEndpoint(n),n.domain,n.description,n.file_path,n.details&&n.details.function_name]));
     const count=$("searchCount");if(count)count.textContent=S.lastSearchQuery?`найдено ${found.length} из ${all.length} узлов`:"";
-    if(S.tab==="map")hooks.renderMap();else hooks.renderIdeas();
+    hooks.renderMap();
   };
   box.addEventListener("input",update);
   box.addEventListener("keydown",ev=>{
-    if(ev.key!=="Enter"||S.tab==="ideas")return;
+    if(ev.key!=="Enter")return;
     const first=(S.G.nodes||[]).find(n=>matchesAll(S.lastSearchQuery,[n.label,methodOfEndpoint(n),urlOfEndpoint(n),n.domain,n.description,n.file_path]));
     if(first){S.selectedNode=first.id;hooks.renderMap();hooks.renderInspector()}
   });

@@ -437,6 +437,8 @@ def decide(state, data: dict) -> dict:
     with state.lock:
         state.mutate_ideas(apply)
         counts = cards.counts(state.load_ideas())
+        if not missing or (pairs is not None and len(missing) < len(pairs)):
+            state.workflow.touch()
     if missing and pairs is not None and len(missing) == len(pairs):
         raise MetadataError("node_not_found", "Карточка не найдена: обновите страницу")
     return {"cards": counts, "missing": missing}
@@ -712,6 +714,21 @@ def baseline(state) -> dict:
     return data if isinstance(data, dict) else {"saved_at": "", "keys": []}
 
 
+def rework(state, data: dict) -> dict:
+    """«Вернуть на доработку»: агент снова реализует то же ТЗ с пожеланием человека."""
+    note = str(data.get("note") or "").strip()[:4000]
+    with state.lock:
+        if state.workflow.data["stage"] != "report":
+            raise MetadataError("wrong_stage", "Вернуть на доработку можно на этапе «Отчёт»")
+        state.runner.set_note(
+            note
+            or "Человек вернул работу на доработку без пояснений: перечитай ТЗ и результаты "
+            "тестов (studio_tests) и исправь замечания."
+        )
+        state.workflow.advance("implement")
+    return info(state)
+
+
 def finish(state) -> dict:
     state.workflow.finish()
     return info(state)
@@ -724,6 +741,7 @@ __all__ = [
     "ideas_ready",
     "info",
     "propose",
+    "rework",
     "select",
     "stage",
     "start",

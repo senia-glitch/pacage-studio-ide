@@ -36,7 +36,7 @@ TRANSITIONS: dict[str, frozenset[str]] = {
     "confirm": frozenset({"select", "review", "ideas", "mode"}),
     "select": frozenset({"implement", "mode"}),
     "implement": frozenset({"report", "select", "mode"}),
-    "report": frozenset({"mode", "select"}),
+    "report": frozenset({"mode", "select", "implement"}),
 }
 STEP_TITLES = {
     "sync": "Синхронизация",
@@ -195,6 +195,11 @@ class Workflow:
             self._emit()
             return self.data
 
+    def touch(self) -> None:
+        """Поднять ревизию без смены этапа: ждущие клиенты видят изменение (например, свайп)."""
+        with self.lock:
+            self._save()
+
     def _reset_cycle(self) -> None:
         self.data.update(
             {"mode": "", "task": "", "summary": "", "report_id": "",
@@ -227,9 +232,12 @@ class Workflow:
         with self.lock:
             self.data["summary"] = str(summary or "").strip()[:_MAX_SUMMARY]
             self.data["report_id"] = report_id
-            if self.data["stage"] == "implement":
+            moved = self.data["stage"] == "implement"
+            if moved:
                 self._go("report")
             self._save()
+            if moved:
+                self._emit()  # прогон тестов и другие слушатели входа на этап «Отчёт»
 
     # ---------------------------------------------------------------------- ожидание
 
