@@ -30,7 +30,7 @@ function normalizeBoard(value){
     idea.scenarios=(Array.isArray(item.scenarios)?item.scenarios:[]).filter(s=>s&&typeof s==="object"&&!Array.isArray(s)).map((scenario,scenarioIndex)=>{
       const source=scenario.source&&typeof scenario.source==="object"&&!Array.isArray(scenario.source)?scenario.source:{};
       const acceptance=Array.isArray(scenario.acceptance)?scenario.acceptance.map(String):[];
-      return {id:text(scenario.id)||id(),source,title:text(scenario.title)||scenarioName(source,scenarioIndex),description:text(scenario.description)||text(source.description),acceptance,domain:text(scenario.domain)||text(source.domain),mapNodeId:text(scenario.mapNodeId),mapEndpointId:text(scenario.mapEndpointId)};
+      return {id:text(scenario.id)||id(),source,title:text(scenario.title)||scenarioName(source,scenarioIndex),description:text(scenario.description)||text(source.description),acceptance,domain:text(scenario.domain)||text(source.domain),mapNodeId:text(scenario.mapNodeId),mapEndpointId:text(scenario.mapEndpointId),decision:text(scenario.decision),planSlug:text(scenario.planSlug)};
     });
     idea.payload=payloadFor(idea);if(!idea.jsonText&&(idea.scenarios.length||idea.pages.length))idea.jsonText=JSON.stringify(idea.payload,null,2);
     return idea;
@@ -177,7 +177,7 @@ function mapScenarioNode(scenario){
   if(!scenario.mapNodeId||!S.G||!Array.isArray(S.G.nodes))return null;
   return S.G.nodes.find(node=>node.id===scenario.mapNodeId)||null;
 }
-function isOnMap(scenario){return !!mapScenarioNode(scenario)}
+function isOnMap(scenario){return !!scenario.planSlug||!!mapScenarioNode(scenario)}
 function hydrateMapLinks(){
   if(!S.G||!Array.isArray(S.G.nodes))return;
   const nodes=S.G.nodes,edges=Array.isArray(S.G.edges)?S.G.edges:[];
@@ -334,6 +334,7 @@ function updatePromptState(idea){
 }
 async function sendToConstructor(button){
   const idea=find(button.closest("[data-idea]").dataset.idea);const scenario=idea&&idea.scenarios.find(item=>item.id===button.dataset.toPlan);if(!scenario)return;
+  if(scenario.planSlug){toast(`Сценарий уже на карте как план «${scenario.planSlug}»`);return}
   if(isOnMap(scenario)){confirmRecreate(scenario);return}
   if(!(await setTab("map")))return;
   await putScenarioOnMap(scenario);

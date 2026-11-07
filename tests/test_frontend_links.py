@@ -194,7 +194,7 @@ def test_http_связи_видны_в_графе_и_агент_может_их_
     from studio.server import access
 
     root, _ = _project(tmp_path)
-    with _Server(root) as srv:
+    with _Server(root, stage="ideas") as srv:
         plan = {"X-Studio-Token": access.derive_token(srv.token, "plan")}
         page = {"action": "save_page", "id": "page-plan:z", "name": "Z", "plannedNew": True,
                 "calls": ["GET /health", "GET /ghost"]}

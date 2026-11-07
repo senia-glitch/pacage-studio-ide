@@ -54,7 +54,7 @@ def _post(srv: _Server, path: str, token: str, payload: dict):
 @pytest.mark.integration
 def test_метка_агента_на_плановых_страницах_и_блоках(tmp_path: Path) -> None:
     root, _ = _project(tmp_path)
-    with _Server(root) as srv:
+    with _Server(root, stage="ideas") as srv:
         plan = access.derive_token(srv.token, "plan")
         page = {"action": "save_page", "id": "page-plan:a1", "name": "agent-page",
                 "plannedNew": True, "description": "от агента"}
@@ -94,7 +94,7 @@ def test_метка_агента_на_плановых_страницах_и_б�
 
 @pytest.mark.integration
 def test_метка_агента_на_плановых_узлах_бэкенда(demo: Path) -> None:
-    with _Server(demo) as srv:
+    with _Server(demo, stage="ideas") as srv:
         plan = access.derive_token(srv.token, "plan")
         node = {"kind": "endpoint", "name": "От агента", "http_method": "get", "path": "/a"}
         status, agent_node = _post(srv, "/api/metadata/graph-node", plan, node)

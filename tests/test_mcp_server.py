@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from studio.agent.client import StudioClient, StudioError, check_url, parse_connection
@@ -20,6 +18,7 @@ class FakeClient:
     def __init__(self, responses: dict | None = None):
         self.responses = responses or {}
         self.calls: list[tuple[str, str, dict | None]] = []
+        self.modes: list[str | None] = []
 
     def _answer(self, method: str, path: str, body):
         self.calls.append((method, path, body))
@@ -32,10 +31,12 @@ class FakeClient:
             return value(body)
         return value if value is not None else {}
 
-    def get(self, path):
+    def get(self, path, mode=None):
+        self.modes.append(mode)
         return self._answer("GET", path, None)
 
-    def post(self, path, body=None):
+    def post(self, path, body=None, mode=None):
+        self.modes.append(mode)
         return self._answer("POST", path, body)
 
 
@@ -83,13 +84,14 @@ def test_инструменты_требуют_подключения():
             tools[name]()
 
 
-def test_connect_разбирает_строку_и_сообщает_режим(monkeypatch):
-    info = {"mode": "plan", "studio_version": "9.9", "project_root": "/p", "routes": []}
+def test_connect_по_строке_запасной_путь(monkeypatch):
+    info = {"mode": "plan", "studio_version": "9.9", "project_root": "/p"}
 
     class Stub(FakeClient):
         def __init__(self, url, token):
-            super().__init__({("GET", "/api/agent"): info})
-            self.url, self.token = url, token
+            super().__init__({("GET", "/api/agent"): info,
+                              ("GET", "/api/workflow"): {"stage": "mode"}})
+            self.url, self.token, self.mode = url, token, "plan"
 
     monkeypatch.setattr("studio.mcp_server.StudioClient", Stub)
     session = Session()
@@ -97,11 +99,49 @@ def test_connect_разбирает_строку_и_сообщает_режим(
     result = tools["studio_connect"](
         connection="Studio: http://127.0.0.1:8777\nToken: TKN\nMode: implement"
     )
-    assert result["connected"] and result["mode"] == "plan"
-    assert "токен даёт plan" in result["next"]  # режим в строке расходится с токеном
-    assert session.client.token == "TKN" and session.info["studio_version"] == "9.9"
+    assert result["connected"] and result["stage"] == "mode"
+    assert session.client.token == "TKN" and session.client.mode == "implement"
+    assert session.info["studio_version"] == "9.9"
     with pytest.raises(Exception, match="строку подключения"):
-        tools["studio_connect"]()
+        tools["studio_connect"](url="http://127.0.0.1:1")  # токена нет
+
+
+def test_connect_без_параметров_находит_студию_сам(monkeypatch):
+    found = FakeClient({("GET", "/api/agent"): {"studio_version": "5", "project_root": "/p"},
+                        ("GET", "/api/workflow"): {"stage": "ideas"}})
+    monkeypatch.setattr("studio.mcp_server.StudioClient.discover", classmethod(lambda cls: found))
+    session = Session()
+    result = create_server(session).studio_tools["studio_connect"]()
+    assert result["connected"] and result["stage"] == "ideas" and session.client is found
+
+    def missing(cls):
+        raise StudioError("studio_not_running", "запустите studio")
+
+    monkeypatch.setattr("studio.mcp_server.StudioClient.discover", classmethod(missing))
+    with pytest.raises(Exception, match="studio_not_running"):
+        create_server(Session()).studio_tools["studio_connect"]()
+
+
+def test_workflow_долгий_опрос_и_подсказка():
+    flow = {"revision": 5, "stage": "ideas", "mode": "plan", "cycle": 2, "task": "Каталог",
+            "hint": {"action": "propose", "text": "присылай идеи"},
+            "steps": [{"id": "ideas", "title": "Идеи агента"}],
+            "cards": {"pending": 1, "accepted": 0, "rejected": 2, "total": 3},
+            "selected": {"plans": 0}, "briefs": {"backend": None, "frontend": None}}
+    tools, client = _tools({("GET", "/api/workflow"): [flow, {**flow, "revision": 5}]})
+    first = tools["studio_workflow"]()
+    assert first["stage"] == "ideas" and first["action"] == "propose" and first["changed"]
+    assert first["stage_title"] == "Идеи агента" and first["cards"]["rejected"] == 2
+    assert client.calls[-1][1] == "/api/workflow"  # первый вызов без ожидания
+    again = tools["studio_workflow"](wait_seconds=99)
+    assert again["changed"] is False
+    assert client.calls[-1][1] == "/api/workflow?rev=5&wait=25"  # ожидание ограничено 25 с
+
+
+def test_ideas_ready_идёт_с_токеном_планирования():
+    tools, client = _tools({("POST", "/api/workflow/ideas-ready"): {"stage": "review"}})
+    assert tools["studio_ideas_ready"]()["stage"] == "review"
+    assert client.modes[-1] == "plan"
 
 
 # ---------------------------------------------------------------------- чтение
@@ -158,61 +198,26 @@ def test_overview_ideas_frontend():
 # ------------------------------------------------------------------- planning
 
 
-def test_idea_add_собирает_json_и_повторяет_при_конфликте():
-    conflict = StudioError("ideas_conflict", "доску изменили", 409)
+def test_idea_add_отправляет_идею_на_валидацию():
     tools, client = _tools({
-        ("POST", "/api/decompose/parse"): lambda body: {
-            "scenarios": [{"title": "С"}], "pages": [], "warnings": ["предупреждение"]},
-        ("GET", "/api/ideas"): [{"revision": 1, "ideas": [{"id": "h"}], "activeId": "h"},
-                                {"revision": 2, "ideas": [{"id": "h"}, {"id": "n"}],
-                                 "activeId": "h"}],
-        ("POST", "/api/ideas"): [conflict, {"ok": True, "revision": 3}],
+        ("POST", "/api/workflow/propose"): {"idea_id": "agent-1", "scenarios": 1, "pages": 0,
+                                            "pending": 1, "warnings": []},
     })
     result = tools["studio_idea_add"]("Идея", "описание", scenarios=[{"title": "С"}])
-    assert result["revision"] == 3 and result["warnings"] == ["предупреждение"]
-    saves = [call for call in client.calls if call[:2] == ("POST", "/api/ideas")]
-    assert len(saves) == 2  # вторая попытка — со свежей доской
-    assert [i["id"] for i in saves[1][2]["ideas"]][:2] == ["h", "n"]
-    assert saves[1][2]["revision"] == 2 and saves[1][2]["activeId"] == "h"
-    sent = saves[1][2]["ideas"][-1]
-    assert sent["title"] == "Идея" and json.loads(sent["jsonText"])["scenarios"] == [{"title": "С"}]
+    assert result["idea_id"] == "agent-1" and "studio_ideas_ready" in result["next"]
+    method, path, body = client.calls[-1]
+    assert (method, path) == ("POST", "/api/workflow/propose")
+    assert body == {"title": "Идея", "description": "описание", "scenarios": [{"title": "С"}],
+                    "pages": []}
+    assert client.modes[-1] == "plan"
 
 
-def test_idea_add_не_скрывает_другие_ошибки():
+def test_idea_add_не_скрывает_ошибки_студии():
     tools, _ = _tools({
-        ("POST", "/api/decompose/parse"): {"scenarios": [], "pages": []},
-        ("GET", "/api/ideas"): {"revision": 0, "ideas": []},
-        ("POST", "/api/ideas"): StudioError("mode_forbidden", "нельзя", 403),
+        ("POST", "/api/workflow/propose"): StudioError("invalid_input", "slug 'Урок': нужен", 400),
     })
-    with pytest.raises(Exception, match="mode_forbidden"):
+    with pytest.raises(Exception, match="slug"):
         tools["studio_idea_add"]("И")
-
-
-def test_узлы_страницы_блоки_правила():
-    meta = {"graph": {"links": {"rows": [
-        {"node": "ID", "call": "GET /a", "status": "ok"},
-        {"node": "чужой", "call": "GET /x", "status": "missing"}]}}}
-    tools, client = _tools({
-        ("POST", "/api/metadata/graph-node"): {"node_id": "studio:1"},
-        ("POST", "/api/frontend/meta"): meta,
-    })
-    assert tools["studio_node_add"]("endpoint", "ep", path="/p", http_method="get") == {
-        "node_id": "studio:1", "kind": "endpoint", "name": "ep"}
-    assert tools["studio_node_delete"]("studio:1") == {"deleted": "studio:1"}
-    page = tools["studio_page_add"](
-        "orders", route="/o", calls=["GET /a"], blocks=[{"name": "Row", "calls": ["GET /a"]}])
-    assert page["page_id"].startswith("page-plan:") and len(page["block_ids"]) == 1
-    actions = [body["action"] for method, path, body in client.calls if path == "/api/frontend/meta"]
-    assert actions == ["save_page", "save_block"]
-    block = tools["studio_block_add"]("page-plan:x", "Extra", calls=["GET /a"])
-    assert block["block_id"].startswith("block-plan:")
-    tools["studio_rule_add"]("page-plan:x", "Правило", block_id="b")
-    tools["studio_front_delete"]("page-plan:x")
-    tools["studio_front_delete"]("page-plan:x", block_id="b")
-    last = [body for _, _, body in client.calls if body and body.get("action") == "delete_planned"]
-    assert [b["kind"] for b in last] == ["page", "block"]
-    rule = next(b for _, _, b in client.calls if b and b.get("action") == "save_rule")
-    assert rule["blockId"] == "b"
 
 
 # ------------------------------------------------------------------ implement
@@ -239,26 +244,33 @@ def test_brief_verify_report_reports():
     assert verify["items"][0] == {"number": 1, "kind": "endpoint", "name": "list",
                                   "status": "частично", "message": "нет теста"}
     assert tools["studio_verify"]("frontend")["items"][0]["name"] == "orders"
-    report = tools["studio_report"]("backend", [{"id": "n", "description": "d"}],
-                                    report={"tests": "ok"})
+    report = tools["studio_report"]("Сделано, тесты зелёные", "backend",
+                                    [{"id": "n", "description": "d"}], report={"tests": "ok"})
     assert report["report_id"] == "r-1" and report["rejected"] == [{"ref": "x", "reason": "нет"}]
     body = next(b for m, p, b in client.calls if p == "/api/agent/report")
     assert body["part"] == "backend" and body["json"]["report"] == {"tests": "ok"}
-    assert body["json"]["not_synced"] == []
+    assert body["summary"] == "Сделано, тесты зелёные" and body["json"]["not_synced"] == []
+    assert "implement" in client.modes  # отчёт подписан токеном реализации
+    minimal = tools["studio_report"]("Только текст")
+    assert minimal["report_id"] == "r-1"
+    last = [b for m, p, b in client.calls if p == "/api/agent/report"][-1]
+    assert last["json"] == {"updates": [], "not_synced": [], "report": {}}
     assert tools["studio_reports"]() == {"pending": 1, "reports": [
         {"id": "r-1", "part": "backend", "status": "pending", "counts": {}}]}
     for tool in ("studio_brief", "studio_verify"):
         with pytest.raises(Exception, match="part"):
             tools[tool]("middle")
     with pytest.raises(Exception, match="part"):
-        tools["studio_report"]("x", [])
+        tools["studio_report"]("x", "middle")
 
 
 def test_инструкции_и_набор_инструментов():
     server = create_server()
     names = set(server.studio_tools)
-    assert {"studio_connect", "studio_idea_add", "studio_page_add", "studio_brief",
-            "studio_verify", "studio_report"} <= names
-    assert len(names) == 17
+    assert {"studio_connect", "studio_workflow", "studio_idea_add", "studio_ideas_ready",
+            "studio_brief", "studio_verify", "studio_report"} <= names
+    # прямых записей в карту у агента нет: всё идёт через карточки и валидацию человека
+    assert not {"studio_node_add", "studio_page_add", "studio_block_add"} & names
+    assert len(names) == 13
     # клиент получает руководство как инструкции MCP: один источник, без HTTP
     assert getattr(server, "instructions", None) == load_guide()

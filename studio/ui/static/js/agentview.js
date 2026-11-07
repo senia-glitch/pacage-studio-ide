@@ -125,7 +125,7 @@ async function openInbox() {
   });
 }
 
-async function openReport(id) {
+export async function openReport(id) {
   let record;
   try {
     record = await api("/api/agent/report?id=" + encodeURIComponent(id));

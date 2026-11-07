@@ -65,6 +65,7 @@ from studio.metamodel import EDGE_KINDS, NODE_KINDS, Graph, Node
 from studio.scanner import scan
 from studio.scanner.anchors import AnchorResolver
 from studio.server import access
+from studio.server.workflow import Workflow
 from studio.source import load_sources, stat_fingerprint
 
 DEFAULT_POLL = 1.0
@@ -107,6 +108,8 @@ class ProjectState:
         # они не требуют, но интерфейс должен увидеть их без перезагрузки вкладки.
         self.aux = 0
         self._aux_stamp: str | None = None
+        # Дорожная карта цепочки «агент ↔ человек»: этап, режим, отчёт.
+        self.workflow = Workflow(self.root, self.lock, self._cond)
 
     # ------------------------------------------------------------------ scan
 
@@ -650,16 +653,34 @@ class ProjectState:
                         item["created_by"] = "agent"
                 ideas.append(item)
             board = {**data, "ideas": ideas, "revision": current_revision + 1}
-            path = self._ideas_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(".json.tmp")
-            tmp.write_text(
-                json.dumps(board, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-                newline="\n",
-            )
-            tmp.replace(path)
+            self._write_ideas(board)
             return {"ok": True, "count": len(data["ideas"]), "revision": board["revision"]}
+
+    def _write_ideas(self, board: dict) -> None:
+        path = self._ideas_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(
+            json.dumps(board, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+            newline="\n",
+        )
+        tmp.replace(path)
+
+    def mutate_ideas(self, mutator):
+        """Прочитать доску, изменить её ``mutator(board)`` и записать с новой ревизией.
+
+        Весь цикл идёт под замком состояния: параллельные записи UI и агента не теряются.
+        Возвращает то, что вернул ``mutator``; если он вернул ``False`` — записи нет.
+        """
+        with self.lock:
+            board = self.load_ideas()
+            result = mutator(board)
+            if result is False:
+                return result
+            board["revision"] = self._board_revision(board) + 1
+            self._write_ideas(board)
+            return result
 
     # ------------------------------------------------------------- агент
 
@@ -994,7 +1015,7 @@ class ProjectState:
 
     def _aux_stamp_now(self) -> str:
         digest = hashlib.sha1()
-        for name in ("frontend.json", "ideas.json"):
+        for name in ("frontend.json", "ideas.json", "workflow.json"):
             try:
                 digest.update((self.root / ".studio" / name).read_bytes())
             except OSError:

@@ -49,7 +49,14 @@ endpoint → scenario → io → model
     параметры нормализуются); `links` в `/api/frontend/graph`, раздел ТЗ.
 15. **MCP-сервер** (`studio/mcp_server.py`, `studio/agent/client.py`) — единственный
     интерфейс агента (`studio mcp`, extra `mcp`); инструменты вызывают HTTP API студии, права
-    и правило владения остаются на её стороне.
+    остаются на её стороне; студия находится автоматически по `.studio/server.json`
+    (`studio/server/discovery.py`).
+16. **Дорожная карта** (`studio/server/workflow.py`, `studio/server/chain.py`,
+    `.studio/workflow.json`) — этапы цепочки «синхронизация → режим → идеи → валидация →
+    перенос → выбор → реализация → отчёт» и допустимые переходы; права записи агента зависят от
+    этапа. Карточки валидации — `studio/agent/cards.py` (сценарии и страницы на доске идей с
+    полем `decision`); перенос принятого создаёт планы со slug и плановые страницы фронтенда.
+    UI: `roadmapview.js`, `swipeview.js`, `roadmapmodel.js`.
 14. **Проверка ТЗ фронтенда** (`studio/frontend/verify.py`) — задачи ТЗ по маркеру
     `studio-front-brief` сверяются с кодом; `studio verify --part frontend`,
     `/api/frontend/verify`.

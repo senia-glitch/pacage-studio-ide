@@ -9,6 +9,7 @@
 <meta name="studio-token" content="">
 <link rel="stylesheet" href="/static/app.css">
 <link rel="stylesheet" href="/static/workspace.css">
+<link rel="stylesheet" href="/static/roadmap.css">
 </head>
 <body>
 <header>
@@ -34,7 +35,7 @@
       </span>
     </span>
     <button id="diagBtn" type="button" title="Диагностика и жёлтые пометки">⚠ 0</button>
-    <button id="agentBtn" type="button" title="Подключить AI-агента: строка с адресом, токеном и режимом (планирование или реализация)">AI-агент</button>
+    <button id="agentBtn" type="button" title="Запасной способ подключения агента: строка с адресом и токеном (обычно не нужна — агент находит студию сам)">AI-агент</button>
     <button id="agentReportsBtn" type="button" class="inbox-btn" hidden title="Отчёты агента, ждущие вашего решения: откройте, проверьте и примите нужное" aria-label="Отчёты агента">✉ <b id="agentReportsCount">0</b></button>
   </div>
   <div class="header-canvas">
@@ -44,6 +45,7 @@
     <button id="rescan" title="Перечитать код проекта и метаданные">Обновить код</button>
   </div>
 </header>
+<nav id="roadmap" class="roadmap" aria-label="Дорожная карта" hidden></nav>
 <div id="offlineBanner" class="offline-banner" role="alert" hidden>Нет связи со студией: правки не сохраняются. Перезапустите <b>studio</b> и обновите страницу.</div>
 <main>
   <section class="tab on" id="tab-map" role="tabpanel" aria-labelledby="tab-map-button">

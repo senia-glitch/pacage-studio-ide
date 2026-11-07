@@ -24,7 +24,7 @@ from studio.frontend import scan_frontend
 from studio.frontend import sync as front_sync
 from studio.frontend import verify as front_verify
 from studio.metadata import MetadataError
-from studio.server import access
+from studio.server import access, chain, discovery
 from studio.server.security import (
     CSP,
     SECURITY_HEADERS,
@@ -161,7 +161,16 @@ def make_handler(ctx):
                         "Список разрешённого — GET /api/agent",
                     )
                 self._mode = mode
-                if mode != access.FULL and path != "/api/wait":
+                if mode != access.FULL:
+                    state.workflow.seen(mode)
+                    reason = state.workflow.agent_gate(
+                        mode, access.WRITE_PATHS.get(mode, frozenset()), self.command, path
+                    )
+                    if reason:
+                        slog.step(f"агент[{mode}] ЗАПРЕЩЕНО (этап) {self.command} {path}")
+                        self._discard_body()
+                        raise _HTTPProblem(403, "stage_forbidden", reason)
+                if mode != access.FULL and path not in ("/api/wait", "/api/workflow"):
                     slog.step(f"агент[{mode}] {self.command} {path}")
             if self.command == "POST":
                 ctype = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
@@ -218,6 +227,7 @@ def make_handler(ctx):
                     "anchor_not_found": 404,
                     "not_writable": 422,
                     "ideas_conflict": 409,
+                    "wrong_stage": 409,
                     "mode_forbidden": 403,
                 }.get(exc.code, 400)
                 code = "node_not_found" if exc.code == "anchor_not_found" else exc.code
@@ -351,6 +361,18 @@ def make_handler(ctx):
                 return self._json(frontend_verify_op(state.root, target, state.check_front_links))
             if url.path == "/api/agent":
                 return self._json(state.agent_info(self._mode))
+            if url.path == "/api/workflow":
+                query = urllib.parse.parse_qs(url.query)
+                if "wait" in query:
+                    try:
+                        rev = int((query.get("rev") or ["0"])[0])
+                        wait = float(query["wait"][0])
+                    except ValueError:
+                        rev, wait = 0, 0.0
+                    state.workflow.wait(rev, max(0.0, min(wait, 25.0)))
+                return self._json(chain.info(state))
+            if url.path == "/api/workflow/candidates":
+                return self._json(chain.candidates(state))
             return self._error(404, "not_found", "Не найдено")
 
         # --------------------------------------------------------------- POST
@@ -381,6 +403,22 @@ def make_handler(ctx):
                         state.root, str(data.get("id") or ""), str(data.get("decision") or "")
                     )
                 )
+            if url.path == "/api/workflow/propose":
+                return self._json(chain.propose(state, data))
+            if url.path == "/api/workflow/ideas-ready":
+                return self._json(chain.ideas_ready(state))
+            if url.path == "/api/workflow/start":
+                return self._json(chain.start(state, data))
+            if url.path == "/api/workflow/stage":
+                return self._json(chain.stage(state, data))
+            if url.path == "/api/workflow/decide":
+                return self._json(chain.decide(state, data))
+            if url.path == "/api/workflow/transfer":
+                return self._json(chain.transfer(state))
+            if url.path == "/api/workflow/select":
+                return self._json(chain.select(state, data, state.check_front_links))
+            if url.path == "/api/workflow/finish":
+                return self._json(chain.finish(state))
             if url.path == "/api/rescan":
                 graph = state.rescan("manual")
                 return self._json(graph.model_dump())
@@ -505,6 +543,12 @@ def agent_report_submit(state, data: dict, mode: str) -> dict:
     part = str(data.get("part") or "backend")
     if part not in ("backend", "frontend"):
         raise MetadataError("invalid_input", "part: backend или frontend")
+    summary = str(data.get("summary") or "").strip()
+    if mode != access.FULL and not summary:
+        raise MetadataError(
+            "invalid_input",
+            "Нужен summary: понятный человеку отчёт (что сделано, что проверено, что осталось)",
+        )
     raw = data.get("json")
     if isinstance(raw, dict):
         text = json.dumps(raw, ensure_ascii=False)
@@ -516,7 +560,9 @@ def agent_report_submit(state, data: dict, mode: str) -> dict:
         preview = state.sync_apply({"json": text})
     else:
         preview = frontend_sync_apply_op(state.root, {"json": text})
-    record = inbox.submit_report(state.root, part, mode, text, preview)
+    record = inbox.submit_report(state.root, part, mode, text, preview, summary)
+    if summary:
+        state.workflow.report_received(record["id"], summary)
     return {
         "id": record["id"],
         "status": record["status"],
@@ -749,11 +795,15 @@ def serve(
         with contextlib.suppress(Exception):
             webbrowser.open(url)
     state.start_watcher()
+    from studio import __version__
+
+    discovery.write(root, url, state.token, __version__)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("Остановлено")
     finally:
+        discovery.remove(root)
         state.stop_watcher()
         server.server_close()
     return bound_port

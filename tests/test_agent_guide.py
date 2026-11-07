@@ -12,7 +12,7 @@ from studio.agent import guide
 
 ROOT = Path(__file__).resolve().parent.parent
 TOOL_RE = re.compile(r"studio_[a-z_]+")
-NOT_TOOLS = {"studio_version"}  # поле ответа studio_connect, а не инструмент
+NOT_TOOLS = {"studio_version", "studio_not_running"}  # поле и код ошибки, не инструменты
 
 
 # ----------------------------------------------- руководство и инструменты MCP

@@ -41,7 +41,7 @@ def _denied(result) -> bool:
 
 
 def test_агент_не_меняет_и_не_удаляет_идеи_человека(demo: Path) -> None:
-    with _Server(demo) as srv:
+    with _Server(demo, stage="ideas") as srv:
         user, plan = srv.token, access.derive_token(srv.token, "plan")
         mine = {"id": "mine", "title": "Моя идея", "description": "от человека"}
         status, saved = _req(srv, "POST", "/api/ideas", user,
@@ -79,7 +79,7 @@ def test_агент_не_меняет_и_не_удаляет_идеи_челов
 
 
 def test_агент_не_правит_и_не_удаляет_узлы_человека(demo: Path) -> None:
-    with _Server(demo) as srv:
+    with _Server(demo, stage="ideas") as srv:
         user, plan = srv.token, access.derive_token(srv.token, "plan")
         status, mine = _req(srv, "POST", "/api/metadata/graph-node", user, {
             "kind": "endpoint", "name": "human_endpoint", "http_method": "get", "path": "/h"})
@@ -117,7 +117,7 @@ def test_агент_не_правит_и_не_удаляет_узлы_челов
 
 def test_агент_не_удаляет_и_не_правит_плановые_узлы_человека_во_фронтенде(tmp_path: Path) -> None:
     root, _ = _project(tmp_path)
-    with _Server(root) as srv:
+    with _Server(root, stage="ideas") as srv:
         user, plan = srv.token, access.derive_token(srv.token, "plan")
 
         def meta(token, payload):
@@ -157,7 +157,7 @@ def test_действия_агента_пишутся_в_журнал(demo: Path
     from studio import log as slog
 
     log_path = slog.start_run(demo, "test")
-    with _Server(demo) as srv:
+    with _Server(demo, stage="ideas") as srv:
         plan = access.derive_token(srv.token, "plan")
         _req(srv, "GET", "/api/agent", plan)
         _req(srv, "POST", "/api/ideas", plan, {"version": 1, "ideas": []})

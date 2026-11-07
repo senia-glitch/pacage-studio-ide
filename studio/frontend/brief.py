@@ -319,11 +319,12 @@ def brief_frontend(
     node_id: str | None = None,
     sections=None,
     check_links=None,
+    page_ids=None,
 ) -> dict:
     """ТЗ фронтенда по области; сохраняется в .studio/agent-brief-frontend.md.
 
     scope: "node" — узел и его потомки (node_id обязателен),
-           "all" — весь фронтенд,
+           "all" — весь фронтенд (page_ids — только эти страницы),
            "violations" — только нарушения (как задачи).
     sections: подмножество BRIEF_SECTIONS (None — все); «Что нужно сделать» и правила
     работы входят всегда.
@@ -332,10 +333,17 @@ def brief_frontend(
     """
     picked = pick_sections(sections, BRIEF_SECTIONS, "ТЗ")
     graph = build_front_graph(project_root)
-    if not graph.get("present"):
+    # Проект может начинаться с плановых страниц: каталог frontend/ агент создаст сам.
+    if not graph.get("present") and not any(p.get("planned") for p in graph.get("pages") or []):
         raise ValueError("frontend/ отсутствует в проекте")
     pages = graph["pages"]
     scope_note = "только нарушения" if scope == "violations" else "весь фронтенд"
+    if page_ids is not None and scope == "all":
+        wanted = {str(item) for item in page_ids}
+        pages = [page for page in pages if page["id"] in wanted]
+        if not pages:
+            raise ValueError("Выбранные страницы не найдены во фронтенде")
+        scope_note = f"выбранные страницы: {len(pages)}"
     if scope == "node" and node_id:
         selected = next((p for p in pages if p["id"] == node_id), None)
         if selected is None:

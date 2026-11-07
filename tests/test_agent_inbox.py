@@ -79,7 +79,7 @@ def _req(srv: _Server, method: str, path: str, token: str, payload: dict | None 
 
 @pytest.mark.integration
 def test_агент_отправляет_отчёт_пользователь_решает(demo: Path) -> None:
-    with _Server(demo) as srv:
+    with _Server(demo, stage="implement") as srv:
         implement = access.derive_token(srv.token, "implement")
         graph = srv.ctx.state.ensure_graph()
         node = next(n for n in graph.nodes if n.kind == "scenario" and not n.planned)
@@ -89,7 +89,7 @@ def test_агент_отправляет_отчёт_пользователь_р�
         ], "report": {"tests": "pytest: ok"}}
 
         status, body = _req(srv, "POST", "/api/agent/report", implement,
-                            {"part": "backend", "json": report})
+                            {"part": "backend", "summary": "Сделано всё", "json": report})
         assert status == 200 and body["status"] == "pending"
         assert body["counts"]["change"] == 1 and body["counts"]["rejected"] == 1
         assert body["rejected"] and "не найден" in body["rejected"][0]["reason"]
@@ -119,11 +119,15 @@ def test_агент_отправляет_отчёт_пользователь_р�
 
 @pytest.mark.integration
 def test_плохой_отчёт_сразу_даёт_агенту_ошибку(demo: Path) -> None:
-    with _Server(demo) as srv:
-        token = access.derive_token(srv.token, "plan")
+    with _Server(demo, stage="implement") as srv:
+        token = access.derive_token(srv.token, "implement")
         for payload in ({"json": "не json"}, {"json": ""}, {}, {"part": "other", "json": "{}"}):
+            payload = {"summary": "Итог", **payload}
             status, body = _req(srv, "POST", "/api/agent/report", token, payload)
             assert status == 400 and body["error"]["code"] == "invalid_input", payload
+        # без человеческого summary отчёт агента не принимается
+        status, body = _req(srv, "POST", "/api/agent/report", token, {"json": "{}"})
+        assert status == 400 and "summary" in body["error"]["message"]
         status, listing = _req(srv, "GET", "/api/agent/reports", token)
         assert listing["reports"] == []
 
@@ -131,13 +135,13 @@ def test_плохой_отчёт_сразу_даёт_агенту_ошибку(d
 @pytest.mark.integration
 def test_отчёт_по_фронтенду_и_живое_обновление(tmp_path: Path) -> None:
     root, _ = _project(tmp_path)
-    with _Server(root) as srv:
+    with _Server(root, stage="implement") as srv:
         token = access.derive_token(srv.token, "implement")
         state = srv.ctx.state
         state.check_aux()
         report = {"updates": [{"id": "page:reporting", "description": "Отчёты", "acceptance": []}]}
         status, body = _req(srv, "POST", "/api/agent/report", token,
-                            {"part": "frontend", "json": json.dumps(report)})
+                            {"part": "frontend", "summary": "Готово", "json": json.dumps(report)})
         assert status == 200 and body["counts"]["change"] == 1
         assert state.check_aux() is True  # интерфейс увидит новый отчёт сам
         status, listing = _req(srv, "GET", "/api/agent/reports", srv.token)

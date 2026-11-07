@@ -1,9 +1,9 @@
 """MCP-сервер студии: инструменты для AI-агента вместо «сырого» HTTP.
 
-Запуск: ``studio mcp`` (stdio). Сервер ничего не решает сам: он подключается к уже
-запущенной студии (``studio_connect`` со строкой из окна «AI-агент») и пересылает
-вызовы в её HTTP API с токеном выбранного режима. Права, правило владения и журнал
-остаются на стороне студии, поэтому запрещённое действие вернёт отказ студии.
+Запуск: ``studio mcp`` (stdio). Сервер ничего не решает сам: он находит уже запущенную
+студию проекта (``studio_connect`` без параметров читает ``.studio/server.json``) и
+пересылает вызовы в её HTTP API с токеном нужного режима. Права, этапы дорожной карты и
+журнал остаются на стороне студии, поэтому запрещённое действие вернёт отказ студии.
 
 Нужен пакет ``mcp`` (``pip install "pacage-studio[mcp]"``); поддерживаются версии с
 ``mcp.server.mcpserver.MCPServer`` (2.x) и ``mcp.server.fastmcp.FastMCP`` (1.x).
@@ -12,8 +12,6 @@
 from __future__ import annotations
 
 import functools
-import json
-import uuid
 from typing import Any
 
 from studio.agent.client import StudioClient, StudioError, parse_connection
@@ -47,13 +45,13 @@ class Session:
     def __init__(self, client: StudioClient | None = None):
         self.client = client
         self.info: dict = {}
+        self.rev = 0  # ревизия дорожной карты, которую агент видел в последний раз
 
     def need(self) -> StudioClient:
         if self.client is None:
             raise StudioError(
                 "not_connected",
-                "Нет подключения к студии: попросите у человека строку из окна «AI-агент» "
-                "и вызовите studio_connect.",
+                "Нет подключения к студии: вызовите studio_connect (без параметров).",
             )
         return self.client
 
@@ -124,42 +122,80 @@ def create_server(session: Session | None = None):
 
     @tool
     def studio_connect(connection: str = "", url: str = "", token: str = "") -> dict:
-        """Подключиться к запущенной студии.
+        """Подключиться к запущенной студии. Обычно — без параметров.
 
-        Передайте строку из окна «AI-агент» целиком (connection) либо url и token.
-        Возвращает режим токена (plan или implement), версию студии и корень проекта.
+        Без параметров студия находится сама (файл .studio/server.json в проекте): ничего
+        копировать человеку не нужно. Запасной путь для особых случаев — строка из окна
+        «AI-агент» целиком (connection) либо url и token.
         """
         fields = parse_connection(connection)
         url = url or fields.get("url", "")
         token = token or fields.get("token", "")
-        if not url or not token:
-            raise StudioError(
-                "bad_connection",
-                "Передайте строку подключения целиком (connection) или url и token.",
-            )
-        client = StudioClient(url, token)
+        if url or token:
+            if not url or not token:
+                raise StudioError(
+                    "bad_connection",
+                    "Передайте строку подключения целиком (connection) или url и token.",
+                )
+            client = StudioClient(url, token)
+            client.mode = fields.get("mode") or "plan"
+        else:
+            client = StudioClient.discover()
         info = client.get("/api/agent")
-        session.client, session.info = client, info
-        mode = info.get("mode", "")
-        asked = fields.get("mode")
-        note = (
-            f" (в строке указан режим {asked}, но токен даёт {mode})"
-            if asked and asked != mode
-            else ""
-        )
-        steps = {
-            "plan": "studio_overview → studio_graph/studio_frontend/studio_ideas → "
-            "studio_idea_add, studio_node_add, studio_page_add",
-            "implement": "studio_brief → реализовать задачи → studio_verify → studio_report",
-        }
+        flow = client.get("/api/workflow")
+        session.client, session.info, session.rev = client, info, 0
         return {
             "connected": True,
-            "mode": mode,
             "studio_version": info.get("studio_version"),
             "project_root": info.get("project_root"),
-            "next": steps.get(mode, "режим полного доступа: агенту нужен токен plan или implement")
-            + note,
+            "stage": flow.get("stage"),
+            "next": "Вызови studio_workflow: он скажет, чего ждёт человек и что делать тебе.",
         }
+
+    @tool
+    def studio_workflow(wait_seconds: int = 20) -> dict:
+        """Дорожная карта: на каком этапе человек и что делать агенту прямо сейчас.
+
+        Главный инструмент цикла. wait_seconds (0–25) — подождать смены этапа, если делать
+        пока нечего. Поле action: wait (ждём человека — вызови снова), propose (присылай
+        идеи), implement (реализуй выбранное ТЗ). Если несколько минут подряд action=wait,
+        скажи человеку, чего ждёшь, и остановись.
+        """
+        client = session.need()
+        wait = max(0, min(int(wait_seconds), 25))
+        path = "/api/workflow"
+        if wait and session.rev:
+            path += f"?rev={session.rev}&wait={wait}"
+        flow = client.get(path)
+        changed = flow.get("revision") != session.rev
+        session.rev = flow.get("revision") or 0
+        hint = flow.get("hint") or {}
+        cards = flow.get("cards") or {}
+        return {
+            "stage": flow.get("stage"),
+            "stage_title": next(
+                (s["title"] for s in flow.get("steps") or [] if s["id"] == flow.get("stage")), ""
+            ),
+            "path": flow.get("mode") or None,
+            "cycle": flow.get("cycle"),
+            "task": flow.get("task") or "",
+            "action": hint.get("action"),
+            "instruction": hint.get("text"),
+            "cards": {k: cards.get(k, 0) for k in ("pending", "accepted", "rejected")},
+            "selected": flow.get("selected"),
+            "briefs": flow.get("briefs"),
+            "changed": changed,
+        }
+
+    @tool
+    def studio_ideas_ready(note: str = "") -> dict:
+        """Сообщить, что идеи готовы: человек переходит к валидации карточек.
+
+        Вызывай после последней studio_idea_add (этап «Идеи агента»). note не используется
+        студией — только для следа в журнале.
+        """
+        result = session.need().post("/api/workflow/ideas-ready", {}, mode="plan")
+        return {**result, "next": "Человек валидирует карточки. Вернись к studio_workflow."}
 
     # ------------------------------------------------------------------ чтение
 
@@ -298,7 +334,7 @@ def create_server(session: Session | None = None):
             ],
         }
 
-    # ------------------------------------------------- режим planning: запись
+    # ------------------------------------------------------- этап «Идеи агента»
 
     @tool
     def studio_idea_add(
@@ -307,199 +343,26 @@ def create_server(session: Session | None = None):
         scenarios: list[dict] | None = None,
         pages: list[dict] | None = None,
     ) -> dict:
-        """Добавить идею на доску (режим planning). Идеи человека не меняются.
+        """Добавить идею с готовыми сценариями: каждый станет карточкой для свайпа человека.
 
-        scenarios — сценарии бэкенда: {title, slug, description, acceptance[], domain,
-        http_method, path, uses_db, with_test}. pages — страницы фронтенда: {title, name,
-        description, acceptance[], domain, route, calls[«GET /path»], blocks[{name,
-        description, acceptance[], calls[]}]}. Человек сам разберёт ответ на вкладке «Идеи».
-        """
-        client = session.need()
-        answer = {"scenarios": scenarios or [], "pages": pages or []}
-        text = json.dumps(answer, ensure_ascii=False)
-        parsed = client.post("/api/decompose/parse", {"text": text})
-        idea_id = "agent-" + uuid.uuid4().hex[:10]
-        idea = {
-            "id": idea_id,
-            "title": title,
-            "description": description,
-            "jsonText": json.dumps(
-                {"scenarios": parsed["scenarios"], "pages": parsed["pages"]},
-                ensure_ascii=False,
-                indent=2,
-            ),
-        }
-        board = client.get("/api/ideas")
-        for attempt in range(2):
-            body = {
-                "version": 1,
-                "activeId": board.get("activeId") or idea_id,
-                "revision": board.get("revision", 0),
-                "ideas": [*(board.get("ideas") or []), idea],
-            }
-            try:
-                saved = client.post("/api/ideas", body)
-                break
-            except StudioError as exc:
-                if exc.code != "ideas_conflict" or attempt:
-                    raise
-                board = client.get("/api/ideas")  # доску изменили: повторить со свежей
-        return {
-            "idea_id": idea_id,
-            "revision": saved.get("revision"),
-            "scenarios": len(parsed["scenarios"]),
-            "pages": len(parsed["pages"]),
-            "warnings": parsed.get("warnings") or [],
-            "next": "Человек откроет вкладку «Идеи» и нажмёт «Разобрать ответ».",
-        }
-
-    @tool
-    def studio_node_add(
-        kind: str,
-        name: str,
-        description: str = "",
-        acceptance: list[str] | None = None,
-        domain: str = "",
-        http_method: str = "",
-        path: str = "",
-        parent_id: str = "",
-        edge_kind: str = "",
-    ) -> dict:
-        """Плановый узел бэкенда на карте (режим planning).
-
-        Типичная цепочка: endpoint (http_method, path), затем scenario с parent_id эндпоинта и
-        edge_kind=dispatch. Правка и удаление — только своих узлов.
+        scenarios — сценарии бэкенда: {title, slug (snake_case, латиница — обязателен как
+        имя будущего кода), description, acceptance[], domain, http_method, path, uses_db,
+        with_test}. pages — страницы фронтенда: {title, name (kebab-case), description,
+        acceptance[], domain, route, calls[«GET /path»], blocks[{name, description,
+        acceptance[], calls[]}]}. Студия проверяет slug и конфликты сразу: при ошибке
+        исправь и отправь снова. Можно вызывать несколько раз; в конце — studio_ideas_ready.
         """
         body = {
-            "kind": kind,
-            "name": name,
+            "title": title,
             "description": description,
-            "acceptance": acceptance or [],
-            "domain": domain,
-            "http_method": http_method,
-            "path": path,
-            "parent_id": parent_id,
-            "edge_kind": edge_kind,
+            "scenarios": scenarios or [],
+            "pages": pages or [],
         }
-        result = session.need().post("/api/metadata/graph-node", body)
-        return {"node_id": result.get("node_id"), "kind": kind, "name": name}
-
-    @tool
-    def studio_node_delete(node_id: str) -> dict:
-        """Удалить свой плановый узел вместе с веткой (чужие узлы студия не даст удалить)."""
-        session.need().post("/api/metadata/graph-node/delete", {"node_id": node_id})
-        return {"deleted": node_id}
-
-    def _meta(payload: dict) -> dict:
-        return session.need().post("/api/frontend/meta", payload)
-
-    @tool
-    def studio_page_add(
-        name: str,
-        description: str = "",
-        route: str = "",
-        domain: str = "",
-        acceptance: list[str] | None = None,
-        calls: list[str] | None = None,
-        blocks: list[dict] | None = None,
-    ) -> dict:
-        """Плановая страница фронтенда с блоками (режим planning).
-
-        name — папка страницы в kebab-case; calls — вызываемые эндпоинты «GET /path»;
-        blocks — [{name (PascalCase), description, acceptance[], calls[]}]. В ответе —
-        статус каждого вызова в бэкенде (ok или missing).
-        """
-        page_id = f"page-plan:{uuid.uuid4()}"
-        response = _meta(
-            {
-                "action": "save_page",
-                "id": page_id,
-                "plannedNew": True,
-                "name": name,
-                "description": description,
-                "acceptance": acceptance or [],
-                "domain": domain,
-                "route": route,
-                "calls": calls or [],
-            }
-        )
-        block_ids = []
-        for block in blocks or []:
-            block_id = f"block-plan:{uuid.uuid4()}"
-            response = _meta(
-                {
-                    "action": "save_block",
-                    "pageId": page_id,
-                    "id": block_id,
-                    "name": block.get("name", ""),
-                    "description": block.get("description", ""),
-                    "acceptance": block.get("acceptance") or [],
-                    "calls": block.get("calls") or [],
-                }
-            )
-            block_ids.append(block_id)
+        result = session.need().post("/api/workflow/propose", body, mode="plan")
         return {
-            "page_id": page_id,
-            "block_ids": block_ids,
-            "links": _links_for(response, {page_id, *block_ids}),
+            **result,
+            "next": "Когда идей достаточно, вызови studio_ideas_ready.",
         }
-
-    @tool
-    def studio_block_add(
-        page_id: str,
-        name: str,
-        description: str = "",
-        acceptance: list[str] | None = None,
-        calls: list[str] | None = None,
-    ) -> dict:
-        """Добавить плановый блок на страницу (в том числе созданную человеком)."""
-        block_id = f"block-plan:{uuid.uuid4()}"
-        response = _meta(
-            {
-                "action": "save_block",
-                "pageId": page_id,
-                "id": block_id,
-                "name": name,
-                "description": description,
-                "acceptance": acceptance or [],
-                "calls": calls or [],
-            }
-        )
-        return {"block_id": block_id, "links": _links_for(response, {block_id})}
-
-    @tool
-    def studio_rule_add(
-        page_id: str,
-        name: str,
-        description: str = "",
-        acceptance: list[str] | None = None,
-        block_id: str = "",
-    ) -> dict:
-        """Добавить новое правило странице или блоку (существующие правила не правятся)."""
-        payload = {
-            "action": "save_rule",
-            "pageId": page_id,
-            "name": name,
-            "description": description,
-            "acceptance": acceptance or [],
-        }
-        if block_id:
-            payload["blockId"] = block_id
-        _meta(payload)
-        return {"added": name, "page_id": page_id, "block_id": block_id}
-
-    @tool
-    def studio_front_delete(page_id: str, block_id: str = "") -> dict:
-        """Удалить свою плановую страницу или блок (page_id, и block_id для блока)."""
-        _meta(
-            {
-                "action": "delete_planned",
-                "kind": "block" if block_id else "page",
-                "pageId": page_id,
-                "blockId": block_id,
-            }
-        )
-        return {"deleted": block_id or page_id}
 
     # ----------------------------------------------- режим implement: работа
 
@@ -541,31 +404,38 @@ def create_server(session: Session | None = None):
 
     @tool
     def studio_report(
-        part: str,
-        updates: list[dict],
+        summary: str,
+        part: str = "backend",
+        updates: list[dict] | None = None,
         not_synced: list[dict] | None = None,
         report: dict | None = None,
     ) -> dict:
-        """Отправить итоговый отчёт человеку (режим implement); применяет его только он.
+        """Отправить человеку итоговый отчёт: завершает реализацию (этап «Отчёт»).
 
-        updates — [{id, description, acceptance[]}] (id узла из ТЗ; для планов бэкенда
-        {plan, layer, description, acceptance[]}); not_synced — [{id, reason}]; report —
-        {outside_changes[], tests, questions[], decisions[]}. В ответе: что студия
-        отклонила (rejected) и почему — исправьте и отправьте заново.
+        summary — понятный человеку текст: что сделано, что проверено (тесты, studio_verify),
+        что осталось или потребует решения. updates — необязательные описания реализованных
+        узлов [{id, description, acceptance[]}] (для планов бэкенда {plan, layer, ...});
+        not_synced — [{id, reason}]; report — {outside_changes[], tests, questions[],
+        decisions[]}. В ответе rejected перечисляет отклонённые записи updates.
         """
         part = _part(part)
         body = {
             "part": part,
-            "json": {"updates": updates, "not_synced": not_synced or [], "report": report or {}},
+            "summary": summary,
+            "json": {
+                "updates": updates or [],
+                "not_synced": not_synced or [],
+                "report": report or {},
+            },
         }
-        result = session.need().post("/api/agent/report", body)
+        result = session.need().post("/api/agent/report", body, mode="implement")
         return {
             "report_id": result.get("id"),
             "status": result.get("status"),
             "counts": result.get("counts"),
             "rejected": result.get("rejected") or [],
             "warnings": result.get("warnings") or [],
-            "next": "Отчёт ждёт человека в «Отчёты агента» (кнопка ✉); сам он не применяется.",
+            "next": "Человек читает отчёт в студии. Вернись к studio_workflow.",
         }
 
     @tool

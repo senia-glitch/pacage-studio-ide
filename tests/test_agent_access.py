@@ -87,7 +87,7 @@ def test_рукопожатие_по_режимам(demo: Path) -> None:
 
 @pytest.mark.integration
 def test_запрещённые_маршруты_режимов(demo: Path) -> None:
-    with _Server(demo) as srv:
+    with _Server(demo, stage="ideas") as srv:
         plan = access.derive_token(srv.token, "plan")
         implement = access.derive_token(srv.token, "implement")
         board = {"version": 1, "activeId": "", "ideas": []}
@@ -112,7 +112,7 @@ def test_запрещённые_маршруты_режимов(demo: Path) -> N
 
 @pytest.mark.integration
 def test_агент_правит_только_плановые_узлы_фронтенда(demo: Path) -> None:
-    with _Server(demo) as srv:
+    with _Server(demo, stage="ideas") as srv:
         plan = access.derive_token(srv.token, "plan")
         fact_page = {"action": "save_page", "id": "page:reporting", "description": "чужое"}
         status, body = _post(srv, "/api/frontend/meta", plan, fact_page)

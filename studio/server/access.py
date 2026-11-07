@@ -6,7 +6,10 @@ UI получает корневой токен и может всё. Агент
 - ``plan`` — планирование: читает проект, пишет идеи и плановые узлы; кода и
   описаний существующих узлов не трогает;
 - ``implement`` — реализация: читает проект и сохранённое пользователем ТЗ,
-  проверяет результат (verify); план и идеи не меняет.
+  проверяет результат (verify), отправляет отчёт; план и идеи не меняет.
+
+Запись режима открыта только на его этапах дорожной карты (``server.workflow``): идеи —
+пока человек ждёт их, отчёт — пока идёт реализация.
 
 Ни один режим агента не применяет JSON-ответы: ``apply`` разрешён только UI.
 """
@@ -37,6 +40,7 @@ _GET_READ = frozenset(
         "/api/frontend/brief/last",
         "/api/frontend/verify",
         "/api/agent/reports",
+        "/api/workflow",
     }
 )
 # POST, которые ничего не меняют в плане и коде проекта (отчёты, промпты,
@@ -52,7 +56,6 @@ _POST_SAFE = frozenset(
         "/api/plan/preview",
         "/api/sync/apply",
         "/api/frontend/sync/apply",
-        "/api/agent/report",
         "/api/decompose/parse",
     }
 )
@@ -63,14 +66,20 @@ _POST_PLAN = frozenset(
         "/api/metadata/graph-node",
         "/api/metadata/graph-node/delete",
         "/api/frontend/meta",
+        "/api/workflow/propose",
+        "/api/workflow/ideas-ready",
     }
 )
+# Отчёт по реализации: только режим реализации.
+_POST_IMPLEMENT = frozenset({"/api/agent/report"})
+# Записи, которые режим вправе делать лишь на «своих» этапах дорожной карты.
+WRITE_PATHS: dict[str, frozenset[str]] = {PLAN: _POST_PLAN, IMPLEMENT: _POST_IMPLEMENT}
 # Маршруты приёма JSON-ответа: агент может только проверить (preview).
 APPLY_PATHS = frozenset({"/api/sync/apply", "/api/frontend/sync/apply"})
 
 ALLOWED: dict[str, dict[str, frozenset[str]]] = {
     PLAN: {"GET": _GET_READ, "POST": _POST_SAFE | _POST_PLAN},
-    IMPLEMENT: {"GET": _GET_READ, "POST": _POST_SAFE},
+    IMPLEMENT: {"GET": _GET_READ, "POST": _POST_SAFE | _POST_IMPLEMENT},
 }
 
 def derive_token(root_token: str, mode: str) -> str:
@@ -107,6 +116,7 @@ __all__ = [
     "FULL",
     "IMPLEMENT",
     "PLAN",
+    "WRITE_PATHS",
     "derive_token",
     "route_allowed",
     "token_mode",

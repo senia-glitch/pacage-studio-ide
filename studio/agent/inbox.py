@@ -68,7 +68,9 @@ def summary(record: dict) -> dict:
     return {key: value for key, value in record.items() if key != "raw"}
 
 
-def submit_report(root: Path, part: str, mode: str, raw: str, preview: dict) -> dict:
+def submit_report(
+    root: Path, part: str, mode: str, raw: str, preview: dict, summary: str = ""
+) -> dict:
     """Сохранить отчёт агента со статусом pending; ``preview`` — результат проверки."""
     with _LOCK:
         records = _all(root)
@@ -93,6 +95,7 @@ def submit_report(root: Path, part: str, mode: str, raw: str, preview: dict) -> 
             "status": PENDING,
             "counts": preview.get("counts") or {},
             "agent_report": preview.get("report"),
+            "summary": str(summary or ""),
             "raw": raw,
         }
         _write(root, record)

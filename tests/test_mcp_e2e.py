@@ -1,14 +1,15 @@
 """MCP по настоящему протоколу: `studio mcp` как процесс, клиент SDK, живая студия.
 
-Агент работает только через инструменты MCP (строка подключения → planning → ТЗ человека →
-implement → отчёт); человек — через токен интерфейса. Проверяет всю цепочку: stdio, сервер,
-HTTP-клиент, права режимов, правило владения.
+Агент работает только через инструменты MCP и находит студию сам (`.studio/server.json`);
+человек ведёт дорожную карту через токен интерфейса. Проверяется вся цепочка: stdio,
+сервер, автообнаружение, HTTP-клиент, этапы и права.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -18,7 +19,8 @@ from agent_helpers import implement_lessons as _implement
 from test_frontend_links import _project
 from test_server import _Server
 
-from studio.server import access
+from studio import __version__
+from studio.server import discovery
 
 pytest.importorskip("mcp")
 from mcp import ClientSession, StdioServerParameters  # noqa: E402
@@ -41,30 +43,33 @@ async def _tool(session: ClientSession, name: str, arguments: dict | None = None
     return json.loads(text), text
 
 
-async def _run(connection: str, scenario):
+async def _run(scenario, project: Path | None = None):
+    env = {**os.environ, "PYTHONPATH": str(ROOT)}  # пакет из репозитория, а не установленный
+    env.pop("STUDIO_PROJECT", None)
     params = StdioServerParameters(
-        command=sys.executable, args=["-m", "studio", "mcp"], cwd=str(ROOT)
+        command=sys.executable,
+        args=["-m", "studio", "mcp"],
+        cwd=str(project or ROOT),
+        env=env,
     )
     async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
         await session.initialize()
         return await scenario(session)
 
 
-def _connection(srv: _Server, mode: str) -> str:
-    token = access.derive_token(srv.token, mode)
-    return f"Studio: {srv.url}\nToken: {token}\nMode: {mode}\nЗаголовок запросов: X-Studio-Token"
-
-
-def test_протокол_инструменты_и_инструкции() -> None:
+def test_протокол_инструменты_и_инструкции(tmp_path: Path) -> None:
     async def scenario(session):
         listed = await session.list_tools()
         names = {tool.name for tool in listed.tools}
-        assert len(names) == 17 and "studio_connect" in names
+        assert len(names) == 13 and {"studio_connect", "studio_workflow"} <= names
         result, text = await _tool(session, "studio_overview")
         assert result is None and "studio_connect" in text  # без подключения — понятная ошибка
+        # студия не запущена (нет .studio/server.json): понятная причина, не трассировка
+        result, text = await _tool(session, "studio_connect")
+        assert result is None and "studio_not_running" in text
         return True
 
-    assert asyncio.run(_run("", scenario))
+    assert asyncio.run(_run(scenario, tmp_path))
 
 
 def test_плохой_токен_и_чужой_адрес_отклоняются(demo: Path) -> None:
@@ -78,116 +83,119 @@ def test_плохой_токен_и_чужой_адрес_отклоняются
             assert alien is None and "не локальный" in text
             return True
 
-        assert asyncio.run(_run("", scenario))
+        assert asyncio.run(_run(scenario))
 
 
-def test_цикл_агента_через_mcp(tmp_path: Path) -> None:
+def test_цепочка_агента_через_mcp(tmp_path: Path) -> None:
     root, _ = _project(tmp_path)  # бэкенд-демо и каталог frontend/
     with _Server(root) as srv:
         user = srv.token
-        status, human = _call(srv, "POST", "/api/metadata/graph-node", user, {
-            "kind": "endpoint", "name": "human_endpoint", "http_method": "get", "path": "/h"})
+        discovery.write(root, srv.url, srv.token, __version__)
+        try:
+            assert _chain(srv, root, user)
+        finally:
+            discovery.remove(root)
+
+
+def _chain(srv, root: Path, user: str) -> bool:
+    flow = lambda: _call(srv, "GET", "/api/workflow", user)[1]  # noqa: E731
+
+    async def agent_session(session):
+        info, _ = await _tool(session, "studio_connect")  # без строки и токена
+        assert info["connected"] and info["stage"] == "mode"
+
+        # этап «Режим»: человек ещё не выбрал — агенту ждать, писать нельзя
+        waiting, _ = await _tool(session, "studio_workflow", {"wait_seconds": 0})
+        assert waiting["action"] == "wait" and waiting["stage"] == "mode"
+        denied, text = await _tool(session, "studio_idea_add", {"title": "Рано"})
+        assert denied is None and "stage_forbidden" in text
+        assert flow()["agent"]["connected"] is True  # синхронизация зафиксирована
+
+        # человек выбирает «планирование» и ставит задачу
+        status, _ = _call(srv, "POST", "/api/workflow/start", user,
+                          {"mode": "plan", "task": "Каталог уроков"})
         assert status == 200
+        step, _ = await _tool(session, "studio_workflow", {"wait_seconds": 0})
+        assert step["action"] == "propose" and step["task"] == "Каталог уроков"
 
-        # ---- planning: агент предлагает идею, плановые узлы и страницу
-        async def planning(session):
-            info, _ = await _tool(session, "studio_connect", {"connection": _connection(srv, "plan")})
-            assert info["mode"] == "plan"
-            overview, _ = await _tool(session, "studio_overview")
-            assert overview["counts"]["endpoints"] >= 1 and overview["reports"]["pending"] == 0
+        # этап «Идеи»: агент присылает разобранные сценарии и страницу
+        idea, _ = await _tool(session, "studio_idea_add", {
+            "title": "Уроки", "description": "Список уроков",
+            "scenarios": [{"title": "Список уроков", "slug": "list_lessons",
+                           "description": "Возвращает список уроков",
+                           "http_method": "get", "path": "/lessons"}],
+            "pages": [{"title": "Уроки", "name": "lessons-list", "route": "/lessons",
+                       "calls": ["get /lessons", "плохо"]}]})
+        assert idea["idea_id"].startswith("agent-") and (idea["scenarios"], idea["pages"]) == (1, 1)
+        assert any("плохо" in w for w in idea["warnings"])
+        bad, text = await _tool(session, "studio_idea_add", {
+            "title": "Плохая", "scenarios": [{"title": "Т", "slug": "Урок", "description": "д",
+                                              "http_method": "get", "path": "/x"}]})
+        assert bad is None and "slug" in text
 
-            idea, _ = await _tool(session, "studio_idea_add", {
-                "title": "Уроки", "description": "Список уроков",
-                "scenarios": [{"title": "Список уроков", "slug": "list_lessons",
-                               "http_method": "get", "path": "/lessons"}],
-                "pages": [{"title": "Уроки", "name": "lessons-list", "route": "/lessons",
-                           "calls": ["get /lessons", "плохо"]}]})
-            assert idea["idea_id"].startswith("agent-") and idea["pages"] == 1
-            assert any("плохо" in w for w in idea["warnings"])
+        ready, _ = await _tool(session, "studio_ideas_ready")
+        assert ready["stage"] == "review" and ready["pending"] == 2
 
-            endpoint, _ = await _tool(session, "studio_node_add", {
-                "kind": "endpoint", "name": "list_lessons", "description": "Список уроков",
-                "acceptance": ["200"], "domain": "lessons", "http_method": "get",
-                "path": "/lessons"})
-            scenario, _ = await _tool(session, "studio_node_add", {
-                "kind": "scenario", "name": "ListLessonsScenario", "description": "Читает уроки",
-                "acceptance": ["Возвращает список"], "parent_id": endpoint["node_id"],
-                "edge_kind": "dispatch"})
-            assert scenario["node_id"].startswith("studio:")
-            page, _ = await _tool(session, "studio_page_add", {
-                "name": "lessons-list", "route": "/lessons", "calls": ["GET /lessons"],
-                "blocks": [{"name": "LessonList", "calls": ["GET /lessons"]}]})
-            assert [row["status"] for row in page["links"]] == ["ok", "ok"]
+        # валидация, перенос и выбор — человек
+        board = _call(srv, "GET", "/api/ideas", user)[1]["ideas"][0]
+        for card in (*board["scenarios"], *board["pages"]):
+            assert _call(srv, "POST", "/api/workflow/decide", user,
+                         {"id": card["id"], "decision": "accepted"})[0] == 200
+        assert _call(srv, "POST", "/api/workflow/stage", user, {"to": "confirm"})[0] == 200
+        moved = _call(srv, "POST", "/api/workflow/transfer", user, {})[1]
+        assert moved["stage"] == "select" and moved["transfer"]["errors"] == []
+        candidates = _call(srv, "GET", "/api/workflow/candidates", user)[1]
+        pages = [p["id"] for p in candidates["pages"]]
+        plans = [p["slug"] for p in candidates["plans"]]
+        assert "list_lessons" in plans and pages
+        chosen = _call(srv, "POST", "/api/workflow/select", user,
+                       {"plans": ["list_lessons"], "pages": pages})
+        assert chosen[0] == 200, chosen
+        return True
 
-            planned, _ = await _tool(session, "studio_graph", {"planned_only": True})
-            mine = {n["id"]: n for n in planned["nodes"]}
-            assert mine[endpoint["node_id"]]["created_by"] == "agent"
-            assert mine[human["node_id"]]["created_by"] == ""  # узел человека не помечен
-            front, _ = await _tool(session, "studio_frontend")
-            assert front["links"]["missing"] == []
+    async def implementing(session):
+        await _tool(session, "studio_connect")
+        step, _ = await _tool(session, "studio_workflow", {"wait_seconds": 0})
+        assert step["action"] == "implement" and step["briefs"]["backend"] == 1
+        assert step["briefs"]["frontend"] is not None
 
-            # правило владения и права режима: сервер отказывает, агент получает причину
-            denied, text = await _tool(session, "studio_node_delete", {"node_id": human["node_id"]})
-            assert denied is None and "mode_forbidden" in text
-            removed, _ = await _tool(session, "studio_node_delete", {"node_id": scenario["node_id"]})
-            assert removed == {"deleted": scenario["node_id"]}
-            _, text = await _tool(session, "studio_node_add", {
-                "kind": "scenario", "name": "ListLessonsScenario", "description": "Читает уроки",
-                "acceptance": ["Возвращает список"], "parent_id": endpoint["node_id"],
-                "edge_kind": "dispatch"})
-            return True
+        brief, _ = await _tool(session, "studio_brief")
+        (task,) = brief["tasks"]
+        assert task["slug"] == "list_lessons" and task["type"] == "plan"
+        names = {layer["suggested_name"] for layer in task["layers"]}
+        assert {"list_lessons", "ListLessonsScenario"} <= names  # имена из slug, не из названия
+        assert all(layer["target_file"] for layer in task["layers"])  # целевые файлы выведены
+        assert "studio-brief" in brief["markdown"]
+        front, _ = await _tool(session, "studio_brief", {"part": "frontend"})
+        assert front["tasks"]
+        before, _ = await _tool(session, "studio_verify")
+        assert before["status"] != "выполнено"
 
-        assert asyncio.run(_run("", planning))
+        # реализация идёт токеном реализации: новые идеи в этот этап не пишутся
+        denied, text = await _tool(session, "studio_idea_add", {"title": "Нельзя"})
+        assert denied is None and "stage_forbidden" in text
 
-        # ---- человек: оставляет предложенное и сохраняет ТЗ
-        status, _ = _call(srv, "POST", "/api/brief/save", user, {})
-        assert status == 200
+        _implement(root)  # агент пишет код; студия замечает его при скане
+        srv.ctx.state.rescan("code")
+        after, _ = await _tool(session, "studio_verify")
+        assert after["status"] == "выполнено", after["items"]
 
-        # ---- implement: ТЗ, реализация, verify, отчёт
-        async def implementing(session):
-            info, _ = await _tool(session, "studio_connect",
-                                  {"connection": _connection(srv, "implement")})
-            assert info["mode"] == "implement"
-            brief, _ = await _tool(session, "studio_brief")
-            anchors = {task["anchor"] for task in brief["tasks"]}
-            assert {"list_lessons", "ListLessonsScenario"} <= anchors
-            assert "studio-brief" in brief["markdown"]
-            before, _ = await _tool(session, "studio_verify")
-            assert before["status"] != "выполнено"
+        sent, _ = await _tool(session, "studio_report", {
+            "summary": "Реализован список уроков, studio_verify: выполнено, тесты зелёные.",
+            "report": {"tests": "pytest: 2 passed"}})
+        assert sent["status"] == "pending" and sent["rejected"] == []
 
-            denied, text = await _tool(session, "studio_idea_add", {"title": "Нельзя"})
-            assert denied is None and "mode_forbidden" in text  # implement не пишет идеи
+        # человек читает отчёт на этапе «Отчёт» и завершает цикл
+        current = flow()
+        assert current["stage"] == "report" and current["summary"].startswith("Реализован")
+        reports, _ = await _tool(session, "studio_reports")
+        assert reports["pending"] == 1
+        done = _call(srv, "POST", "/api/workflow/finish", user, {})
+        assert done[0] == 200 and done[1]["cycle"] == 2
+        again, _ = await _tool(session, "studio_workflow", {"wait_seconds": 0})
+        assert again["stage"] == "mode" and again["action"] == "wait"
+        return True
 
-            _implement(root)  # агент пишет код; студия замечает его при скане
-            srv.ctx.state.rescan("code")
-            after, _ = await _tool(session, "studio_verify")
-            assert after["status"] == "выполнено", after["items"]
-
-            found, _ = await _tool(session, "studio_graph", {"query": "ListLessonsScenario"})
-            fact = next(n for n in found["nodes"] if not n["planned"])
-            sent, _ = await _tool(session, "studio_report", {
-                "part": "backend",
-                "updates": [{"id": fact["id"], "description": "Читает уроки из БД",
-                             "acceptance": ["Возвращает список"]},
-                            {"id": "studio:нет-такого", "description": "x"}],
-                "report": {"tests": "pytest: 2 passed"}})
-            assert sent["status"] == "pending" and sent["counts"]["change"] == 1
-            assert len(sent["rejected"]) == 1 and "не найден" in sent["rejected"][0]["reason"]
-
-            # человек применяет отчёт и принимает решение
-            status, listing = _call(srv, "GET", "/api/agent/reports", user)
-            report_id = listing["reports"][0]["id"]
-            status, record = _call(srv, "GET", f"/api/agent/report?id={report_id}", user)
-            status, applied = _call(srv, "POST", "/api/sync/apply", user,
-                                    {"json": record["raw"], "apply": True})
-            assert status == 200 and applied["applied"] == 1
-            _call(srv, "POST", "/api/agent/report/decision", user,
-                  {"id": report_id, "decision": "accepted"})
-
-            reports, _ = await _tool(session, "studio_reports")
-            assert reports["pending"] == 0 and reports["reports"][0]["status"] == "accepted"
-            node, _ = await _tool(session, "studio_node", {"node_id": fact["id"]})
-            assert node["description"] == "Читает уроки из БД"
-            return True
-
-        assert asyncio.run(_run("", implementing))
+    assert asyncio.run(_run(agent_session, root))
+    assert asyncio.run(_run(implementing, root))
+    return True

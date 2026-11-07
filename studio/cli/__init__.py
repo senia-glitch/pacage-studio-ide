@@ -576,8 +576,10 @@ def cmd_skill(args) -> int:
     return 0
 
 
-def cmd_mcp(_args) -> int:
+def cmd_mcp(args) -> int:
     """MCP-сервер (stdio) для AI-агента. В stdout — только протокол, поэтому без печати."""
+    if getattr(args, "project", None):
+        os.environ["STUDIO_PROJECT"] = str(args.project)
     try:
         from studio.mcp_server import create_server
 
@@ -698,6 +700,9 @@ def build_parser() -> argparse.ArgumentParser:
     skill_p.set_defaults(f=cmd_skill)
 
     mcp_p = sub.add_parser("mcp", help="MCP-сервер для AI-агента (stdio)")
+    mcp_p.add_argument(
+        "--project", default=None, help="папка проекта со студией (по умолчанию — текущая)"
+    )
     mcp_p.set_defaults(f=cmd_mcp)
 
     doctor_p = sub.add_parser("doctor", help="диагностика проекта")

@@ -155,14 +155,18 @@ def test_agent_report_submit_напрямую(demo: Path):
     state = _state(demo)
     node = next(n for n in state.graph.nodes if n.kind == "scenario" and not n.planned)
     report = {"updates": [{"id": node.id, "description": "Описание", "acceptance": []}]}
-    sent = agent_report_submit(state, {"part": "backend", "json": report}, "implement")
+    sent = agent_report_submit(
+        state, {"part": "backend", "summary": "Итог", "json": report}, "implement"
+    )
     assert sent["status"] == "pending" and sent["counts"]["change"] == 1
-    sent_text = agent_report_submit(state, {"json": json.dumps(report)}, "plan")  # part по умолчанию
+    sent_text = agent_report_submit(  # part по умолчанию
+        state, {"summary": "Итог", "json": json.dumps(report)}, "plan"
+    )
     assert sent_text["id"] != sent["id"]
     assert [r["mode"] for r in reversed(inbox.list_reports(demo))] == ["implement", "plan"]
     for bad in ({"part": "x", "json": "{}"}, {"json": ""}, {"json": 5}):
         with pytest.raises(MetadataError):
-            agent_report_submit(state, bad, "plan")
+            agent_report_submit(state, {"summary": "Итог", **bad}, "plan")
 
 
 # ---------------------------------------------------------- клиент студии
