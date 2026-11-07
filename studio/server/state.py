@@ -65,6 +65,7 @@ from studio.metamodel import EDGE_KINDS, NODE_KINDS, Graph, Node
 from studio.scanner import scan
 from studio.scanner.anchors import AnchorResolver
 from studio.server import access
+from studio.server.runner import Runner
 from studio.server.workflow import Workflow
 from studio.source import load_sources, stat_fingerprint
 
@@ -110,6 +111,9 @@ class ProjectState:
         self._aux_stamp: str | None = None
         # Дорожная карта цепочки «агент ↔ человек»: этап, режим, отчёт.
         self.workflow = Workflow(self.root, self.lock, self._cond)
+        # Автозапуск агента на его этапах: включается человеком в интерфейсе.
+        self.runner = Runner(self.root, self.workflow)
+        self.workflow.listeners.append(self.runner.on_stage)
 
     # ------------------------------------------------------------------ scan
 

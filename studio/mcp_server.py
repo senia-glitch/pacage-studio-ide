@@ -14,6 +14,7 @@ from __future__ import annotations
 import functools
 from typing import Any
 
+from studio.agent import brief_parts
 from studio.agent.client import StudioClient, StudioError, parse_connection
 from studio.agent.guide import load_guide
 
@@ -367,17 +368,38 @@ def create_server(session: Session | None = None):
     # ----------------------------------------------- режим implement: работа
 
     @tool
-    def studio_brief(part: str = "backend") -> dict:
-        """ТЗ, которое человек сохранил (backend) или собрал (frontend), и его задачи."""
+    def studio_brief(
+        part: str = "backend", task: int = 0, section: str = "", offset: int = 0
+    ) -> dict:
+        """ТЗ по частям (оно бывает на десятки тысяч символов и целиком не помещается).
+
+        Без параметров — оглавление: задачи (номер, имя, размер) и разделы. Дальше читай
+        нужное: task=N — одна задача целиком; section="2" — раздел (2 и 3 — правила
+        работы, один раз в начале). offset — продолжение, если ответ обрезан
+        (next_offset). part — backend или frontend.
+        """
         part = _part(part)
         path = "/api/brief/last" if part == "backend" else "/api/frontend/brief/last"
         brief = session.need().get(path)
-        return {
-            "part": part,
-            "brief_id": brief.get("brief_id"),
-            "tasks": brief.get("tasks") or [],
-            "markdown": brief.get("markdown"),
-        }
+        markdown = str(brief.get("markdown") or "")
+        base = {"part": part, "brief_id": brief.get("brief_id")}
+        if not task and not section:
+            return {
+                **base,
+                **brief_parts.outline(markdown, brief.get("tasks") or []),
+                "next": "Читай по частям: studio_brief(task=N) — задача, "
+                'studio_brief(section="2") — правила работы.',
+            }
+        parts = brief_parts.split_brief(markdown)
+        if task:
+            found = next((t for t in parts["tasks"] if t["number"] == int(task)), None)
+            if found is None:
+                raise StudioError("task_not_found", f"В ТЗ нет задачи T{task}: см. оглавление")
+            return {**base, "task": int(task), **brief_parts.page(found["text"], offset)}
+        found = next((s for s in parts["sections"] if s["key"] == str(section)), None)
+        if found is None:
+            raise StudioError("section_not_found", f"В ТЗ нет раздела {section}: см. оглавление")
+        return {**base, "section": str(section), **brief_parts.page(found["text"], offset)}
 
     @tool
     def studio_verify(part: str = "backend") -> dict:
@@ -390,6 +412,8 @@ def create_server(session: Session | None = None):
             "status": report.get("status"),
             "done": report.get("done"),
             "total": report.get("total"),
+            "note": "Проверка по структуре кода: есть ли слои, связи и тесты с нужными именами. "
+            "Критерии приёмки и поведение она не проверяет — это делают только тесты проекта.",
             "items": [
                 {
                     "number": item.get("number"),
@@ -399,6 +423,34 @@ def create_server(session: Session | None = None):
                     "message": item.get("message", ""),
                 }
                 for item in report.get("items") or []
+            ],
+        }
+
+    @tool
+    def studio_doctor(strict: bool = False, limit: int = 40) -> dict:
+        """Диагностика проекта (как `studio doctor [--strict]`): ошибки и предупреждения.
+
+        ok=false, если есть ошибки (а при strict=true — и предупреждения).
+        """
+        graph = session.need().get("/api/graph")
+        found = graph.get("diagnostics") or []
+        errors = [d for d in found if d.get("level") == "error"]
+        warnings = [d for d in found if d.get("level") == "warning"]
+        shown = [*errors, *warnings][: max(0, int(limit))]
+        return {
+            "ok": not errors and not (strict and warnings),
+            "errors": len(errors),
+            "warnings": len(warnings),
+            "info": len(found) - len(errors) - len(warnings),
+            "items": [
+                {
+                    "level": d.get("level"),
+                    "code": d.get("code"),
+                    "message": d.get("message"),
+                    "file": d.get("file") or "",
+                    "line": d.get("line") or 0,
+                }
+                for d in shown
             ],
         }
 

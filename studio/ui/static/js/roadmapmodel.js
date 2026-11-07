@@ -93,9 +93,29 @@ export function steps(flow) {
   return Array.isArray(flow && flow.steps) ? flow.steps : [];
 }
 
+/* Агент «готов», если он уже обращался к студии или студия запускает его сама (автозапуск). */
+export function agentReady(flow) {
+  return !!(flow && flow.agent && (flow.agent.connected || flow.agent.auto));
+}
+
+/* Что говорит автозапуск на этапах агента: строка для полосы и нужна ли кнопка «Запустить снова». */
+export function runnerNote(flow) {
+  const runner = flow && flow.runner;
+  if (!runner || !runner.enabled || !["ideas", "implement"].includes(flow.stage)) return null;
+  const messages = {
+    queued: "Студия запускает агента…",
+    running: "Агент запущен студией и работает",
+    done: "Агент выполнил этап и завершился",
+    stalled: runner.message,
+    failed: `Агент не отработал: ${String(runner.message || "").trim().split("\n").pop()}`,
+  };
+  const text = messages[runner.state] || "";
+  return text ? {text, retry: runner.state === "stalled" || runner.state === "failed", state: runner.state} : null;
+}
+
 const NOTES = {
-  mode: (flow) => (flow.agent && flow.agent.connected
-    ? "Агент подключён. Выберите, с чего начать."
+  mode: (flow) => (agentReady(flow)
+    ? (flow.agent.connected ? "Агент подключён. Выберите, с чего начать." : "Агент запустится сам, когда понадобится. Выберите, с чего начать.")
     : "Запустите агента в папке проекта: он найдёт студию сам."),
   ideas: (flow) => `Агент готовит идеи · карточек получено: ${(flow.cards && flow.cards.total) || 0}`,
   review: (flow) => `Осталось карточек: ${(flow.cards && flow.cards.pending) || 0}`,
@@ -117,7 +137,7 @@ export function primaryAction(flow) {
   const cards = flow.cards || {};
   switch (flow.stage) {
     case "mode":
-      return {id: "mode", label: flow.agent && flow.agent.connected ? "Выбрать режим" : "Как подключить агента"};
+      return {id: "mode", label: agentReady(flow) ? "Выбрать режим" : "Как подключить агента"};
     case "ideas":
       return cards.total > 0 ? {id: "review", label: "К валидации карточек"} : null;
     case "review":
@@ -140,7 +160,7 @@ export function autoOpen(flow) {
   if (!flow) return "";
   switch (flow.stage) {
     case "mode":
-      return flow.agent && flow.agent.connected ? "mode" : "";
+      return agentReady(flow) ? "mode" : "";
     case "review":
       return "swipe";
     case "confirm":

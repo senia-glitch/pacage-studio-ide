@@ -110,7 +110,7 @@ def test_присутствие_агента_и_шаги(tmp_path: Path) -> None
     steps = wf.steps()
     assert [s["id"] for s in steps] == list(STEP_ORDER)
     assert steps[0]["state"] == "done" and steps[1]["state"] == "active"
-    assert wf.describe({"cards": {}})["agent"] == {"connected": True, "mode": "plan"}
+    assert wf.describe({"cards": {}})["agent"] == {"connected": True, "auto": False, "mode": "plan"}
 
 
 def test_ожидание_смены_ревизии_без_блокировки(tmp_path: Path) -> None:
@@ -205,6 +205,37 @@ def test_идея_карточки_решения_и_этапы(demo: Path) -> N
     assert chain.stage(state, {"to": "mode"})["stage"] == "mode"
     with pytest.raises(MetadataError, match="длиннее"):
         chain.start(state, {"mode": "plan", "task": "x" * 5000})
+
+
+def test_дубли_маршрутов_и_страниц_ловятся_сразу(demo: Path) -> None:
+    state = _state(demo)
+    chain.start(state, {"mode": "plan"})
+    base = {"description": "д", "http_method": "GET"}
+    # в демо-проекте уже есть GET /api/v1/health: префикс и слэш в конце не мешают
+    for path in ("/health", "/api/v1/health", "/health/"):
+        with pytest.raises(MetadataError, match="уже есть") as error:
+            chain.propose(state, {"title": "Дубль", "scenarios": [
+                {**base, "title": "Здоровье", "slug": "health_check_2", "path": path}]})
+        assert "GET /api/v1/health" in error.value.message
+    # параметры пути обезличены: {id} и {lesson_id} — один маршрут
+    first = {**base, "title": "Урок", "slug": "get_lesson", "path": "/lessons/{id}"}
+    chain.propose(state, {"title": "Первая", "scenarios": [first]})
+    with pytest.raises(MetadataError, match="идея «Урок»"):
+        chain.propose(state, {"title": "Вторая", "scenarios": [
+            {**first, "slug": "get_lesson_2", "path": "/lessons/{lesson_id}"}]})
+    # другой метод на том же пути — это другой маршрут
+    chain.propose(state, {"title": "Третья", "scenarios": [
+        {**first, "slug": "delete_lesson", "http_method": "DELETE", "title": "Удалить"}]})
+
+    page = {"name": "lessons-list", "title": "Список", "route": "/lessons"}
+    chain.propose(state, {"title": "Страницы", "pages": [page]})
+    for clash in ({**page, "route": "/other"}, {**page, "name": "other-page"}):
+        with pytest.raises(MetadataError, match="уже занят"):
+            chain.propose(state, {"title": "Дубль страницы", "pages": [clash]})
+    # отклонённая карточка имя не занимает
+    card = state.load_ideas()["ideas"][-1]["pages"][0]["id"]
+    chain.decide(state, {"id": card, "decision": "rejected"})
+    chain.propose(state, {"title": "Снова", "pages": [page]})
 
 
 def test_ideas_ready_требует_карточки(demo: Path) -> None:

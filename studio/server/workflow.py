@@ -90,6 +90,9 @@ class Workflow:
         self.cond = cond
         self._seen: float | None = None
         self._seen_mode = ""
+        # Слушатели входа на этап (автозапуск агента) и признак «агент запускается сам».
+        self.listeners: list = []
+        self.auto_agent = False
         self.data = self._load()
 
     # ------------------------------------------------------------------ хранение
@@ -133,6 +136,13 @@ class Workflow:
             raise MetadataError("not_writable", "Не удалось сохранить дорожную карту")
         self.cond.notify_all()
 
+    def _emit(self) -> None:
+        for listener in list(self.listeners):
+            try:
+                listener(self.data["stage"], self.data["entries"])
+            except Exception:  # noqa: BLE001 — сбой слушателя не должен ломать переход
+                continue
+
     # ----------------------------------------------------------------- присутствие
 
     def seen(self, mode: str) -> None:
@@ -170,6 +180,7 @@ class Workflow:
             self.data["summary"] = ""
             self.data["report_id"] = ""
             self._save()
+            self._emit()
             return self.data
 
     def advance(self, stage: str, **fields) -> dict:
@@ -181,6 +192,7 @@ class Workflow:
                 self._reset_cycle()
             self.data.update(fields)
             self._save()
+            self._emit()
             return self.data
 
     def _reset_cycle(self) -> None:
@@ -198,6 +210,7 @@ class Workflow:
             self._reset_cycle()
             self.data["cycle"] += 1
             self._save()
+            self._emit()
             return self.data
 
     def reset(self) -> dict:
@@ -207,6 +220,7 @@ class Workflow:
                 self._go("mode")
                 self._reset_cycle()
                 self._save()
+                self._emit()
             return self.data
 
     def report_received(self, report_id: str, summary: str) -> None:
@@ -252,7 +266,7 @@ class Workflow:
 
     def steps(self) -> list[dict]:
         stage, mode = self.data["stage"], self.data["mode"]
-        connected = self.connected()
+        connected = self.connected() or self.auto_agent
         skip = PLANNING_ONLY if mode == "implement" else frozenset()
         out = []
         # До выбора режима активна «Синхронизация», пока агент не подключился.
@@ -301,7 +315,11 @@ class Workflow:
             data["selected"] = dict(self.data["selected"])
             return {
                 **data,
-                "agent": {"connected": self.connected(), "mode": self._seen_mode},
+                "agent": {
+                    "connected": self.connected(),
+                    "auto": self.auto_agent,
+                    "mode": self._seen_mode,
+                },
                 "steps": self.steps(),
                 "hint": self.hint(ctx),
                 **ctx,

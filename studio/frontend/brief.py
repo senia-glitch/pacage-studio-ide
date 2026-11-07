@@ -411,6 +411,9 @@ def brief_frontend(
         lines.append("Задач нет: узел соответствует описанию. Ниже — контекст и состояние проекта.")
     else:
         lines.append(f"Реализуй {total} задач(у/и) в frontend/. Разделы ниже — полный контекст.")
+        for block in tasks:  # текст задач должен быть в самом ТЗ, а не только в маркере
+            lines.append("")
+            lines.extend(block.splitlines())
     rules_text = load_front_prompt(project_root, "brief") or STANDARD_RULES
     lines.extend(rules_text.splitlines())
     lines.append("")

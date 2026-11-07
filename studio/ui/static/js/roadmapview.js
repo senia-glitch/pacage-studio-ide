@@ -1,8 +1,8 @@
 import {api} from "./api.js";
 import {$, esc, toast} from "./core.js";
 import {
-  autoKey, autoOpen, cardsOf, defaultSelection, primaryAction, progressOf, selectionCount,
-  selectionPayload, stageNote, steps,
+  agentReady, autoKey, autoOpen, cardsOf, defaultSelection, primaryAction, progressOf,
+  runnerNote, selectionCount, selectionPayload, stageNote, steps,
 } from "./roadmapmodel.js";
 import {closeSwipe, isSwipeOpen, openSwipe, refreshSwipe} from "./swipeview.js";
 
@@ -82,10 +82,44 @@ function openConnectHelp() {
   win.button("Закрыть", win.close, "primary");
 }
 
+/* --- автозапуск агента по этапам */
+
+async function openRunnerDialog() {
+  let view;
+  try { view = await api("/api/runner"); } catch (error) { toast(error.message); return; }
+  const win = dialog("Автозапуск агента", `
+    <p>Агент не висит в ожидании: студия сама запускает его на этапах «Идеи агента» и «Реализация», а после
+    выполнения этапа процесс агента завершается. Лимиты не тратятся, пока от агента ничего не нужно.</p>
+    <label class="rm-check"><input type="checkbox" id="rmRunEnabled"${view.enabled ? " checked" : ""}>
+      <span><b>Запускать агента автоматически</b></span></label>
+    <label class="rm-task">Команда (по аргументу на строку; <code>{prompt}</code> — текст запроса агенту)
+      <textarea id="rmRunCommand" rows="9" spellcheck="false">${esc(view.command.join("\n"))}</textarea></label>
+    <label class="rm-task">Предел одного запуска, минут
+      <input id="rmRunTimeout" type="number" min="1" max="240" value="${esc(view.timeout_minutes)}"></label>
+    <p class="rm-warn">Студия запустит эту программу в папке проекта с правами, указанными в команде (по умолчанию —
+    правка файлов и запуск тестов). Включайте, только если доверяете команде. Вывод — в .studio/runner.log.</p>
+    ${view.status && view.status.message ? `<p class="hint">Последний запуск: ${esc(view.status.message.trim().split("\n").pop())}</p>` : ""}`);
+  win.button("Вернуть стандартную команду", () => {
+    win.body.querySelector("#rmRunCommand").value = view.default_command.join("\n");
+  });
+  win.button("Закрыть", win.close);
+  win.button("Сохранить", async () => {
+    const result = await post("/api/runner/config", {
+      enabled: win.body.querySelector("#rmRunEnabled").checked,
+      command: win.body.querySelector("#rmRunCommand").value,
+      timeout_minutes: Number(win.body.querySelector("#rmRunTimeout").value),
+    });
+    if (!result) return;
+    win.close();
+    toast(result.enabled ? "Автозапуск включён: агент запускается по этапам" : "Автозапуск выключен");
+    await refreshRoadmap();
+  }, "primary");
+}
+
 /* --- этап 2: выбор режима */
 
 function openModeDialog() {
-  const connected = !!(flow && flow.agent && flow.agent.connected);
+  const connected = agentReady(flow);
   const win = dialog("С чего начнём?", `
     <div class="rm-choices">
       <button type="button" class="rm-choice" data-mode="plan"><b>Планирование</b>
@@ -297,6 +331,8 @@ function run(id) {
   else if (id === "help") openConnectHelp();
   else if (id === "review") post("/api/workflow/stage", {to: "review"}).then(apply);
   else if (id === "swipe") openSwipe({onStage: apply});
+  else if (id === "runner") openRunnerDialog();
+  else if (id === "retry") post("/api/runner/run").then(() => refreshRoadmap());
   else if (id === "confirm") openConfirm();
   else if (id === "select") openSelect();
   else if (id === "manual") confirmManual();
@@ -318,9 +354,11 @@ function render() {
   const list = steps(flow);
   const action = primaryAction(flow);
   const connected = !!(flow.agent && flow.agent.connected);
-  const note = flow.stage === "implement" && progress && progress.total
+  const auto = runnerNote(flow);
+  let note = flow.stage === "implement" && progress && progress.total
     ? `Агент реализует · выполнено ${progress.done} из ${progress.total}`
     : stageNote(flow);
+  if (auto && !(auto.state === "running" && progress && progress.total)) note = auto.text;
   root.hidden = false;
   root.dataset.stage = flow.stage;
   const html = `
@@ -329,7 +367,9 @@ function render() {
     <div class="rm-side">
       <span class="rm-note">${esc(note)}</span>
       ${action ? `<button type="button" class="primary rm-main" data-rm="${esc(action.id)}">${esc(action.label)}</button>` : ""}
+      ${auto && auto.retry ? '<button type="button" data-rm="retry" title="Запустить агента на этом этапе ещё раз">↻ Запустить агента</button>' : ""}
       ${flow.stage !== "mode" ? '<button type="button" class="rm-reset" data-rm="reset" title="Сбросить цепочку и начать заново">⟲ Заново</button>' : ""}
+      <button type="button" class="rm-reset" data-rm="runner" title="Автозапуск агента по этапам">⚙ Автозапуск: ${flow.runner && flow.runner.enabled ? "вкл" : "выкл"}</button>
       <span class="rm-agent ${connected ? "on" : "off"}" title="${connected ? "Агент обращался к студии недавно" : "Агент не подключён"}">● агент</span>
     </div>`;
   // Перерисовка только при изменении: иначе опрос заменяет кнопку между нажатием и отпусканием.

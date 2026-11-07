@@ -373,6 +373,8 @@ def make_handler(ctx):
                 return self._json(chain.info(state))
             if url.path == "/api/workflow/candidates":
                 return self._json(chain.candidates(state))
+            if url.path == "/api/runner":
+                return self._json(state.runner.view())
             return self._error(404, "not_found", "Не найдено")
 
         # --------------------------------------------------------------- POST
@@ -419,6 +421,14 @@ def make_handler(ctx):
                 return self._json(chain.select(state, data, state.check_front_links))
             if url.path == "/api/workflow/finish":
                 return self._json(chain.finish(state))
+            if url.path == "/api/runner/config":
+                state.runner.save_config(data)
+                return self._json(state.runner.view())
+            if url.path == "/api/runner/run":
+                return self._json(state.runner.retry())
+            if url.path == "/api/runner/stop":
+                state.runner.stop()
+                return self._json(state.runner.public())
             if url.path == "/api/rescan":
                 graph = state.rescan("manual")
                 return self._json(graph.model_dump())
@@ -804,6 +814,7 @@ def serve(
         print("Остановлено")
     finally:
         discovery.remove(root)
+        state.runner.stop()
         state.stop_watcher()
         server.server_close()
     return bound_port

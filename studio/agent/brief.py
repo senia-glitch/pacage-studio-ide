@@ -56,18 +56,24 @@ EDGE_NAMES = {
     "depends": "зависит",
 }
 CODE_EDGE_KINDS = frozenset({"dispatch", "scenario_call", "port_call", "table", "tests"})
-SECRET_RE = re.compile(
-    r"(?ix)"
-    r"(?:"
-    r"(?:^|[^A-Za-z0-9_])"
-    r"(?:[A-Z0-9_]*KEY|secret|token|password|passwd|api[_-]?key|"
-    r"access[_-]?key|private[_-]?key|auth[_-]?token)"
-    r"\s*[:=]"
-    r"|\{[^{}\n]*\b(?:secret|token|password|passwd|api[_-]?key|"
-    r"access[_-]?key|private[_-]?key)\b[^{}\n]*\}"
-    r"|[\"'][^\"'\n]*(?:secret|token|password|passwd)[^\"'\n]*[\"']"
-    r")"
+# Образец кода показывает агенту, как устроен проект, поэтому прячется только само значение
+# секрета: литерал в присваивании секретоподобному имени и узнаваемые формы ключей.
+# Ссылки на переменные и поля (`dto.password`, `settings.secret_key`) секретом не считаются.
+_SECRET_NAME = r"[A-Za-z0-9_]*(?:key|secret|token|passw(?:or)?d|pwd|credential)[A-Za-z0-9_]*"
+SECRET_ASSIGN_RE = re.compile(
+    r"(?i)(?P<head>(?<![\w.])[\"']?" + _SECRET_NAME + r"[\"']?"
+    r"(?:\s*:\s*[\w\[\]., |]+?)?\s*[:=]\s*[bru]{0,2})"
+    r"(?P<q>[\"'])(?P<val>(?:(?!(?P=q))[^\n])+)(?P=q)"
 )
+SECRET_SHAPES = (
+    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    re.compile(r"(?<=://)[^/\s:@]+:[^/\s@]+(?=@)"),
+)
+MASK = "***"
 
 
 class BriefError(Exception):
@@ -576,10 +582,22 @@ def _choose_sample(task: Node, samples: list[Node]) -> Node | None:
 
 
 def redact_sample(line: str) -> str:
-    """Скрыть строку образца, похожую на секрет."""
-    if SECRET_RE.search(line):
-        return "…"
-    return line
+    """Спрятать значения секретов в строке образца; остальной код остаётся как есть."""
+    masked = False
+
+    def hide(match: re.Match) -> str:
+        nonlocal masked
+        if "{" in match.group("val"):  # f-строка с подстановкой: значения тут нет
+            return match.group(0)
+        masked = True
+        quote = match.group("q")
+        return f"{match.group('head')}{quote}{MASK}{quote}"
+
+    out = SECRET_ASSIGN_RE.sub(hide, line)
+    for shape in SECRET_SHAPES:
+        out, count = shape.subn(MASK, out)
+        masked = masked or bool(count)
+    return out + "  # (значение скрыто)" if masked else out
 
 
 def _sample_code(source: SourceSet, node: Node) -> tuple[str, int, int] | None:
@@ -595,13 +613,7 @@ def _sample_code(source: SourceSet, node: Node) -> tuple[str, int, int] | None:
     truncated = len(lines) > SAMPLE_LINE_LIMIT
     if truncated:
         lines = lines[:SAMPLE_LINE_LIMIT]
-    cleaned: list[str] = []
-    for line in lines:
-        if SECRET_RE.search(line):
-            indent = line[: len(line) - len(line.lstrip())]
-            cleaned.append(f"{indent}# … (скрыто: возможный секрет)")
-        else:
-            cleaned.append(redact_sample(line))
+    cleaned = [redact_sample(line) for line in lines]
     if truncated:
         cleaned.append("… обрезано")
     return "\n".join(cleaned), start, min(end, start + SAMPLE_LINE_LIMIT - 1)
@@ -1573,8 +1585,14 @@ def _build_markdown(
     lines.append("")
     lines.append("После работы выполните:")
     lines.append("")
-    lines.append("- `studio verify <этот файл>` — проверить, что задачи выполнены;")
-    lines.append("- `studio doctor --strict` — проверить проект целиком.")
+    lines.append(
+        "- `studio verify <этот файл>` (через MCP — инструмент `studio_verify`) — проверить, "
+        "что задачи выполнены (по структуре кода; поведение подтверждают тесты);"
+    )
+    lines.append(
+        "- `studio doctor --strict` (через MCP — инструмент `studio_doctor`) — проверить "
+        "проект целиком."
+    )
     lines.append("")
     lines.extend(BRIEF_REPORT_BACKEND_LINES)
     lines.append("")

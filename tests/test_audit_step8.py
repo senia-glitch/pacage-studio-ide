@@ -495,22 +495,35 @@ def test_verify_находит_тест_с_точным_именем():
 
 
 @pytest.mark.parametrize(
-    "line",
+    ("line", "hidden"),
     [
-        'API_KEY="abc"',
-        "token = 'abc'",
-        "password = f'{pw}'",
-        "secret = 's'",
-        'print(f"{token}")',
-        'value = "password123"',
+        ('API_KEY="abc"', "abc"),
+        ("token = 'abc12'", "abc12"),
+        ('JWT_SECRET: str = "super-secret-value"', "super-secret-value"),
+        ('cfg = {"api_key": "abcd1234"}', "abcd1234"),
+        ('url = "postgres://admin:hunter2@db:5432/app"', "hunter2"),
+        ('sk = "sk-abcdefghijklmnopqrstuvwxyz"', "abcdefghijklmnop"),
     ],
 )
-def test_redact_ловит_секреты(line: str):
-    assert redact_sample(line) == "…"
+def test_redact_прячет_значение_секрета(line: str, hidden: str):
+    out = redact_sample(line)
+    assert hidden not in out and "***" in out and "скрыто" in out
 
 
-def test_redact_не_трогает_обычную_строку():
-    assert redact_sample("value = 1") == "value = 1"
+@pytest.mark.parametrize(
+    "line",
+    [
+        "value = 1",
+        "password = f'{pw}'",
+        'print(f"{token}")',
+        'value = "password123"',
+        'return await run("admin_login", {"email": dto.email, "password": dto.password})',
+        "key = settings.secret_key",
+        'token = os.environ["TOKEN"]',
+    ],
+)
+def test_redact_не_трогает_обычный_код(line: str):
+    assert redact_sample(line) == line
 
 
 def test_тз_без_обратных_слэшей_и_абсолютных_путей(demo: Path):

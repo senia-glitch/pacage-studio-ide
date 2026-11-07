@@ -29,6 +29,8 @@ GITIGNORE_ARTIFACTS = (
     "agent-reports/",
     "server.json",
     "workflow.json",
+    "runner.json",
+    "runner.log",
 )
 METADATA_IGNORE = "metadata.json"
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  agentReady,
   autoKey,
   autoOpen,
   cardsOf,
@@ -9,6 +10,7 @@ import {
   pendingQueue,
   primaryAction,
   progressOf,
+  runnerNote,
   selectionCount,
   selectionPayload,
   stageNote,
@@ -129,4 +131,27 @@ test("progressOf складывает части проверки", () => {
   assert.deepEqual(progressOf([{done: 1, total: 2}, null, {done: 2, total: 2}]), {done: 3, total: 4, complete: false});
   assert.equal(progressOf([{done: 2, total: 2}]).complete, true);
   assert.deepEqual(progressOf([]), {done: 0, total: 0, complete: false});
+});
+
+test("автозапуск: агент считается готовым, пока его запускает студия", () => {
+  assert.equal(agentReady({agent: {connected: false}}), false);
+  assert.equal(agentReady({agent: {connected: false, auto: true}}), true);
+  assert.equal(agentReady(null), false);
+  assert.equal(primaryAction({stage: "mode", agent: {auto: true}}).label, "Выбрать режим");
+  assert.equal(autoOpen({stage: "mode", agent: {auto: true}}), "mode");
+  assert.match(stageNote({stage: "mode", agent: {auto: true}}), /запустится сам/);
+});
+
+test("runnerNote: состояние автозапуска на этапах агента", () => {
+  const base = {stage: "ideas", runner: {enabled: true, state: "running"}};
+  assert.equal(runnerNote({...base}).retry, false);
+  assert.match(runnerNote({...base}).text, /работает/);
+  const failed = runnerNote({...base, runner: {enabled: true, state: "failed", message: "нет команды\nхвост"}});
+  assert.equal(failed.retry, true);
+  assert.equal(failed.text, "Агент не отработал: хвост");
+  assert.equal(runnerNote({...base, runner: {enabled: true, state: "stalled", message: "этап не продвинулся"}}).retry, true);
+  assert.equal(runnerNote({stage: "review", runner: {enabled: true, state: "running"}}), null);
+  assert.equal(runnerNote({...base, runner: {enabled: false, state: "running"}}), null);
+  assert.equal(runnerNote({...base, runner: {enabled: true, state: "idle"}}), null);
+  assert.equal(runnerNote(null), null);
 });

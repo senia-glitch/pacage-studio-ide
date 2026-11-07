@@ -223,9 +223,18 @@ def test_idea_add_не_скрывает_ошибки_студии():
 # ------------------------------------------------------------------ implement
 
 
+BRIEF_TEXT = (
+    "# ТЗ\n\n## 1. Что нужно сделать\n\nТаблица\n\n## 2. Правила\n\nПравило\n\n"
+    "## 4. Задачи\n\n### T1. План сценария\nТекст задачи\n\n## 9. Отчёт\n\nКонец\n"
+)
+
+
 def test_brief_verify_report_reports():
     tools, client = _tools({
-        ("GET", "/api/brief/last"): {"brief_id": "b1", "tasks": [{"number": 1}], "markdown": "# ТЗ"},
+        ("GET", "/api/brief/last"): {
+            "brief_id": "b1",
+            "tasks": [{"number": 1, "type": "plan", "slug": "list_x"}],
+            "markdown": BRIEF_TEXT},
         ("GET", "/api/frontend/brief/last"): {"brief_id": "f1", "tasks": [], "markdown": "# Ф"},
         ("GET", "/api/verify"): {"status": "частично", "done": 1, "total": 2, "items": [
             {"number": 1, "kind": "endpoint", "anchor": "list", "status": "частично",
@@ -237,8 +246,18 @@ def test_brief_verify_report_reports():
         ("GET", "/api/agent/reports"): {"pending": 1, "reports": [
             {"id": "r-1", "part": "backend", "status": "pending", "counts": {}}]},
     })
-    brief = tools["studio_brief"]()
-    assert brief["brief_id"] == "b1" and brief["markdown"] == "# ТЗ"
+    brief = tools["studio_brief"]()  # без параметров — оглавление, а не весь текст
+    assert brief["brief_id"] == "b1" and "markdown" not in brief
+    assert brief["tasks"] == [{"number": 1, "kind": "plan", "name": "list_x",
+                               "title": "План сценария", "chars": brief["tasks"][0]["chars"]}]
+    assert [s["key"] for s in brief["sections"]] == ["1", "2", "4", "9"]
+    one = tools["studio_brief"](task=1)
+    assert "Текст задачи" in one["markdown"] and "Правило" not in one["markdown"]
+    assert one["next_offset"] is None
+    assert "Правило" in tools["studio_brief"](section="2")["markdown"]
+    for bad in ({"task": 7}, {"section": "77"}):
+        with pytest.raises(Exception, match="не"):
+            tools["studio_brief"](**bad)
     assert tools["studio_brief"]("frontend")["brief_id"] == "f1"
     verify = tools["studio_verify"]()
     assert verify["items"][0] == {"number": 1, "kind": "endpoint", "name": "list",
@@ -264,6 +283,28 @@ def test_brief_verify_report_reports():
         tools["studio_report"]("x", "middle")
 
 
+def test_doctor_считает_ошибки_и_строгий_режим():
+    found = [
+        {"level": "warning", "code": "W_X", "message": "предупреждение", "file": "a.py", "line": 3},
+        {"level": "info", "code": "I_Y", "message": "справка"},
+    ]
+    tools, _ = _tools({("GET", "/api/graph"): {"diagnostics": found}})
+    soft = tools["studio_doctor"]()
+    assert soft["ok"] is True and (soft["errors"], soft["warnings"], soft["info"]) == (0, 1, 1)
+    assert soft["items"] == [{"level": "warning", "code": "W_X", "message": "предупреждение",
+                              "file": "a.py", "line": 3}]
+    assert tools["studio_doctor"](strict=True)["ok"] is False  # как studio doctor --strict
+    found.append({"level": "error", "code": "E_Z", "message": "ошибка"})
+    broken = tools["studio_doctor"](limit=1)
+    assert broken["ok"] is False and broken["errors"] == 1 and len(broken["items"]) == 1
+    assert broken["items"][0]["level"] == "error"  # ошибки показываются первыми
+
+
+def test_verify_честно_говорит_что_проверка_структурная():
+    tools, _ = _tools({("GET", "/api/verify"): {"status": "выполнено", "done": 1, "total": 1}})
+    assert "структур" in tools["studio_verify"]()["note"]
+
+
 def test_инструкции_и_набор_инструментов():
     server = create_server()
     names = set(server.studio_tools)
@@ -271,6 +312,6 @@ def test_инструкции_и_набор_инструментов():
             "studio_brief", "studio_verify", "studio_report"} <= names
     # прямых записей в карту у агента нет: всё идёт через карточки и валидацию человека
     assert not {"studio_node_add", "studio_page_add", "studio_block_add"} & names
-    assert len(names) == 13
+    assert len(names) == 14
     # клиент получает руководство как инструкции MCP: один источник, без HTTP
     assert getattr(server, "instructions", None) == load_guide()

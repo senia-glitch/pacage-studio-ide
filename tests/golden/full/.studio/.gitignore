@@ -8,3 +8,5 @@ last-front-brief.json
 agent-reports/
 server.json
 workflow.json
+runner.json
+runner.log

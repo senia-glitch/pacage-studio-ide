@@ -61,7 +61,7 @@ def test_протокол_инструменты_и_инструкции(tmp_pat
     async def scenario(session):
         listed = await session.list_tools()
         names = {tool.name for tool in listed.tools}
-        assert len(names) == 13 and {"studio_connect", "studio_workflow"} <= names
+        assert len(names) == 14 and {"studio_connect", "studio_workflow"} <= names
         result, text = await _tool(session, "studio_overview")
         assert result is None and "studio_connect" in text  # без подключения — понятная ошибка
         # студия не запущена (нет .studio/server.json): понятная причина, не трассировка
@@ -160,12 +160,15 @@ def _chain(srv, root: Path, user: str) -> bool:
         assert step["briefs"]["frontend"] is not None
 
         brief, _ = await _tool(session, "studio_brief")
+        assert "markdown" not in brief  # сначала оглавление: ТЗ целиком в ответ не влезает
         (task,) = brief["tasks"]
-        assert task["slug"] == "list_lessons" and task["type"] == "plan"
-        names = {layer["suggested_name"] for layer in task["layers"]}
-        assert {"list_lessons", "ListLessonsScenario"} <= names  # имена из slug, не из названия
-        assert all(layer["target_file"] for layer in task["layers"])  # целевые файлы выведены
-        assert "studio-brief" in brief["markdown"]
+        assert task["name"] == "list_lessons" and task["kind"] == "plan"
+        one, _ = await _tool(session, "studio_brief", {"task": task["number"]})
+        # имена из slug, не из названия; целевые файлы выведены
+        assert "ListLessonsScenario" in one["markdown"] and "list_lessons" in one["markdown"]
+        assert "app/scenarios/list_lessons.py" in one["markdown"]
+        rules, _ = await _tool(session, "studio_brief", {"section": "2"})
+        assert rules["markdown"].startswith("## 2.")
         front, _ = await _tool(session, "studio_brief", {"part": "frontend"})
         assert front["tasks"]
         before, _ = await _tool(session, "studio_verify")

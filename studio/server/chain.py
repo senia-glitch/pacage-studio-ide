@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 from pathlib import Path
 
 from studio.agent import cards
 from studio.agent.brief import BRIEF_FILENAME, LAST_BRIEF
+from studio.env import read_env
 from studio.frontend import graph as front_graph
 from studio.frontend import meta as front_meta
 from studio.frontend.brief import FRONT_BRIEF_FILENAME, LAST_FRONT_BRIEF, brief_frontend
@@ -38,6 +40,7 @@ def info(state) -> dict:
         "cards": cards.counts(board),
         "briefs": state._briefs_status(),
         "ideas_revision": state._board_revision(board),
+        "runner": state.runner.public(),
     }
     return state.workflow.describe(ctx)
 
@@ -69,6 +72,56 @@ def _plan_data(item: dict) -> dict:
     }
 
 
+_PARAM_RE = re.compile(r"\{[^}]*\}")
+
+
+def _route_key(method: str, path: str, prefix: str) -> tuple[str, str]:
+    """Маршрут для сравнения: метод в верхнем регистре, без префикса API и слэша в конце,
+    параметры пути обезличены (`{id}` и `{lesson_id}` — один и тот же маршрут)."""
+    text = "/" + str(path or "").strip().strip("/")
+    pre = "/" + str(prefix or "").strip("/")
+    if pre != "/" and (text == pre or text.startswith(pre + "/")):
+        text = text[len(pre):] or "/"
+    return str(method or "").upper(), _PARAM_RE.sub("{}", text.rstrip("/") or "/")
+
+
+def _existing_routes(state, board: dict) -> dict[tuple[str, str], str]:
+    """Маршруты, которые уже есть: код и планы, плановые узлы и живые карточки доски."""
+    graph = state.ensure_graph()
+    prefix = read_env(state.root).api_prefix
+    found: dict[tuple[str, str], str] = {}
+    for node in graph.nodes:
+        if node.kind != "endpoint":
+            continue
+        details = node.details or {}
+        route = details.get("url_path") or details.get("path")
+        if route and details.get("http_method"):
+            where = f" ({node.file_path})" if node.file_path and not node.planned else " (план)"
+            key = _route_key(details["http_method"], route, prefix)
+            found.setdefault(key, f"{key[0]} {route}{where}")
+    for _idea, kind, item in cards.iter_cards(board):
+        source = item.get("source") or {}
+        if kind == "scenario" and item.get("decision") != cards.REJECTED:
+            key = _route_key(source.get("http_method"), source.get("path"), prefix)
+            found.setdefault(key, f"{key[0]} {source.get('path')} (идея «{item.get('title')}»)")
+    return found
+
+
+def _existing_pages(state, board: dict) -> dict[str, str]:
+    """Имена и маршруты страниц фронтенда и живых карточек: ключ → как называется."""
+    found: dict[str, str] = {}
+    for page in front_graph.build_front_graph(state.root).get("pages") or []:
+        found.setdefault(f"name:{page.get('name')}", f"страница «{page.get('name')}»")
+        if page.get("route"):
+            found.setdefault(f"route:{page['route']}", f"страница «{page.get('name')}»")
+    for _idea, kind, item in cards.iter_cards(board):
+        if kind == "page" and item.get("decision") != cards.REJECTED:
+            found.setdefault(f"name:{item.get('name')}", f"карточка «{item.get('title')}»")
+            if item.get("route"):
+                found.setdefault(f"route:{item['route']}", f"карточка «{item.get('title')}»")
+    return found
+
+
 def propose(state, data: dict) -> dict:
     """Идея от агента (или человека) со сценариями и страницами → карточки ``pending``."""
     actor = str(data.get("_actor") or "")
@@ -95,18 +148,37 @@ def propose(state, data: dict) -> dict:
             if kind == "scenario" and item.get("decision") != cards.REJECTED
         }
         problems = []
+        board = state.load_ideas()
+        routes = _existing_routes(state, board)
+        prefix = read_env(state.root).api_prefix
         for card in idea["scenarios"]:
             slug = card["source"]["slug"]
             if slug in taken:
                 problems.append(f"slug {slug!r} уже занят идеей «{taken[slug]}»")
                 continue
+            source = card["source"]
+            key = _route_key(source["http_method"], source["path"], prefix)
+            if key in routes:
+                problems.append(
+                    f"сценарий {slug!r}: маршрут {source['http_method']} {source['path']} уже "
+                    f"есть — {routes[key]}; расширяйте существующий или возьмите другой путь"
+                )
+                continue
             preview = state.plan_preview(_plan_data(card))
             for conflict in preview.get("conflicts") or []:
                 problems.append(f"сценарий {slug!r}: {conflict.get('message', conflict)}")
+        pages_taken = _existing_pages(state, board)
+        for card in idea["pages"]:
+            keys = [("имя", f"name:{card['name']}")]
+            if card["route"]:
+                keys.append(("маршрут", f"route:{card['route']}"))
+            for label, key in keys:
+                if key in pages_taken:
+                    problems.append(
+                        f"страница {card['name']!r}: {label} уже занято — {pages_taken[key]}"
+                    )
         if problems:
-            raise _invalid(
-                "Идея отклонена, исправьте и отправьте снова: " + "; ".join(problems)
-            )
+            raise _invalid("Идея отклонена, исправьте и отправьте снова: " + "; ".join(problems))
 
         def add(board: dict) -> None:
             board.setdefault("version", 1)

@@ -57,6 +57,10 @@ endpoint → scenario → io → model
     этапа. Карточки валидации — `studio/agent/cards.py` (сценарии и страницы на доске идей с
     полем `decision`); перенос принятого создаёт планы со slug и плановые страницы фронтенда.
     UI: `roadmapview.js`, `swipeview.js`, `roadmapmodel.js`.
+17. **Автозапуск агента** (`studio/server/runner.py`, `.studio/runner.json`) — студия сама
+    запускает команду агента при входе цепочки на этап «Идеи агента» / «Реализация»;
+    включается только человеком в интерфейсе; ТЗ агенту отдаётся по частям
+    (`studio/agent/brief_parts.py`).
 14. **Проверка ТЗ фронтенда** (`studio/frontend/verify.py`) — задачи ТЗ по маркеру
     `studio-front-brief` сверяются с кодом; `studio verify --part frontend`,
     `/api/frontend/verify`.
