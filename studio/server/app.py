@@ -387,6 +387,10 @@ def make_handler(ctx):
                 return self._json(state.runner.view())
             if url.path == "/api/agent/status":
                 return self._json(state.runner.agent_view())
+            if url.path == "/api/agent/models":
+                # Список моделей подписки (может занять секунды: вызывает ``opencode models``)
+                agent = urllib.parse.parse_qs(url.query).get("agent", [""])[0]
+                return self._json(state.runner.models(agent))
             if url.path == "/api/ui":
                 return self._json(state.settings.get())
             return self._error(404, "not_found", "Не найдено")

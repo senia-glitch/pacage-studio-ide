@@ -40,6 +40,7 @@ GITIGNORE_ARTIFACTS = (
     "mcp.json",
     "agent-session.json",
     "agent-git.json",
+    "opencode.json",
 )
 METADATA_IGNORE = "metadata.json"
 

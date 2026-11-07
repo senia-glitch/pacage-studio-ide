@@ -115,3 +115,30 @@ test("откат и строка про git", () => {
   assert.match(gitNote({git: {repo: true, branch: "studio/c1", checkpoint: "abc"}}), /чекпоинт/);
   assert.equal(gitNote({git: {repo: true, branch: "main"}, git_note: "есть правки"}), "есть правки");
 });
+
+import {agentInfo} from "../../studio/ui/static/js/dockmodel.js";
+
+test("выбранный агент: название, найден ли, нужна ли модель", () => {
+  assert.deepEqual(agentInfo(null), {name: "claude", label: "Claude Code", found: false, needsModel: false});
+  assert.equal(agentInfo({claude_found: true}).found, true);
+  const agents = [
+    {name: "claude", label: "Claude Code", found: true, needs_model: false},
+    {name: "opencode", label: "OpenCode", found: true, needs_model: true},
+  ];
+  const info = agentInfo({agent: "opencode", agents});
+  assert.equal(info.label, "OpenCode");
+  assert.equal(info.needsModel, true);
+});
+
+test("индикатор OpenCode: без модели — «выберите модель», с моделью — как у Claude", () => {
+  const agents = [
+    {name: "claude", label: "Claude Code", found: true, needs_model: false},
+    {name: "opencode", label: "OpenCode", found: true, needs_model: true},
+  ];
+  const base = {agent: "opencode", agents, enabled: true, mcp: {ok: true}, state: "idle"};
+  assert.equal(agentStatus({...base, model: ""}).text, "выберите модель");
+  assert.equal(agentStatus({...base, model: ""}).connected, false);
+  assert.equal(agentStatus({...base, model: "opencode-go/kimi-k3"}).tone, "ok");
+  const missing = agents.map((a) => (a.name === "opencode" ? {...a, found: false} : a));
+  assert.equal(agentStatus({...base, agents: missing}).text, "OpenCode не найден");
+});

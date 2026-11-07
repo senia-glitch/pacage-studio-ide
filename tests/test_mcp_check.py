@@ -320,3 +320,10 @@ def test_студия_не_читает_вход_claude() -> None:
         text = path.read_text(encoding="utf-8")
         offenders += [f"{path.name}: {item}" for item in forbidden if item in text]
     assert offenders == []
+
+
+def test_хвост_stderr_без_цветовых_кодов() -> None:
+    from studio.agent import mcpcheck
+
+    red = "\x1b[1;34musage:\x1b[0m studio \x1b[33m--project\x1b[0m\n"
+    assert mcpcheck._tail([red]) == "usage: studio --project"

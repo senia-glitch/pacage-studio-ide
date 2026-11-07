@@ -5,7 +5,7 @@ import {
   selectionCount, selectionPayload, testsView,
 } from "./roadmapmodel.js";
 import {
-  agentStatus, canRollback, dockActions, dockNote, dockSteps, gitNote,
+  agentInfo, agentStatus, canRollback, dockActions, dockNote, dockSteps, gitNote,
 } from "./dockmodel.js";
 import {closeSwipe, isSwipeOpen, openSwipe, refreshSwipe} from "./swipeview.js";
 
@@ -342,7 +342,7 @@ function render() {
   const html = `
     <div class="dock-head" data-dock="toggle" title="${open ? "Свернуть" : "Развернуть"}">
       <span class="dock-dot ${esc(status.tone)}"></span>
-      <b>Агент · Claude Code</b>
+      <b>Агент · ${esc(agentInfo(agent).label)}</b>
       <span class="dock-status">${esc(status.text)}</span>
       <span class="dock-toggle">${open ? "—" : "▢"}</span>
     </div>

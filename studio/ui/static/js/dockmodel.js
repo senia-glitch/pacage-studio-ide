@@ -45,16 +45,26 @@ export function dockSteps(flow) {
   }));
 }
 
+/* Выбранный агент: имя, название для людей, найден ли он на компьютере и нужна ли ему модель. */
+export function agentInfo(view) {
+  const list = view && Array.isArray(view.agents) ? view.agents : [];
+  const entry = list.find((item) => item.name === view.agent);
+  if (entry) return {name: entry.name, label: entry.label, found: !!entry.found, needsModel: !!entry.needs_model};
+  return {name: "claude", label: "Claude Code", found: !!(view && view.claude_found), needsModel: false};
+}
+
 /* Состояние связи с агентом для индикатора: tone = off | ok | run | wait | bad. */
 export function agentStatus(view) {
   if (!view) return {tone: "off", text: "нет связи со студией", connected: false};
-  if (!view.claude_found) return {tone: "bad", text: "Claude Code не найден", connected: false};
+  const info = agentInfo(view);
+  if (!info.found) return {tone: "bad", text: `${info.label} не найден`, connected: false};
   const mcp = view.mcp || {};
   if (mcp.ok === false && mcp.code && mcp.code !== "no_config") {
     // MCP-сервер не отвечает на initialize: агент остался бы без инструментов studio_*.
     const why = String(mcp.reason || "").split("\n")[0];
     return {tone: "bad", text: `MCP не запускается: ${why}`.slice(0, 120), connected: false};
   }
+  if (info.needsModel && !view.model) return {tone: "off", text: "выберите модель", connected: false};
   if (!view.enabled) return {tone: "off", text: "не подключён", connected: false};
   const last = String(view.message || "").trim().split("\n").pop();
   switch (view.state) {

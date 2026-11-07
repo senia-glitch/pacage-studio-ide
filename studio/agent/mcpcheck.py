@@ -17,6 +17,7 @@ import contextlib
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -125,8 +126,13 @@ def _classify(exe: str, text: str) -> tuple[str, str, str, str]:
             "Запустите сервер вручную, чтобы увидеть полную ошибку.", f'"{exe}" -m studio mcp')
 
 
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\([A-Z]")
+
+
 def _tail(lines: list[str]) -> str:
-    return redact("\n".join(line.rstrip() for line in lines[-_TAIL_LINES:] if line.strip()))
+    """Последние строки stderr: без цветовых кодов (Python 3.14 красит справку argparse)."""
+    clean = (_ANSI.sub("", line).rstrip() for line in lines[-_TAIL_LINES:])
+    return redact("\n".join(line for line in clean if line.strip()))
 
 
 def handshake(root: Path, server: dict | None = None, timeout: float = TIMEOUT) -> dict:

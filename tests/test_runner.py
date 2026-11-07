@@ -42,7 +42,10 @@ def test_по_умолчанию_выключен_и_команда_для_claud
 def test_сохранение_настройки_проверяется(tmp_path: Path) -> None:
     run, wf = _runner(tmp_path)
     saved = run.save_config({"enabled": True, "command": "prog\n--p\n{prompt}\n", "timeout_minutes": 5})
-    assert saved == {"enabled": True, "command": ["prog", "--p", "{prompt}"], "timeout_minutes": 5}
+    assert saved == {
+        "enabled": True, "agent": "claude", "command": ["prog", "--p", "{prompt}"],
+        "model": "", "variant": "", "timeout_minutes": 5,
+    }
     assert run.config() == saved and wf.auto_agent is True  # «синхронизация» выполнена заранее
     for bad in (
         {"enabled": "да"},
