@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import time
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from studio.frontend import graph as front_graph
 from studio.frontend import meta as front_meta
 from studio.frontend.brief import FRONT_BRIEF_FILENAME, LAST_FRONT_BRIEF, brief_frontend
 from studio.metadata import MetadataError
+from studio.metadata.plans import SLUG_RE
 from studio.scanner.routes_check import shadow_notes
 from studio.server import reconcile
 
@@ -82,11 +84,21 @@ def _archive_cards(state) -> None:
 # --------------------------------------------------------------------------- идеи
 
 
+def _plan_slug(raw) -> str:
+    """slug из ответа LLM часто в kebab-case («salon-services-list»): приводим к snake_case.
+
+    Если и после замены дефисов/пробелов имя не годится, возвращаем как есть — ошибку даст план.
+    """
+    text = raw.strip() if isinstance(raw, str) else ""
+    fixed = re.sub(r"[-\s]+", "_", text).lower()
+    return fixed if SLUG_RE.match(fixed) else text
+
+
 def _plan_data(item: dict) -> dict:
     source = item.get("source") or {}
     return {
         "title": item.get("title") or source.get("title") or "",
-        "slug": source.get("slug") or "",
+        "slug": _plan_slug(source.get("slug")),
         "description": item.get("description") or "",
         "acceptance": item.get("acceptance") or [],
         "domain": item.get("domain") or "",

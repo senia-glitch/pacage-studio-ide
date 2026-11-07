@@ -46,6 +46,27 @@ export function isCardDone(card,findNode){
 
 export function ideaCards(idea){return [...(idea.scenarios||[]),...(idea.pages||[])]}
 
+/* Карточка уже разобрана: перенесена на карту/во фронтенд, есть в коде или реализована.
+   Такие карточки уходят из поля зрения — работать остаётся только с неразобранными. */
+export function isHandledCard(card,findNode){
+  if(!card)return false;
+  if(card.planSlug||card.mapPageId||card.inCode||card.implemented===true)return true;
+  return !!(card.mapNodeId&&findNode&&findNode(card.mapNodeId));
+}
+
+/* Колесо мыши над горизонтальной лентой карточек: на сколько пикселей сдвинуть ленту.
+   0 — колесо не трогаем (нет что прокручивать, горизонтальный жест, край ленты, прокручивается текстовое поле). */
+export function wheelShift(event,box,innerCanScroll){
+  if(!event||!box||event.ctrlKey||innerCanScroll)return 0;
+  const dy=Number(event.deltaY)||0,dx=Number(event.deltaX)||0;
+  if(!dy||Math.abs(dx)>=Math.abs(dy))return 0;
+  const max=box.scrollWidth-box.clientWidth;
+  if(max<=0)return 0;
+  const unit=event.deltaMode===1?16:event.deltaMode===2?box.clientWidth:1;
+  const next=Math.max(0,Math.min(max,box.scrollLeft+dy*unit));
+  return next===box.scrollLeft?0:next-box.scrollLeft;
+}
+
 /* Идея реализована, когда в ней есть карточки и все они реализованы. */
 export function isIdeaDone(idea,findNode){
   const cards=ideaCards(idea);

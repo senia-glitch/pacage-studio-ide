@@ -221,7 +221,12 @@ body[data-ui-mode="manual"] .agent-only { display: none !important; }
 .rail-group.closed .rail-group-body { display: none; }
 .idea-rail-item.done { opacity: .6; }
 .idea-scenario-card.swipeable, .idea-page-card.swipeable { touch-action: pan-x; position: relative; transition: transform .18s ease, opacity .18s ease; }
-.idea-scenario-card.swiping, .idea-page-card.swiping { transition: none; cursor: grabbing; z-index: 3; }
+.idea-scenario-card.swiping, .idea-page-card.swiping { transition: none; cursor: grabbing; z-index: 2000; box-shadow: 0 18px 40px #000a; }
+.swipe-holder { box-sizing: border-box; border: 2px dashed var(--line); border-radius: 10px; opacity: .45; }
+.handled-toggle { margin-left: 10px; text-transform: none; letter-spacing: 0; }
+.idea-accept-all { margin: 10px 0 2px; }
+.idea-accept-all button { width: 100%; }
+.idea-accept-all button span { margin-left: 6px; padding: 0 7px; border-radius: 9px; background: #0d162644; font-size: 11px; }
 .idea-scenario-card.swipe-up, .idea-page-card.swipe-up { box-shadow: 0 0 0 2px var(--green); }
 .idea-scenario-card.swipe-down, .idea-page-card.swipe-down { box-shadow: 0 0 0 2px #e5534b; }
 .swipe-hint { color: var(--dim); font-size: 11px; margin: 0 0 8px; }

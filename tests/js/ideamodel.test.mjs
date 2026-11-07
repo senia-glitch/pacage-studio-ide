@@ -131,3 +131,31 @@ test("пометка «агент» и действие по жесту", () => 
   assert.equal(swipeAction("rejected"), "delete");
   assert.equal(swipeAction(null), null);
 });
+
+import {isHandledCard, wheelShift} from "../../studio/ui/static/js/ideamodel.js";
+
+test("разобранная карточка: на карте, во фронтенде, в коде или реализована", () => {
+  const find = (id) => ({n1: {planned: true}})[id];
+  assert.equal(isHandledCard({planSlug: "orders_list"}, find), true);
+  assert.equal(isHandledCard({mapPageId: "page-plan:1"}, find), true);
+  assert.equal(isHandledCard({inCode: "GET /health"}, find), true);
+  assert.equal(isHandledCard({implemented: true}, find), true);
+  assert.equal(isHandledCard({mapNodeId: "n1"}, find), true);
+  assert.equal(isHandledCard({mapNodeId: "нет"}, find), false);
+  assert.equal(isHandledCard({mapNodeId: "n1"}), false);
+  assert.equal(isHandledCard({decision: "pending"}, find), false);
+  assert.equal(isHandledCard(null, find), false);
+});
+
+test("колесо мыши листает ленту карточек по горизонтали", () => {
+  const box = {scrollLeft: 0, scrollWidth: 1000, clientWidth: 400};
+  assert.equal(wheelShift({deltaY: 100, deltaX: 0, deltaMode: 0}, box, false), 100);
+  assert.equal(wheelShift({deltaY: -100, deltaX: 0, deltaMode: 0}, box, false), 0, "левый край");
+  assert.equal(wheelShift({deltaY: 100, deltaX: 0, deltaMode: 0}, {...box, scrollLeft: 600}, false), 0, "правый край");
+  assert.equal(wheelShift({deltaY: 100, deltaX: 0, deltaMode: 0}, {...box, scrollLeft: 550}, false), 50, "не дальше края");
+  assert.equal(wheelShift({deltaY: 3, deltaX: 0, deltaMode: 1}, box, false), 48, "колесо в строках");
+  assert.equal(wheelShift({deltaY: 100, deltaX: 0, deltaMode: 0}, {...box, scrollWidth: 400}, false), 0, "всё помещается");
+  assert.equal(wheelShift({deltaY: 10, deltaX: 80, deltaMode: 0}, box, false), 0, "горизонтальный жест — браузеру");
+  assert.equal(wheelShift({deltaY: 100, deltaX: 0, deltaMode: 0, ctrlKey: true}, box, false), 0, "Ctrl — масштаб");
+  assert.equal(wheelShift({deltaY: 100, deltaX: 0, deltaMode: 0}, box, true), 0, "внутри текстового поля с прокруткой");
+});

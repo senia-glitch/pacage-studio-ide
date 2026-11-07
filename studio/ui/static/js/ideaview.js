@@ -1,7 +1,7 @@
 import {api} from "./api.js";
 import {S, esc, setTab, schedulePersist, toast, applyGraph, hooks, modal} from "./core.js";
 import {storageKey} from "./storage.js";
-import {id, text, strings, blockFrom, pageFrom, pagesFrom, pageSource, plural, railCounts, railLabel, groupIdeas, ideaCards, isAgentCard, isCardDone, swipeAction} from "./ideamodel.js";
+import {id, text, strings, blockFrom, pageFrom, pagesFrom, pageSource, plural, railCounts, railLabel, groupIdeas, ideaCards, isAgentCard, isCardDone, isHandledCard, wheelShift, swipeAction} from "./ideamodel.js";
 import {swipeDecision, swipeProgress} from "./roadmapmodel.js";
 
 const EMPTY = {version: 1, activeId: "", ideas: []};
@@ -19,6 +19,8 @@ let boardRevision = 0;
 let dirty = false;
 /* Какая ветка идеи открыта: сценарии бэкенда или страницы фронтенда. */
 let branchView = "backend";
+/* Разобранные карточки (на карте, в коде) скрыты; кнопка в заголовке ветки показывает их обратно. */
+let showHandled = false;
 let serverSynced = false;
 /* Поиск по идеям — свой, в левой панели страницы; свёрнутые группы помним в браузере. */
 let ideaQuery = "";
@@ -238,11 +240,30 @@ function pageCard(page,index,idea){
     <div class="idea-page-blocks"><div class="branch-label">БЛОКИ <span>${page.blocks.length}</span></div>${blocks||'<div class="hint">Блоков нет</div>'}</div>
   </article>`;
 }
+const foundNode=nodeId=>S.byId&&S.byId[nodeId];
+function pendingCards(idea,kind){return (kind==="page"?idea.pages:idea.scenarios).filter(item=>!isHandledCard(item,foundNode))}
+function handledToggle(total,pending){
+  const handled=total-pending;
+  return handled?`<button type="button" class="text-button handled-toggle" data-toggle-handled>${showHandled?"Скрыть разобранные":`Показать разобранные (${handled})`}</button>`:"";
+}
+function emptyBranch(total,pending,emptyText){
+  if(total&&!pending&&!showHandled)return '<div class="branch-empty"><span>✓</span><b>Все карточки разобраны</b><small>Они на карте или уже в коде. Показать их можно кнопкой в заголовке ветки</small></div>';
+  return emptyText;
+}
 function scenarioBranch(idea,children){
-  return `<div class="idea-branch"><div class="branch-label">СЦЕНАРИИ БЭКЕНДА <span>${idea.scenarios.length}</span></div>${idea.scenarios.length?'<p class="swipe-hint">Потяните карточку за ⇅ или пустое место: вверх — на карту, вниз — удалить</p>':""}<div class="scenario-branch">${children||'<div class="branch-empty"><span>＋</span><b>Ветка пока пустая</b><small>Вставьте JSON от LLM и разберите ответ</small></div>'}</div></div>`;
+  const total=idea.scenarios.length,pending=pendingCards(idea,"scenario").length;
+  return `<div class="idea-branch"><div class="branch-label">СЦЕНАРИИ БЭКЕНДА <span>${showHandled?total:pending}</span>${handledToggle(total,pending)}</div>${pending?'<p class="swipe-hint">Потяните карточку за ⇅ или пустое место: вверх — на карту, вниз — удалить</p>':""}<div class="scenario-branch">${children||emptyBranch(total,pending,'<div class="branch-empty"><span>＋</span><b>Ветка пока пустая</b><small>Вставьте JSON от LLM и разберите ответ</small></div>')}</div></div>`;
 }
 function pageBranch(idea){
-  return `<div class="idea-branch"><div class="branch-label">СТРАНИЦЫ ФРОНТЕНДА <span>${idea.pages.length}</span></div>${idea.pages.length?'<p class="swipe-hint">Потяните карточку: вверх — во фронтенд, вниз — удалить</p>':""}<div class="scenario-branch">${idea.pages.map((page,index)=>pageCard(page,index,idea)).join("")}</div></div>`;
+  const total=idea.pages.length,pending=pendingCards(idea,"page").length;
+  const shown=idea.pages.filter(page=>showHandled||!isHandledCard(page,foundNode));
+  return `<div class="idea-branch"><div class="branch-label">СТРАНИЦЫ ФРОНТЕНДА <span>${showHandled?total:pending}</span>${handledToggle(total,pending)}</div>${pending?'<p class="swipe-hint">Потяните карточку: вверх — во фронтенд, вниз — удалить</p>':""}<div class="scenario-branch">${shown.map((page,index)=>pageCard(page,index,idea)).join("")||emptyBranch(total,pending,"")}</div></div>`;
+}
+function acceptAllButton(idea,view){
+  const kind=view==="frontend"?"page":"scenario";
+  const count=pendingCards(idea,kind).length;
+  if(!count)return "";
+  return `<div class="idea-accept-all"><button type="button" class="primary" data-accept-all="${esc(idea.id)}" data-kind="${kind}" title="Перенести все неразобранные карточки ветки: ${kind==="page"?"во вкладку «Фронтенд»":"на карту"}">${kind==="page"?"Принять все страницы":"Принять все сценарии"} ↗ <span>${count}</span></button></div>`;
 }
 function branchTabs(idea,view){
   if(!idea.pages.length)return "";
@@ -251,7 +272,7 @@ function branchTabs(idea,view){
 function card(idea){
   const view=idea.pages.length&&(branchView==="frontend"||!idea.scenarios.length)?"frontend":"backend";
   const promptIsFresh=!!idea.prompt&&idea.promptBasis===promptBasis(idea);
-  const children=idea.scenarios.map((s,index)=>{
+  const children=idea.scenarios.filter(s=>showHandled||!isHandledCard(s,foundNode)).map((s,index)=>{
     const onMap=isOnMap(s);
     return `<article class="idea-scenario-card swipeable${onMap||s.inCode?" on-map":""}" data-scenario="${esc(s.id)}">
     <div class="idea-scenario-head"><span class="swipe-grip" title="Потяните карточку: вверх — на карту, вниз — удалить">⇅</span><span class="scenario-index">${String(index+1).padStart(2,"0")}</span>${isAgentCard(s,idea)?'<span class="agent-badge">агент</span>':""}${isCardDone(s,id=>S.byId&&S.byId[id])?'<span class="scenario-on-map">реализовано</span>':""}${onMap?'<span class="scenario-on-map" title="Плановые узлы сценария уже созданы на карте">на карте</span>':""}${s.inCode?`<span class="scenario-on-map" title="${esc(s.inCode)}">уже в коде</span>`:""}<input class="scenario-title" data-field="title" aria-label="Название сценария" value="${esc(s.title)}"><button class="text-button" type="button" data-to-plan="${esc(s.id)}" title="${onMap?"Уже на карте — подтвердите пересоздание узлов":"Создать плановые узлы на общей карте"}">На карту ↗</button><button class="icon-button danger" type="button" data-delete-scenario="${esc(s.id)}" title="Удалить ветку сценария" aria-label="Удалить сценарий">×</button></div>
@@ -265,6 +286,7 @@ function card(idea){
       <div class="node-kicker"><span class="node-dot"></span> ИДЕЯ <span class="node-state">Корень ветки${idea.created_by==="agent"?" · от агента":""}</span><button type="button" class="icon-button danger" data-delete-idea="${esc(idea.id)}" title="Удалить идею">×</button></div>
       <input class="idea-title" data-idea-title="${esc(idea.id)}" value="${esc(idea.title)}" aria-label="Название идеи">
       <label class="idea-field-label">ЗАДАЧА / ИДЕЯ<textarea data-idea-description="${esc(idea.id)}" rows="4" placeholder="Какую потребность или проблему нужно решить?">${esc(idea.description)}</textarea></label>
+      ${acceptAllButton(idea,view)}
       <div class="idea-node-actions manual-only"><select class="prompt-mode" data-prompt-mode="${esc(idea.id)}" title="Режим сборки промпта"><option value="new"${promptMode==="new"?" selected":""}>Новая система</option><option value="improve"${promptMode==="improve"?" selected":""}>Развитие системы</option></select><button type="button" class="primary" data-generate-prompt="${esc(idea.id)}">✦ Собрать промпт</button><button type="button" data-copy-prompt="${esc(idea.id)}" ${promptIsFresh?"":"disabled"}>Копировать</button><span class="prompt-freshness ${promptIsFresh?"fresh":idea.prompt?"stale":""}" data-prompt-state="${esc(idea.id)}">${promptIsFresh?"Актуален":idea.prompt?"Устарел":""}</span></div>
       <details class="idea-prompt-details manual-only"><summary>Промпт для LLM</summary><textarea data-idea-prompt="${esc(idea.id)}" rows="7" readonly placeholder="Соберите промпт на основе идеи">${esc(idea.prompt)}</textarea></details>
       <div class="idea-json-head manual-only"><label class="idea-field-label">ОТВЕТ LLM · JSON</label><button type="button" class="text-button" data-import-json="${esc(idea.id)}">Разобрать ответ ↓</button></div>
@@ -336,17 +358,44 @@ function render(){
   boardEl.querySelectorAll("[data-copy-prompt]").forEach(el=>el.onclick=()=>copy(find(el.dataset.copyPrompt)?.prompt||""));
   boardEl.querySelectorAll("[data-import-json]").forEach(el=>el.onclick=()=>importJson(el.dataset.importJson));
   boardEl.querySelectorAll("[data-add-first]").forEach(el=>el.onclick=addIdea);
+  boardEl.querySelectorAll("[data-toggle-handled]").forEach(el=>el.onclick=()=>{showHandled=!showHandled;render()});
+  boardEl.querySelectorAll("[data-accept-all]").forEach(el=>el.onclick=()=>acceptAll(el.dataset.acceptAll,el.dataset.kind,el));
+  bindWheel(boardEl);
   list.querySelectorAll("[data-focus-idea]").forEach(el=>el.onclick=()=>{board.activeId=el.dataset.focusIdea;render();save()});
   bindSwipe(boardEl);
 }
 function find(ideaId){return board.ideas.find(x=>x.id===ideaId)}
+/* Колесо мыши над лентой карточек листает её по горизонтали. */
+function bindWheel(boardEl){
+  boardEl.querySelectorAll(".scenario-branch").forEach(box=>box.addEventListener("wheel",ev=>{
+    const area=ev.target.closest&&ev.target.closest("textarea");
+    const down=ev.deltaY>0;
+    const inner=!!area&&area.scrollHeight>area.clientHeight&&(down?area.scrollTop+area.clientHeight<area.scrollHeight-1:area.scrollTop>0);
+    const shift=wheelShift(ev,box,inner);
+    if(shift){box.scrollLeft+=shift;ev.preventDefault()}
+  },{passive:false}));
+}
 /* ---------- свайп карточек: вверх — на карту, вниз — удалить ---------- */
+const FLY_MS=220;
+/* На время жеста карточка выходит из ленты (position:fixed): лента обрезает всё по вертикали,
+   а так карточка летит поверх страницы. На её месте остаётся пустая рамка, чтобы соседи не сдвигались. */
+function liftCard(card){
+  const rect=card.getBoundingClientRect();
+  const holder=document.createElement("div");
+  holder.className="swipe-holder";
+  holder.style.cssText=`flex:0 0 ${rect.width}px;width:${rect.width}px;height:${rect.height}px`;
+  card.before(holder);
+  card.style.cssText=`position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;margin:0;z-index:2000`;
+  return holder;
+}
+function dropCard(card,holder){card.style.cssText="";holder.remove()}
 function bindSwipe(boardEl){
   boardEl.querySelectorAll(".swipeable").forEach(card=>{
     card.addEventListener("pointerdown",ev=>{
       if(ev.button!==0||ev.target.closest("input,textarea,select,button,a,summary,label"))return;
       const startY=ev.clientY,startAt=performance.now();let dy=0;
       try{card.setPointerCapture(ev.pointerId)}catch(_){ }
+      const holder=liftCard(card);
       card.classList.add("swiping");
       const move=e=>{
         dy=e.clientY-startY;
@@ -360,15 +409,31 @@ function bindSwipe(boardEl){
         try{card.releasePointerCapture(e.pointerId)}catch(_){ }
         const speed=Math.abs(dy)/Math.max(1,performance.now()-startAt);
         const action=e.type==="pointercancel"?null:swipeAction(swipeDecision(dy,speed));
-        card.classList.remove("swiping","swipe-up","swipe-down");card.style.transform="";
-        if(action)void applySwipe(card,action);
+        card.classList.remove("swiping");
+        if(!action){
+          card.classList.remove("swipe-up","swipe-down");card.style.transform="";
+          setTimeout(()=>dropCard(card,holder),180);
+          return;
+        }
+        /* Принятая карточка улетает вверх, удалённая — вниз; затем список перерисовывается без неё. */
+        const away=(action==="delete"?1:-1)*(window.innerHeight||800);
+        card.style.transition=`transform ${FLY_MS}ms ease-in, opacity ${FLY_MS}ms ease-in`;
+        card.style.transform=`translateY(${dy+away}px)`;card.style.opacity="0";
+        setTimeout(()=>{void applySwipe(card,action,holder)},FLY_MS);
       };
       card.addEventListener("pointermove",move);card.addEventListener("pointerup",finish);card.addEventListener("pointercancel",finish);
     });
   });
 }
 function acceptDecision(item){if(item&&item.decision)item.decision="accepted"}
-async function applySwipe(card,action){
+async function applySwipe(card,action,holder){
+  try{await applySwipeAction(card,action)}
+  finally{
+    /* Список не перерисовался (отказ, нечего делать) — возвращаем карточку на место. */
+    if(card.isConnected){card.style.cssText="";card.classList.remove("swipe-up","swipe-down");if(holder)holder.remove()}
+  }
+}
+async function applySwipeAction(card,action){
   const idea=find(card.closest("[data-idea]")?.dataset.idea);if(!idea)return;
   if(card.dataset.scenario){
     const scenario=idea.scenarios.find(x=>x.id===card.dataset.scenario);if(!scenario)return;
@@ -401,6 +466,7 @@ async function transferCard(kind,card,options={}){
     const result=await api("/api/workflow/transfer-card","POST",{id:card.id,force:options.force===true});
     await reloadBoard();
     if(result.graph)applyGraph(result.graph);
+    if(options.quiet)return result;
     if(result.already){toast(`Уже перенесено: ${result.already}`);return result}
     if(!result.transferred){toast(`Уже есть в коде: ${(result.verdict&&result.verdict.where)||"такой узел"}. На карту не переносится`);return result}
     const missing=result.links_missing||[];
@@ -414,7 +480,34 @@ async function transferCard(kind,card,options={}){
         :`Страница и блоки добавлены во вкладку «Фронтенд» как плановые узлы${partial}`);
     }
     return result;
-  }catch(error){toast("Не удалось перенести карточку: "+error.message);return null}
+  }catch(error){
+    if(options.errors)options.errors.push(error.message);else toast("Не удалось перенести карточку: "+error.message);
+    return null;
+  }
+}
+/* «Принять все»: переносит по одной все неразобранные карточки текущей ветки, итог — одним сообщением. */
+async function acceptAll(ideaId,kind,button){
+  const idea=find(ideaId);if(!idea)return;
+  const ids=pendingCards(idea,kind).map(item=>item.id);
+  if(!ids.length)return;
+  button.disabled=true;
+  const tally={moved:0,inCode:0,already:0};const errors=[];
+  for(const cardId of ids){
+    const current=find(ideaId);
+    const item=current&&(kind==="page"?current.pages:current.scenarios).find(x=>x.id===cardId);
+    if(!item)continue;
+    const result=await transferCard(kind,item,{quiet:true,errors});
+    if(!result)continue;
+    if(result.transferred)tally.moved++;else if(result.already)tally.already++;else tally.inCode++;
+  }
+  hooks.renderMap();hooks.renderInspector();hooks.renderIdeas();
+  render();
+  const where=kind==="page"?"во «Фронтенд»":"на карту";
+  const parts=[`перенесено ${where}: ${tally.moved}`];
+  if(tally.inCode)parts.push(`уже в коде: ${tally.inCode}`);
+  if(tally.already)parts.push(`уже были перенесены: ${tally.already}`);
+  if(errors.length)parts.push(`ошибок: ${errors.length} (${errors[0]})`);
+  toast(parts.join(" · "));
 }
 /* Приёмка работы: всё, что стало картой или страницей, считается реализованным и уходит в нижнюю группу. */
 export async function markImplemented(){

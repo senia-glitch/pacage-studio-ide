@@ -223,3 +223,14 @@ def test_http_перенос_карточки_только_человеку(demo
         status, dup = srv.post("/api/workflow/transfer-card", {"id": dup_id})
         assert status == 200 and dup["transferred"] is False and dup["mark"]["inCode"]
         assert srv.post("/api/workflow/transfer-card", {"id": "нет"})[0] == 400
+
+
+def test_slug_в_kebab_case_приводится_к_snake_case_при_переносе(demo: Path) -> None:
+    """LLM пишет «salon-services-list»: перенос не должен падать из-за дефисов."""
+    state = _state(demo)
+    idea = _add_idea(state, scenarios=[_scenario("salon_services_list", "GET", "/salon/services")])
+    chain.transfer_card(state, {"id": idea["scenarios"][0]["id"]})
+    assert chain._plan_slug("salon-services-list") == "salon_services_list"
+    assert chain._plan_slug("Salon Services") == "salon_services"
+    assert chain._plan_slug("1-bad") == "1-bad"
+    assert chain._plan_slug(None) == ""
