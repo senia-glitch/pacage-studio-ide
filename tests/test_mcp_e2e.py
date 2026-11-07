@@ -61,7 +61,7 @@ def test_протокол_инструменты_и_инструкции(tmp_pat
     async def scenario(session):
         listed = await session.list_tools()
         names = {tool.name for tool in listed.tools}
-        assert len(names) == 14 and {"studio_connect", "studio_workflow"} <= names
+        assert len(names) == 16 and {"studio_connect", "studio_workflow"} <= names
         result, text = await _tool(session, "studio_overview")
         assert result is None and "studio_connect" in text  # без подключения — понятная ошибка
         # студия не запущена (нет .studio/server.json): понятная причина, не трассировка

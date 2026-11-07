@@ -205,6 +205,9 @@ def _find_plan_target(
         in_file = [node for node in candidates if node.file_path == target_file]
         if len(in_file) == 1:
             return in_file[0]
+        if kind == "test" and in_file:
+            # в файле тестов их обычно несколько, и называют их по поведению, а не по плану
+            return sorted(in_file, key=lambda node: (node.line, node.id))[0]
     return None
 
 
@@ -325,6 +328,7 @@ def apply_metadata(builder: GraphBuilder, metadata: Metadata, sink: Sink | None 
     # Планы привязываются к коду первыми: так видно, какие planned-записи
     # агент заменил (в том числе с другим именем).
     _apply_plans(builder, metadata.plans)
+    redirect: dict[str, str] = {}
     for node_id, record in sorted(metadata.nodes.items()):
         kind = str(record.get("kind") or node_id.split(":", 1)[0])
         if kind not in NODE_KINDS:
@@ -343,6 +347,10 @@ def apply_metadata(builder: GraphBuilder, metadata: Metadata, sink: Sink | None 
         if record.get("planned"):
             slug = _plan_slug_for_record(metadata, record)
             resolved = _resolved_plan_node(builder, slug, kind) if slug else None
+            if resolved is not None:
+                redirect[node_id] = resolved.id  # связи записи плана идут к реальному узлу
+            if resolved is not None and kind == "test":
+                continue  # тесты называют по поведению: расхождение имени тут штатное
             if resolved is not None:
                 mark_node(
                     resolved,
@@ -379,6 +387,9 @@ def apply_metadata(builder: GraphBuilder, metadata: Metadata, sink: Sink | None 
         source_anchor = str(record.get("from") or "")
         target_anchor = str(record.get("to") or "")
         kind = str(record.get("kind") or "")
+        redirected = source_anchor in redirect or target_anchor in redirect
+        source_anchor = redirect.get(source_anchor, source_anchor)
+        target_anchor = redirect.get(target_anchor, target_anchor)
         source, source_code = _resolve(builder, source_anchor, "")
         target, target_code = _resolve(builder, target_anchor, "")
         if source is None or target is None:
@@ -431,6 +442,8 @@ def apply_metadata(builder: GraphBuilder, metadata: Metadata, sink: Sink | None 
             and not source_node.planned
             and not target_node.planned
         )
+        if both_code and redirected:
+            continue  # связь плана уже есть в коде: запись заглушки её не дублирует
         if both_code and kind not in CODE_ONLY_EXTRA_EDGE_KINDS:
             mark_node(
                 source_node,

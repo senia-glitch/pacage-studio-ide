@@ -59,7 +59,10 @@ CODE_EDGE_KINDS = frozenset({"dispatch", "scenario_call", "port_call", "table", 
 # Образец кода показывает агенту, как устроен проект, поэтому прячется только само значение
 # секрета: литерал в присваивании секретоподобному имени и узнаваемые формы ключей.
 # Ссылки на переменные и поля (`dto.password`, `settings.secret_key`) секретом не считаются.
-_SECRET_NAME = r"[A-Za-z0-9_]*(?:key|secret|token|passw(?:or)?d|pwd|credential)[A-Za-z0-9_]*"
+# Имя должно ЗАКАНЧИВАТЬСЯ секретным словом: `api_key`, `JWT_SECRET`, но не `token_type`.
+_SECRET_NAME = r"[A-Za-z0-9_]*(?:key|secret|token|passw(?:or)?d|pwd|credentials?)"
+# Значения, которые секретом не бывают (название схемы, алгоритм): образец остаётся рабочим.
+SAFE_VALUES = frozenset({"bearer", "basic", "digest", "none", "null", "hs256", "rs256", "jwt"})
 SECRET_ASSIGN_RE = re.compile(
     r"(?i)(?P<head>(?<![\w.])[\"']?" + _SECRET_NAME + r"[\"']?"
     r"(?:\s*:\s*[\w\[\]., |]+?)?\s*[:=]\s*[bru]{0,2})"
@@ -549,6 +552,54 @@ def _path_text(graph: Graph, path: list[str], numbers: dict[str, int]) -> str:
     return " → ".join(parts)
 
 
+_WORD_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
+_NOISE_WORDS = frozenset(
+    {"scenario", "test", "tests", "api", "v1", "get", "post", "put", "patch", "delete", "id",
+     "list", "py", "app", "core", "project", "routes", "scenarios"}
+)
+
+
+def _words(*texts: object) -> set[str]:
+    """Значимые слова имён и путей: ``ListNewsScenario`` и ``/news/list`` дают ``news``."""
+    found: set[str] = set()
+    for text in texts:
+        for word in _WORD_RE.findall(str(text or "")):
+            word = word.lower()
+            if len(word) > 2 and word not in _NOISE_WORDS:
+                found.add(word)
+    return found
+
+
+def _node_words(node: Node) -> set[str]:
+    details = node.details or {}
+    return _words(
+        details.get("function_name"),
+        details.get("class_name"),
+        details.get("test_name"),
+        details.get("url_path") or details.get("path"),
+        Path(node.file_path).stem,
+    )
+
+
+def _sample_rank(task: Node, node: Node) -> tuple:
+    """Чем меньше, тем ближе образец: общие слова, метод, домен, не служебный (admin/auth)."""
+    mine, theirs = _node_words(task), _node_words(node)
+    method = str((task.details or {}).get("http_method") or "").lower()
+    other = str((node.details or {}).get("http_method") or "").lower()
+    same_method = bool(method) and method == other
+    task_domain = {part.strip() for part in str(task.domain or "").split(",") if part.strip()}
+    node_domain = {part.strip() for part in str(node.domain or "").split(",") if part.strip()}
+    service = {"admin", "auth", "login", "token"}
+    penalty = 0 if (mine & service) else len(theirs & service)
+    return (
+        -len(mine & theirs),
+        0 if same_method else 1,
+        0 if task_domain & node_domain else 1,
+        penalty,
+        node.id,
+    )
+
+
 def _choose_sample(task: Node, samples: list[Node]) -> Node | None:
     candidates = [
         node
@@ -568,9 +619,11 @@ def _choose_sample(task: Node, samples: list[Node]) -> Node | None:
             key=lambda node: (
                 0 if node.file_path == task.file_path else 1,
                 abs(int(node.line or 0) - int(task.line or 0)),
-                node.id,
+                *_sample_rank(task, node),
             ),
         )[0]
+    if task.planned and task.plan:  # план: файла и строки ещё нет, ближайший — по смыслу
+        return sorted(candidates, key=lambda node: _sample_rank(task, node))[0]
 
     def key(node: Node) -> tuple[int, int, str]:
         node_domain = {part.strip() for part in str(node.domain or "").split(",") if part.strip()}
@@ -587,7 +640,8 @@ def redact_sample(line: str) -> str:
 
     def hide(match: re.Match) -> str:
         nonlocal masked
-        if "{" in match.group("val"):  # f-строка с подстановкой: значения тут нет
+        value = match.group("val")
+        if "{" in value or value.lower() in SAFE_VALUES:  # подстановка или не секрет
             return match.group(0)
         masked = True
         quote = match.group("q")
@@ -1275,6 +1329,44 @@ def _plan_reuse(graph: Graph, state, samples: list[Node]) -> list[Node]:
     return sorted(found.values(), key=lambda node: (node.file_path, node.line, node.id))
 
 
+def _route_order_lines(graph: Graph, state) -> list[str]:
+    """Конкретный рецепт, если маршрут плана окажется позади (или перед) параметрическим."""
+    from studio.env import read_env
+    from studio.scanner.routes_check import shadow_notes
+
+    endpoint = next((item for item in state.layers if item.layer == "endpoint"), None)
+    if endpoint is None or not endpoint.target_file or not state.path or not state.http_method:
+        return []
+    prefix = read_env(Path(graph.project_root)).api_prefix
+    own = "/" + "/".join(
+        part.strip("/") for part in (prefix, state.path) if part and part.strip("/")
+    )
+    known = []
+    for node in graph.nodes:
+        details = node.details or {}
+        path = details.get("url_path") or details.get("path")
+        if (
+            node.kind == "endpoint"
+            and path
+            and details.get("http_method")
+            and node.file_path
+            and node.plan != state.slug
+        ):
+            known.append((str(details["http_method"]), str(path), node.file_path))
+    notes = shadow_notes(state.http_method, own, endpoint.target_file, known)
+    if not notes:
+        return []
+    return [
+        f"- ⚠ Порядок маршрутов: {notes[0]}.",
+        "  Файлы роутов подключаются по алфавиту, а FastAPI сопоставляет маршруты в порядке "
+        "регистрации. Два рабочих способа: (1) в файле с параметрическим маршрутом объяви "
+        "этот обработчик выше него; (2) оставь обработчик в целевом файле, назови его роутер "
+        "не `router` (например `search_router`, иначе он подключится второй раз) и подключи "
+        "через `router.include_router(...)` в файле параметрического маршрута ВЫШЕ него. "
+        "Проверь, что `studio_doctor` не показывает `W_ROUTE_SHADOW`.",
+    ]
+
+
 def _render_plan_task(
     graph: Graph,
     sources: SourceSet,
@@ -1291,6 +1383,7 @@ def _render_plan_task(
     if route:
         lines.append(f"- Эндпоинт: {route}")
     lines.append(f"- Домен: {state.domain or 'не указано'}")
+    lines.extend(_route_order_lines(graph, state))
     if state.description.strip():
         lines.append(f"- Описание сценария: {state.description.strip()}")
     else:
@@ -1334,6 +1427,12 @@ def _render_plan_task(
         else:
             text = "test: проверка критериев приёмки"
         lines.append(f"  {index}. {text}")
+    if "io" in layers_by_name or "model" in layers_by_name:
+        lines.append(
+            "- Слои io и model: если в проекте SQL выполняется прямо в сценарии "
+            "(`self._db.query(...)`) и подходящая модель уже есть, новых io-методов и моделей "
+            "не создавай — слой считается выполненным существующими."
+        )
     samples: list[Node] = []
     sample_lines: list[str] = []
     for layer in PLAN_CHAIN_ORDER:
@@ -1372,7 +1471,7 @@ def _render_plan_task(
     lines.append("- Решения за тобой:")
     lines.append(
         "  - имена io-методов и модели, поля модели, SQL; "
-        "запиши принятые решения в `report.decisions` итогового JSON."
+        "запиши принятые решения в отчёт (поле `decisions`)."
     )
     lines.append(
         "- Проверка (studio verify): слои цепочки, связи origin=code "
@@ -1480,9 +1579,12 @@ def _build_markdown(
         lines.append("|---|---|---|---|---|")
         for state in plans:
             number = numbers[f"plan:{state.slug}"]
+            files = ", ".join(
+                dict.fromkeys(f"`{item.target_file}`" for item in state.layers if item.target_file)
+            )
             lines.append(
                 f"| T{number} | план | {state.title or state.slug} "
-                f"({state.slug}) | — | — |"
+                f"({state.slug}) | {files or '—'} | — |"
             )
         for node in tasks:
             number = numbers[node.id]
@@ -1592,6 +1694,12 @@ def _build_markdown(
     lines.append(
         "- `studio doctor --strict` (через MCP — инструмент `studio_doctor`) — проверить "
         "проект целиком."
+    )
+    lines.append("")
+    lines.append(
+        "Если у тебя есть инструменты студии (MCP), отправь итог через "
+        "`studio_report(summary, part, updates, not_synced, report)`: `summary` — понятный "
+        "человеку текст, остальные поля — те же, что в JSON ниже; писать JSON в чат тогда не нужно."
     )
     lines.append("")
     lines.extend(BRIEF_REPORT_BACKEND_LINES)

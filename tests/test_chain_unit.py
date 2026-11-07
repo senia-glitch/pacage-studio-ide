@@ -148,7 +148,7 @@ def test_подсказки_агенту(tmp_path: Path) -> None:
     wf.data["task"] = ""
     assert "спроси" in wf.hint({})["text"]
     wf.advance("review")
-    assert "3" in wf.hint({"pending": 3})["text"]
+    assert "осталось: 3" in wf.hint({"cards": {"pending": 3}})["text"]
     wf.advance("confirm")
     wf.advance("select")
     wf.advance("implement")
@@ -379,3 +379,148 @@ def test_клиент_находит_студию_по_файлу_и_переч�
         discovery.path_for(tmp_path).write_text(json.dumps({"url": "u"}), encoding="utf-8")
         StudioClient.discover()
     assert broken.value.code == "studio_not_running"
+
+
+def test_новый_цикл_архивирует_карточки_и_старые_тз(demo: Path) -> None:
+    state = _state(demo)
+    _to_confirm(state)
+    chain.transfer(state)
+    chain.select(state, {"plans": ["list_lessons"]})
+    assert (demo / ".studio" / "agent-brief.md").is_file()
+    saved = chain.baseline(state)  # на момент передачи ТЗ запомнены предупреждения проекта
+    assert saved["saved_at"] and isinstance(saved["keys"], list)
+    assert chain.baseline(_state(demo.parent / "пусто")) == {"saved_at": "", "keys": []}
+    chain.stage(state, {"to": "report"})
+    chain.finish(state)
+
+    started = chain.start(state, {"mode": "plan", "task": "Новое"})
+    assert started["cards"] == {"pending": 0, "accepted": 0, "rejected": 0, "total": 0,
+                                "to_transfer": 0}
+    assert started["briefs"] == {"backend": None, "frontend": None}  # старое ТЗ не доживает
+    assert not (demo / ".studio" / "agent-brief.md").exists()
+    idea = state.load_ideas()["ideas"][0]  # сами идеи и связь с планами остались на доске
+    assert [s["planSlug"] for s in idea["scenarios"]] == ["list_lessons", "create_lesson"]
+    assert all("decision" not in s for s in idea["scenarios"])
+
+
+def _route_file(demo: Path, name: str, method: str, path: str) -> None:
+    (demo / f"app/api/v1/routes/{name}.py").write_text(
+        "from fastapi import APIRouter\nfrom core import run\n\nrouter = APIRouter()\n\n"
+        f'@router.{method}("{path}")\nasync def {name}_handler():\n    return await run("{name}")\n',
+        encoding="utf-8",
+    )
+
+
+def test_идея_предупреждает_о_порядке_маршрутов_и_убирает_префикс(demo: Path) -> None:
+    _route_file(demo, "items", "get", "/items/{item_id}")
+    _route_file(demo, "zone", "get", "/zone/export")
+    state = _state(demo)
+    chain.start(state, {"mode": "plan"})
+    base = {"description": "д", "http_method": "GET"}
+    got = chain.propose(state, {"title": "Экспорт", "scenarios": [
+        {**base, "title": "Экспорт", "slug": "items_export", "path": "/api/v1/items/export"}]})
+    texts = " ".join(got["warnings"])
+    assert "без префикса API" in texts and "'/items/export'" in texts  # префикс убран, агент знает
+    assert "будет перекрыт" in texts and "items.py" in texts and "по алфавиту" in texts
+    assert got["cards"] == [{"id": got["cards"][0]["id"], "kind": "scenario",
+                             "slug": "items_export", "title": "Экспорт", "route": "GET /items/export"}]
+    assert state.load_ideas()["ideas"][0]["scenarios"][0]["source"]["path"] == "/items/export"
+
+    # slug, при котором файл встанет раньше items.py, предупреждений о перекрытии не даёт
+    ok = chain.propose(state, {"title": "Ок", "scenarios": [
+        {**base, "title": "Ок", "slug": "a_items_dump", "path": "/items/dump"}]})
+    assert ok["warnings"] == []
+    # а новый параметрический маршрут из файла раньше литерального перекроет его
+    shadow = chain.propose(state, {"title": "Перекроет", "scenarios": [
+        {**base, "title": "Зона", "slug": "a_zone_item", "path": "/zone/{zone_id}"}]})
+    assert any("перекроет существующий" in w and "/zone/export" in w for w in shadow["warnings"])
+
+
+def _front_project(tmp_path: Path):
+    from test_frontend_links import _project
+
+    root, _ = _project(tmp_path)
+    return root, _state(root)
+
+
+def test_extends_добавляет_блоки_на_существующую_страницу(tmp_path: Path) -> None:
+    root, state = _front_project(tmp_path)
+    page_id = chain._front_pages(state)["reporting"]  # страница, уже существующая во фронтенде
+    chain.start(state, {"mode": "plan"})
+    # extends без blocks, с неизвестной страницей, с неверным именем — отказ сразу
+    for bad in ({"extends": "reporting"}, {"extends": "Reporting", "blocks": [{"name": "B"}]}):
+        with pytest.raises(MetadataError):
+            chain.propose(state, {"title": "И", "pages": [bad]})
+    with pytest.raises(MetadataError, match="не найдена") as missing:
+        chain.propose(state, {"title": "И", "pages": [
+            {"extends": "no-such-page", "blocks": [{"name": "Stats"}]}]})
+    assert "reporting" in missing.value.message
+    got = chain.propose(state, {"title": "Сводка", "pages": [
+        {"extends": "reporting", "title": "Сводка на отчётах",
+         "blocks": [{"name": "SiteStats", "description": "Сводка", "calls": ["GET /stats"]}]}]})
+    assert got["warnings"] == [] and got["cards"][0]["kind"] == "page"
+    # новая страница с именем существующей подсказывает extends; пустой route — предупреждение
+    with pytest.raises(MetadataError, match="extends"):
+        chain.propose(state, {"title": "Дубль", "pages": [{"name": "reporting", "route": "/r"}]})
+    warned = chain.propose(state, {"title": "Новая", "pages": [{"name": "fresh-page"}]})
+    assert any("пустой route" in w and "extends" in w for w in warned["warnings"])
+
+    chain.ideas_ready(state)
+    chain.decide(state, {"all": "accepted"})
+    chain.stage(state, {"to": "confirm"})
+    moved = chain.transfer(state)
+    assert moved["transfer"]["errors"] == [] and moved["transfer"]["pages"] == 2
+    mapped = [p for p in state.load_ideas()["ideas"][0]["pages"]]
+    assert mapped[0]["mapPageId"] == page_id  # блоки легли на существующую страницу
+    assert mapped[0]["blocks"][0]["mapBlockId"].startswith("block-plan:")
+    graph = chain.front_graph.build_front_graph(root)
+    page = next(p for p in graph["pages"] if p["id"] == page_id)
+    assert [b["name"] for b in page["blocks"] if b.get("planned")] == ["SiteStats"]
+    assert page["planned"] is False  # сама страница не стала плановой
+
+    candidates = chain.candidates(state)
+    ours = next(p for p in candidates["pages"] if p["id"] == page_id)
+    assert ours["new"] is False and ours["planned_blocks"] == ["SiteStats"] and ours["ready"]
+    selected = chain.select(state, {"pages": [page_id]})
+    assert selected["saved"]["frontend"] >= 1
+    brief = (root / ".studio" / "agent-brief-frontend.md").read_text(encoding="utf-8")
+    assert "SiteStats" in brief and "reporting" in brief
+
+
+def test_отзыв_идеи_подтверждение_extends_и_предупреждения(tmp_path: Path) -> None:
+    root, state = _front_project(tmp_path)
+    chain.start(state, {"mode": "plan"})
+    block = {"name": "SiteStats", "description": "Сводка", "calls": ["GET /stats"]}
+    first = chain.propose(state, {"_actor": "agent", "title": "Сводка", "pages": [
+        {"extends": "reporting", "description": "лишнее", "acceptance": ["тоже"],
+         "blocks": [block]}]})
+    ref = first["cards"][0]
+    assert ref["extends"] == "reporting" and ref["attached_to"] == "page:reporting"
+    assert ref["new_blocks"] == ["SiteStats"]
+    text = " ".join(first["warnings"])
+    assert "не применяются" in text and "description" in text and "acceptance" in text
+    idea = state.load_ideas()["ideas"][0]
+    assert idea["cycle"] == 1 and idea["created_by"] == "agent"
+
+    # такая же страница в другой идее — предупреждение о возможном дубле с id прежней
+    second = chain.propose(state, {"_actor": "agent", "title": "Сводка ещё раз", "pages": [
+        {"name": "dup-page", "route": "/d", "blocks": [block], "calls": []}]})
+    assert any("похожа на карточку идеи «Сводка»" in w and "studio_idea_withdraw" in w
+               for w in second["warnings"])
+
+    # отзыв: своя идея без решений уходит, неизвестная — 404, принятая — нельзя
+    gone = chain.withdraw(state, {"idea_id": idea["id"], "_actor": "agent"})
+    assert gone["withdrawn"] == idea["id"] and gone["pending"] == 1
+    with pytest.raises(MetadataError) as missing:
+        chain.withdraw(state, {"idea_id": idea["id"]})
+    assert missing.value.code == "node_not_found"
+    left = state.load_ideas()["ideas"][0]
+    chain.decide(state, {"id": left["pages"][0]["id"], "decision": "accepted"})
+    with pytest.raises(MetadataError, match="решает человек"):
+        chain.withdraw(state, {"idea_id": left["id"]})
+    chain.decide(state, {"id": left["pages"][0]["id"], "decision": "pending"})
+    # идею человека агент отозвать не может
+    state.mutate_ideas(lambda b: b["ideas"][0].update(created_by=""))
+    with pytest.raises(MetadataError) as human:
+        chain.withdraw(state, {"idea_id": left["id"], "_actor": "agent"})
+    assert human.value.code == "mode_forbidden"

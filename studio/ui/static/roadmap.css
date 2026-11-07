@@ -79,6 +79,13 @@
 .rm-results li.ok span { color: var(--green); }
 .rm-results li.no span { color: #ff7b72; }
 .rm-results small { color: var(--dim); margin-left: 6px; }
+.rm-tests { border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; margin: 8px 0; background: #26272b; }
+.rm-tests.ok { border-color: var(--green); }
+.rm-tests.bad { border-color: #ff5d5d; background: #2e2424; }
+.rm-tests.run { border-color: #e0b95a; }
+.rm-tests ul { margin: 6px 0 8px; padding-left: 18px; font-size: 12px; max-height: 22vh; overflow: auto; }
+.rm-tests small { color: var(--dim); }
+.rm-tests button { margin-top: 6px; }
 
 /* ---------- валидация свайпом ---------- */
 .swipe-overlay {

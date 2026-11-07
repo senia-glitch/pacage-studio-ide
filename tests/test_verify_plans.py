@@ -421,3 +421,22 @@ def test_задача_плана_без_plan_записи():
     report = verify_brief(_chain(), {"tasks": [task], "brief_id": "b"})
     assert report["done"] == 1
     assert report["code"] == 0
+
+
+def test_реализованный_план_не_даёт_ложных_предупреждений(demo: Path):
+    """Тесты называют по поведению и их в файле несколько, io живёт в файле сценария."""
+    create_plan(PLAN_DATA, read_env(demo))
+    _implement_plan(demo)
+    (demo / "tests/test_refund_request.py").write_text(
+        "def test_refund_is_saved(client):\n"
+        '    client.post("/api/v1/refunds")\n\n'
+        "def test_refund_rejects_empty_body(client):\n"
+        '    client.post("/api/v1/refunds", json={})\n',
+        encoding="utf-8",
+    )
+    graph = scan(demo)
+    noisy = {"W_PLAN_CONFLICT", "W_METADATA_ORPHAN", "W_EDGE_UNRESOLVED", "W_METADATA_EDGE"}
+    assert [d.message for d in graph.diagnostics if d.code in noisy] == []
+    assert [n.id for n in graph.nodes if n.planned] == []  # заглушек плана не осталось
+    state = next(item for item in graph.plans if item.slug == "refund_request")
+    assert state.status == "done"

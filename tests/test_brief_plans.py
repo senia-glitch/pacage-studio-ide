@@ -210,3 +210,39 @@ def test_golden_plan(tmp_path: Path):
         PLAN_GOLDEN.write_text(actual, encoding="utf-8")
         return
     assert actual == PLAN_GOLDEN.read_text(encoding="utf-8")
+
+
+def test_тз_плана_даёт_рецепт_порядка_маршрутов(tmp_path: Path):
+    root = _project(tmp_path)
+    (root / "app/api/v1/routes/items.py").write_text(
+        "from fastapi import APIRouter\nfrom core import run\n\nrouter = APIRouter()\n\n"
+        '@router.get("/items/{item_id}")\nasync def get_item(item_id: str):\n'
+        '    return await run("get_item")\n',
+        encoding="utf-8",
+    )
+    # файл items_export.py встанет в алфавите ПОСЛЕ items.py: статичный путь был бы перекрыт
+    create_plan(
+        {**PLAN, "slug": "items_export", "title": "Экспорт", "http_method": "get",
+         "path": "/items/export"},
+        read_env(root),
+    )
+    _graph, brief = _plan_brief(root, map_mode="none")
+    assert "Порядок маршрутов" in brief.markdown and "include_router" in brief.markdown
+    assert "будет перекрыт" in brief.markdown and "items.py" in brief.markdown
+    # без пересечения рецепта нет
+    create_plan({**PLAN, "slug": "other_thing", "path": "/other"}, read_env(root))
+    plain = _plan_brief(root, map_mode="none", plans=("other_thing",))[1]
+    assert "Порядок маршрутов" not in plain.markdown
+
+
+def test_образец_плана_подбирается_по_смыслу_а_не_по_алфавиту(demo: Path):
+    from studio.agent.brief import _choose_sample, _plan_pseudo_node
+
+    create_plan({**PLAN, "slug": "orders_report", "http_method": "get",
+                 "path": "/orders/report", "domain": "zzz"}, read_env(demo))
+    graph, _brief = _plan_brief(demo, map_mode="none")
+    state = next(p for p in graph.plans if p.slug == "orders_report")
+    sample = _choose_sample(_plan_pseudo_node(state, "endpoint"), graph.nodes)
+    # первым по алфавиту был бы health.py, а по смыслу — GET в orders.py
+    assert sample is not None and sample.file_path.endswith("orders.py")
+    assert (sample.details or {}).get("http_method", "").lower() == "get"

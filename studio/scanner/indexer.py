@@ -423,10 +423,8 @@ def _resolve_router_ref(
     return None
 
 
-def _router_chains(
-    sources: SourceSet, root: Path
-) -> dict[str, list[str]]:
-    """Префиксы include_router для каждого модуля роутов (от корня к модулю)."""
+def _include_calls(sources: SourceSet, root: Path) -> list[dict]:
+    """Все ``include_router(<дочерний>)``: кто подключает, с каким префиксом и в какой строке."""
     parsed: list[tuple[SourceFile, ast.Module]] = [
         (source, source.tree) for source in sources.all_files() if source.tree is not None
     ]
@@ -438,7 +436,7 @@ def _router_chains(
         routers_by_module[module] = set(_router_defs(tree))
         imports_by_source[source.rel] = _import_map(source, root)
 
-    parents: dict[str, list[tuple[str, str, str]]] = {}
+    calls: list[dict] = []
     for source, tree in parsed:
         caller = modules[source.rel]
         local_routers = routers_by_module.get(caller, set())
@@ -459,7 +457,6 @@ def _router_chains(
             child = _resolve_router_ref(caller, node.args[0], imports, local_routers)
             if child is None:
                 continue
-            child_module, _child_var = child
             prefix = ""
             for kw in node.keywords:
                 if (
@@ -469,8 +466,43 @@ def _router_chains(
                 ):
                     prefix = kw.value.value
                     break
-            parent_prefix = _router_defs(tree).get(parent_var, RouterInfo()).prefix
-            parents.setdefault(child_module, []).append((caller, parent_prefix, prefix))
+            calls.append(
+                {
+                    "file": source.rel,
+                    "caller": caller,
+                    "child": child[0],
+                    "line": node.lineno,
+                    "parent_prefix": _router_defs(tree).get(parent_var, RouterInfo()).prefix,
+                    "prefix": prefix,
+                }
+            )
+    return calls
+
+
+def router_include_sites(sources: SourceSet, root: Path) -> dict[str, tuple[str, int, str]]:
+    """``{модуль дочернего роутера: (файл, строка, модуль того, кто его подключает)}``.
+
+    Порядок регистрации маршрутов определяет место ``include_router``, а не файл дочернего
+    модуля. Если дочерний модуль подключают несколько раз, берётся самое раннее место.
+    """
+    sites: dict[str, tuple[str, int, str]] = {}
+    for call in _include_calls(sources, root):
+        site = (call["file"], call["line"], call["caller"])
+        if call["child"] not in sites or site < sites[call["child"]]:
+            sites[call["child"]] = site
+    return sites
+
+
+def _router_chains(
+    sources: SourceSet, root: Path
+) -> dict[str, list[str]]:
+    """Префиксы include_router для каждого модуля роутов (от корня к модулю)."""
+    modules = {source.rel: module_name(root, source.path) for source in sources.all_files()}
+    parents: dict[str, list[tuple[str, str, str]]] = {}
+    for call in _include_calls(sources, root):
+        parents.setdefault(call["child"], []).append(
+            (call["caller"], call["parent_prefix"], call["prefix"])
+        )
 
     cache: dict[str, list[str]] = {}
 

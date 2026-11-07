@@ -57,6 +57,11 @@ endpoint → scenario → io → model
     этапа. Карточки валидации — `studio/agent/cards.py` (сценарии и страницы на доске идей с
     полем `decision`); перенос принятого создаёт планы со slug и плановые страницы фронтенда.
     UI: `roadmapview.js`, `swipeview.js`, `roadmapmodel.js`.
+18. **Прогон тестов** (`studio/server/tester.py`, `studio/agent/testrun.py`, `studio test`) —
+    независимая проверка поведения: JUnit → результат по узлам и планам;
+    `studio migrate` (`studio/metadata/migrate.py`) убирает заглушки старой модели;
+    `W_ROUTE_SHADOW` (`studio/scanner/routes_check.py`) — статичный маршрут позади
+    параметрического.
 17. **Автозапуск агента** (`studio/server/runner.py`, `.studio/runner.json`) — студия сама
     запускает команду агента при входе цепочки на этап «Идеи агента» / «Реализация»;
     включается только человеком в интерфейсе; ТЗ агенту отдаётся по частям
