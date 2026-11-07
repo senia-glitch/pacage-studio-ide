@@ -19,7 +19,7 @@ from collections import deque
 from pathlib import Path
 
 from studio._atomic import atomic_write
-from studio.agent import testrun
+from studio.agent import projectenv, testrun
 from studio.metadata import MetadataError
 
 CONFIG_FILE = "tests.json"
@@ -222,6 +222,7 @@ class TestRunner:
                 junit.unlink()
             argv = [item.replace(testrun.JUNIT_PLACEHOLDER, str(junit)) for item in part["command"]]
             env = {"PYTHONIOENCODING": "utf-8", **os.environ, "STUDIO_TEST_RUN": "1", "CI": "1"}
+            projectenv.activate(env, self.root)  # тесты видят зависимости проекта
             with open(log, "wb") as stream:
                 proc = subprocess.Popen(  # noqa: S603 — команду задал человек
                     argv, cwd=self.root, env=env, stdout=stream, stderr=subprocess.STDOUT,

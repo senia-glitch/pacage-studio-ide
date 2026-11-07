@@ -36,7 +36,7 @@ function normalizeBoard(value){
     idea.scenarios=(Array.isArray(item.scenarios)?item.scenarios:[]).filter(s=>s&&typeof s==="object"&&!Array.isArray(s)).map((scenario,scenarioIndex)=>{
       const source=scenario.source&&typeof scenario.source==="object"&&!Array.isArray(scenario.source)?scenario.source:{};
       const acceptance=Array.isArray(scenario.acceptance)?scenario.acceptance.map(String):[];
-      return {id:text(scenario.id)||id(),source,title:text(scenario.title)||scenarioName(source,scenarioIndex),description:text(scenario.description)||text(source.description),acceptance,domain:text(scenario.domain)||text(source.domain),mapNodeId:text(scenario.mapNodeId),mapEndpointId:text(scenario.mapEndpointId),decision:text(scenario.decision),planSlug:text(scenario.planSlug),implemented:scenario.implemented===true};
+      return {id:text(scenario.id)||id(),source,title:text(scenario.title)||scenarioName(source,scenarioIndex),description:text(scenario.description)||text(source.description),acceptance,domain:text(scenario.domain)||text(source.domain),mapNodeId:text(scenario.mapNodeId),mapEndpointId:text(scenario.mapEndpointId),decision:text(scenario.decision),planSlug:text(scenario.planSlug),inCode:text(scenario.inCode),implemented:scenario.implemented===true};
     });
     idea.payload=payloadFor(idea);if(!idea.jsonText&&(idea.scenarios.length||idea.pages.length))idea.jsonText=JSON.stringify(idea.payload,null,2);
     return idea;
@@ -228,6 +228,7 @@ function pageCard(page,index,idea){
   return `<article class="idea-scenario-card idea-page-card swipeable${sent?" on-map":""}" data-page="${esc(page.id)}">
     <div class="idea-scenario-head"><span class="swipe-grip" title="Потяните карточку: вверх — во фронтенд, вниз — удалить">⇅</span><span class="scenario-index">${String(index+1).padStart(2,"0")}</span>${isAgentCard(page,idea)?'<span class="agent-badge">агент</span>':""}${isCardDone(page)?'<span class="scenario-on-map">реализовано</span>':""}<input class="scenario-title" data-pfield="title" aria-label="Название страницы" value="${esc(page.title)}"><button class="text-button" type="button" data-page-to-front="${esc(page.id)}" title="Создать плановую страницу и блоки во вкладке «Фронтенд»">Во фронтенд ↗</button><button class="icon-button danger" type="button" data-delete-page="${esc(page.id)}" title="Удалить страницу из ветки" aria-label="Удалить страницу">×</button></div>
     ${sent?'<div class="hint">✓ Передана во вкладку «Фронтенд». «Во фронтенд ↗» обновит те же узлы.</div>':""}
+    ${page.inCode?`<div class="hint">✓ Уже есть в коде: ${esc(page.inCode)}. Во фронтенд не переносится.</div>`:""}
     <label class="idea-field-label">ПАПКА СТРАНИЦЫ<input data-pfield="name" value="${esc(page.name)}" placeholder="orders-list"></label>
     <label class="idea-field-label">МАРШРУТ<input data-pfield="route" value="${esc(page.route)}" placeholder="/orders"></label>
     <label class="idea-field-label">ОПИСАНИЕ<textarea data-pfield="description" rows="4" placeholder="Что делает страница…">${esc(page.description)}</textarea></label>
@@ -252,8 +253,8 @@ function card(idea){
   const promptIsFresh=!!idea.prompt&&idea.promptBasis===promptBasis(idea);
   const children=idea.scenarios.map((s,index)=>{
     const onMap=isOnMap(s);
-    return `<article class="idea-scenario-card swipeable${onMap?" on-map":""}" data-scenario="${esc(s.id)}">
-    <div class="idea-scenario-head"><span class="swipe-grip" title="Потяните карточку: вверх — на карту, вниз — удалить">⇅</span><span class="scenario-index">${String(index+1).padStart(2,"0")}</span>${isAgentCard(s,idea)?'<span class="agent-badge">агент</span>':""}${isCardDone(s,id=>S.byId&&S.byId[id])?'<span class="scenario-on-map">реализовано</span>':""}${onMap?'<span class="scenario-on-map" title="Плановые узлы сценария уже созданы на карте">на карте</span>':""}<input class="scenario-title" data-field="title" aria-label="Название сценария" value="${esc(s.title)}"><button class="text-button" type="button" data-to-plan="${esc(s.id)}" title="${onMap?"Уже на карте — подтвердите пересоздание узлов":"Создать плановые узлы на общей карте"}">На карту ↗</button><button class="icon-button danger" type="button" data-delete-scenario="${esc(s.id)}" title="Удалить ветку сценария" aria-label="Удалить сценарий">×</button></div>
+    return `<article class="idea-scenario-card swipeable${onMap||s.inCode?" on-map":""}" data-scenario="${esc(s.id)}">
+    <div class="idea-scenario-head"><span class="swipe-grip" title="Потяните карточку: вверх — на карту, вниз — удалить">⇅</span><span class="scenario-index">${String(index+1).padStart(2,"0")}</span>${isAgentCard(s,idea)?'<span class="agent-badge">агент</span>':""}${isCardDone(s,id=>S.byId&&S.byId[id])?'<span class="scenario-on-map">реализовано</span>':""}${onMap?'<span class="scenario-on-map" title="Плановые узлы сценария уже созданы на карте">на карте</span>':""}${s.inCode?`<span class="scenario-on-map" title="${esc(s.inCode)}">уже в коде</span>`:""}<input class="scenario-title" data-field="title" aria-label="Название сценария" value="${esc(s.title)}"><button class="text-button" type="button" data-to-plan="${esc(s.id)}" title="${onMap?"Уже на карте — подтвердите пересоздание узлов":"Создать плановые узлы на общей карте"}">На карту ↗</button><button class="icon-button danger" type="button" data-delete-scenario="${esc(s.id)}" title="Удалить ветку сценария" aria-label="Удалить сценарий">×</button></div>
     <label class="idea-field-label">ОПИСАНИЕ<textarea data-field="description" rows="5" placeholder="Опишите сценарий…">${esc(s.description)}</textarea></label>
     <label class="idea-field-label">КРИТЕРИИ ПРИЁМКИ<textarea data-field="acceptance" rows="3" placeholder="По одному критерию на строку">${esc(s.acceptance.join("\n"))}</textarea></label>
     <label class="idea-field-label">ДОМЕН<input data-field="domain" value="${esc(s.domain)}" placeholder="orders"></label>
@@ -375,8 +376,8 @@ async function applySwipe(card,action){
       pushUndo();idea.scenarios=idea.scenarios.filter(x=>x.id!==scenario.id);idea.payload=payloadFor(idea);idea.jsonText=JSON.stringify(idea.payload,null,2);
       render();save();toast("Сценарий удалён (вернуть: Ctrl+Z или «Отменить»)");return;
     }
-    if(scenario.planSlug||isOnMap(scenario)){acceptDecision(scenario);save();toast("Сценарий уже на карте");render();return}
-    await putScenarioOnMap(scenario);acceptDecision(scenario);save();render();return;
+    if(scenario.planSlug||scenario.inCode||isOnMap(scenario)){acceptDecision(scenario);save();toast(scenario.inCode?`Уже есть в коде: ${scenario.inCode}`:"Сценарий уже на карте");render();return}
+    await transferCard("scenario",scenario);render();return;
   }
   const page=idea.pages.find(x=>x.id===card.dataset.page);if(!page)return;
   if(action==="delete"){
@@ -384,7 +385,36 @@ async function applySwipe(card,action){
     render();save();toast("Страница удалена (вернуть: Ctrl+Z или «Отменить»)");return;
   }
   const button=card.querySelector("[data-page-to-front]");if(!button)return;
-  await sendPageToFront(page,button,{stay:true});acceptDecision(page);save();render();
+  await sendPageToFront(page,button,{stay:true});render();
+}
+/* Перенос карточки делает сервер: он сверяет её с кодом и создаёт план (имена по slug) или плановую страницу.
+   Уже реализованное в коде не переносится, карточка получает пометку «уже в коде». */
+async function reloadBoard(){
+  const raw=await api("/api/ideas","GET");
+  board=normalizeBoard(raw);boardRevision=Number(raw&&raw.revision)||0;dirty=false;
+  try{localStorage.setItem(loadedKey,localCopy())}catch(_){ }
+}
+async function transferCard(kind,card,options={}){
+  clearTimeout(persistTimer);clearTimeout(syncTimer);
+  try{
+    await pushBoard();
+    const result=await api("/api/workflow/transfer-card","POST",{id:card.id,force:options.force===true});
+    await reloadBoard();
+    if(result.graph)applyGraph(result.graph);
+    if(result.already){toast(`Уже перенесено: ${result.already}`);return result}
+    if(!result.transferred){toast(`Уже есть в коде: ${(result.verdict&&result.verdict.where)||"такой узел"}. На карту не переносится`);return result}
+    const missing=result.links_missing||[];
+    if(kind==="scenario"){
+      hooks.renderMap();hooks.renderInspector();hooks.renderIdeas();
+      toast(`Сценарий перенесён на карту как план «${result.mark.planSlug}»`);
+    }else{
+      const partial=result.verdict&&result.verdict.status==="partial"?" (только недостающие блоки)":"";
+      toast(missing.length
+        ?`Страница добавлена во «Фронтенд»${partial}. Эндпоинтов нет в бэкенде: ${missing.length} (${missing.slice(0,2).join(", ")}${missing.length>2?"…":""}) — передайте сценарии «На карту ↗»`
+        :`Страница и блоки добавлены во вкладку «Фронтенд» как плановые узлы${partial}`);
+    }
+    return result;
+  }catch(error){toast("Не удалось перенести карточку: "+error.message);return null}
 }
 /* Приёмка работы: всё, что стало картой или страницей, считается реализованным и уходит в нижнюю группу. */
 export async function markImplemented(){
@@ -403,10 +433,24 @@ async function sendToConstructor(button){
   const idea=find(button.closest("[data-idea]").dataset.idea);const scenario=idea&&idea.scenarios.find(item=>item.id===button.dataset.toPlan);if(!scenario)return;
   if(scenario.planSlug){toast(`Сценарий уже на карте как план «${scenario.planSlug}»`);return}
   if(isOnMap(scenario)){confirmRecreate(scenario);return}
-  if(!(await setTab("map")))return;
-  await putScenarioOnMap(scenario);
+  if(scenario.inCode){
+    if(!confirm(`Это уже есть в коде: ${scenario.inCode}.\nПеренести на карту всё равно?`))return;
+    const forced=await transferCard("scenario",scenario,{force:true});
+    if(forced&&forced.transferred)await setTab("map");
+    return;
+  }
+  const result=await transferCard("scenario",scenario);
+  if(result&&result.transferred)await setTab("map");
 }
 async function sendPageToFront(page,button,options={}){
+  if(!page.mapPageId){
+    button.disabled=true;
+    if(page.inCode&&!confirm(`Это уже есть в коде: ${page.inCode}.\nПеренести во фронтенд всё равно?`)){button.disabled=false;return}
+    const result=await transferCard("page",page,{force:!!page.inCode});
+    button.disabled=false;
+    if(result&&result.transferred&&!options.stay)await setTab("frontend");
+    return;
+  }
   button.disabled=true;
   try{
     const pageId=page.mapPageId||`page-plan:${uid()}`;
@@ -438,24 +482,9 @@ function confirmRecreate(scenario){
     ]);
 }
 function endpointPayload(scenario,nodeId){
-  const payload={kind:"endpoint",name:scenario.title,description:scenario.description,acceptance:scenario.acceptance,domain:scenario.domain,http_method:scenario.source.http_method||"GET",path:scenario.source.path||""};
+  const payload={kind:"endpoint",name:scenario.title,slug:scenario.source.slug||"",description:scenario.description,acceptance:scenario.acceptance,domain:scenario.domain,http_method:scenario.source.http_method||"GET",path:scenario.source.path||""};
   if(nodeId)payload.node_id=nodeId;
   return payload;
-}
-async function putScenarioOnMap(scenario){
-  try{
-    let parentId="";
-    if(String(scenario.source.path||"")){
-      const reuse=scenario.mapEndpointId&&S.byId[scenario.mapEndpointId]?scenario.mapEndpointId:"";
-      const endpoint=await api("/api/metadata/graph-node","POST",endpointPayload(scenario,reuse));
-      applyGraph(endpoint.graph);parentId=endpoint.node_id;
-    }
-    const node=await api("/api/metadata/graph-node","POST",{kind:"scenario",name:scenario.title,description:scenario.description,acceptance:scenario.acceptance,domain:scenario.domain,parent_id:parentId,edge_kind:"dispatch"});
-    applyGraph(node.graph);
-    scenario.mapEndpointId=parentId;scenario.mapNodeId=node.node_id;
-    S.selectedNode=node.node_id;hooks.renderMap();hooks.renderInspector();schedulePersist();save();hooks.renderIdeas();
-    toast("Идея добавлена на карту как плановый узел");
-  }catch(error){toast("Не удалось передать идею на карту: "+error.message)}
 }
 async function recreateScenario(scenario){
   try{
@@ -469,11 +498,11 @@ async function recreateScenario(scenario){
     const existing=scenario.mapNodeId&&S.byId[scenario.mapNodeId]?scenario.mapNodeId:"";
     let nodeId="";
     if(existing){
-      const updated=await api("/api/metadata/graph-node","POST",{node_id:existing,kind:"scenario",name:scenario.title,description:scenario.description,acceptance:scenario.acceptance,domain:scenario.domain});
+      const updated=await api("/api/metadata/graph-node","POST",{node_id:existing,kind:"scenario",name:scenario.title,slug:scenario.source.slug||"",description:scenario.description,acceptance:scenario.acceptance,domain:scenario.domain});
       applyGraph(updated.graph);
       nodeId=updated.node_id||existing;
     }else{
-      const node=await api("/api/metadata/graph-node","POST",{kind:"scenario",name:scenario.title,description:scenario.description,acceptance:scenario.acceptance,domain:scenario.domain,parent_id:parentId,edge_kind:"dispatch"});
+      const node=await api("/api/metadata/graph-node","POST",{kind:"scenario",name:scenario.title,slug:scenario.source.slug||"",description:scenario.description,acceptance:scenario.acceptance,domain:scenario.domain,parent_id:parentId,edge_kind:"dispatch"});
       applyGraph(node.graph);
       nodeId=node.node_id;
     }

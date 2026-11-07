@@ -191,9 +191,13 @@ def iter_cards(board: dict):
 
 
 def mapped(kind: str, item: dict) -> str:
-    """Чем карточка уже стала на карте (slug плана или id страницы); пусто — не перенесена."""
+    """Чем карточка уже стала на карте (slug плана или id страницы); пусто — не перенесена.
+
+    Карточка, которая уже есть в коде (``inCode``, см. сверку перед переносом), тоже считается
+    разобранной: переносить её не нужно.
+    """
     key = "mapNodeId" if kind == "scenario" else "mapPageId"
-    return str(item.get("planSlug") or item.get(key) or "")
+    return str(item.get("planSlug") or item.get(key) or item.get("inCode") or "")
 
 
 def counts(board: dict) -> dict:

@@ -25,6 +25,9 @@ function connectionCard(view) {
     <h3>Подключение</h3>
     <p><span class="dock-dot ${esc(status.tone)}"></span> <b>Claude Code</b> — ${esc(status.text)}</p>
     <p class="hint">${found}</p>
+    <p class="hint">${view.venv
+      ? `Окружение проекта: <code>${esc(view.venv)}</code>. Агент и тесты запускаются в нём, поэтому видят зависимости проекта.`
+      : "Окружение проекта (<code>.venv</code> или <code>venv</code>) не найдено: агент запускается в окружении студии и может не увидеть зависимости проекта."}</p>
     <div class="agent-row">
       <button type="button" class="primary" id="agentConnect">${view.enabled ? "Переподключить" : "Подключить Claude Code"}</button>
       <button type="button" id="agentCheck">Проверить связь</button>

@@ -284,8 +284,8 @@ def test_перенос_создаёт_планы_и_страницы_и_идё�
               "calls": ["GET /lessons"], "blocks": [{"name": "Card", "calls": ["GET /lessons"]}]}]
     _to_confirm(state, pages=pages)
     moved = chain.transfer(state)
-    assert moved["stage"] == "select" and moved["transfer"] == {"plans": 2, "pages": 1,
-                                                               "errors": []}
+    assert moved["stage"] == "select" and moved["transfer"] == {
+        "plans": 2, "pages": 1, "in_code": 0, "errors": []}
     assert {p.slug for p in state.graph.plans} == {"list_lessons", "create_lesson"}
     board = state.load_ideas()
     idea = board["ideas"][0]

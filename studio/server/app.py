@@ -433,6 +433,8 @@ def make_handler(ctx):
                 return self._json(chain.decide(state, data))
             if url.path == "/api/workflow/transfer":
                 return self._json(chain.transfer(state))
+            if url.path == "/api/workflow/transfer-card":
+                return self._json(chain.transfer_card(state, data))
             if url.path == "/api/workflow/select":
                 return self._json(chain.select(state, data, state.check_front_links))
             if url.path == "/api/workflow/finish":

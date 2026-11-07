@@ -12,9 +12,10 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+from studio.agent import projectenv
 
 DEFAULT_TIMEOUT = 300
 MAX_TIMEOUT = 3600
@@ -22,19 +23,7 @@ JUNIT_PLACEHOLDER = "{junit}"
 _PARAMS_RE = re.compile(r"\[.*\]$")
 
 
-def project_python(root: Path | None) -> str:
-    """Python проекта: из его виртуального окружения (``.venv``, ``venv``), иначе — студии.
-
-    Тесты проекта нужно гонять в его окружении: в окружении студии нет ни зависимостей проекта,
-    ни самого проекта, и сборка тестов падает.
-    """
-    if root is not None:
-        for folder in (".venv", "venv"):
-            for rel in ("Scripts/python.exe", "bin/python"):
-                candidate = Path(root) / folder / rel
-                if candidate.is_file():
-                    return str(candidate)
-    return sys.executable
+project_python = projectenv.project_python
 
 
 def default_command(root: Path | None = None) -> list[str]:

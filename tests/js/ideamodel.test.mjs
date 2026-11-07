@@ -98,6 +98,12 @@ test("карточка реализована по флагу приёмки и�
   assert.equal(isCardDone(null, find), false);
 });
 
+test("карточка, найденная в коде при сверке (inCode), считается реализованной", () => {
+  assert.equal(isCardDone({inCode: "GET /health (app/api/v1/routes/health.py)"}), true);
+  assert.equal(isCardDone({inCode: ""}), false);
+  assert.equal(isIdeaDone({scenarios: [{inCode: "GET /x"}], pages: [{implemented: true}]}), true);
+});
+
 test("идея реализована только когда есть карточки и все готовы", () => {
   const done = {scenarios: [{implemented: true}], pages: [{implemented: true}]};
   assert.equal(isIdeaDone(done), true);

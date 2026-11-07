@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import re
 import time
 from pathlib import Path
 
@@ -22,6 +21,7 @@ from studio.frontend import meta as front_meta
 from studio.frontend.brief import FRONT_BRIEF_FILENAME, LAST_FRONT_BRIEF, brief_frontend
 from studio.metadata import MetadataError
 from studio.scanner.routes_check import shadow_notes
+from studio.server import reconcile
 
 MAX_TASK = 4000
 
@@ -97,17 +97,7 @@ def _plan_data(item: dict) -> dict:
     }
 
 
-_PARAM_RE = re.compile(r"\{[^}]*\}")
-
-
-def _route_key(method: str, path: str, prefix: str) -> tuple[str, str]:
-    """Маршрут для сравнения: метод в верхнем регистре, без префикса API и слэша в конце,
-    параметры пути обезличены (`{id}` и `{lesson_id}` — один и тот же маршрут)."""
-    text = "/" + str(path or "").strip().strip("/")
-    pre = "/" + str(prefix or "").strip("/")
-    if pre != "/" and (text == pre or text.startswith(pre + "/")):
-        text = text[len(pre):] or "/"
-    return str(method or "").upper(), _PARAM_RE.sub("{}", text.rstrip("/") or "/")
+_route_key = reconcile.route_key
 
 
 def _existing_routes(state, board: dict) -> dict[tuple[str, str], str]:
@@ -536,46 +526,151 @@ def _uid() -> str:
     return str(uuid.uuid4())
 
 
-def transfer(state) -> dict:
-    """«Да»: перенести принятые карточки на карту и перейти к выбору задач."""
-    with state.lock:
-        if state.workflow.data["stage"] != "confirm":
-            raise MetadataError("wrong_stage", "Перенос возможен на этапе «Перенос на карту»")
-        board = state.load_ideas()
-        marks: dict[str, dict] = {}
-        errors: list[dict] = []
-        done = {"plans": 0, "pages": 0}
-        for _idea, kind, item in cards.to_transfer(board):
-            title = str(item.get("title") or item.get("id"))
-            try:
-                if kind == "scenario":
-                    marks[item["id"]] = {"planSlug": _transfer_scenario(state, item)}
-                    done["plans"] += 1
-                else:
-                    created = _transfer_page(state, item)
-                    marks[item["id"]] = {"mapPageId": created["page"], "blocks": created["blocks"]}
-                    done["pages"] += 1
-            except Exception as exc:  # noqa: BLE001 — ошибка одной карточки не рушит остальные
-                message = getattr(exc, "message", None) or str(exc)
-                errors.append({"id": item["id"], "title": title, "message": str(message)})
+def _transfer_item(state, kind: str, item: dict, graph, front: dict, prefix: str,
+                   force: bool = False) -> tuple[dict, dict]:
+    """Сверить карточку с кодом и перенести. Возвращает (отметка для доски, вердикт).
 
-        def apply(board: dict):
-            changed = False
-            for _idea, kind, item in cards.iter_cards(board):
-                mark = marks.get(item.get("id"))
+    Если такое уже есть в коде, ничего не создаётся: карточка получает пометку ``inCode``.
+    ``force`` переносит в любом случае (человек решил, что дубль ему нужен).
+    """
+    if kind == "scenario":
+        verdict = reconcile.check_scenario(graph, prefix, item)
+    else:
+        verdict = reconcile.check_page(front, item)
+    if verdict["status"] == reconcile.EXISTS and not force:
+        return {"inCode": verdict["where"] or "уже в коде"}, verdict
+    if kind == "scenario":
+        return {"planSlug": _transfer_scenario(state, item)}, verdict
+    page_item = item
+    if verdict["status"] == reconcile.PARTIAL and not force:
+        missing = {name.lower() for name in verdict["missing"]}
+        page_item = {
+            **item,
+            "blocks": [
+                b for b in item.get("blocks") or []
+                if str(b.get("name") or "").strip().lower() in missing
+            ],
+        }
+    created = _transfer_page(state, page_item)
+    return {"mapPageId": created["page"], "blocks": created["blocks"]}, verdict
+
+
+def _apply_marks(board: dict, marks: dict[str, dict]) -> bool:
+    """Записать на карточки итог переноса: ``planSlug``, ``mapPageId`` или ``inCode``."""
+    changed = False
+    for idea in board.get("ideas") or []:
+        if not isinstance(idea, dict):
+            continue
+        for kind, key in (("scenario", "scenarios"), ("page", "pages")):
+            for item in idea.get(key) or []:
+                mark = marks.get(item.get("id")) if isinstance(item, dict) else None
                 if not mark:
                     continue
                 changed = True
-                if kind == "scenario":
+                item.pop("inCode", None)
+                if "inCode" in mark:
+                    item["inCode"] = mark["inCode"]
+                elif kind == "scenario":
                     item["planSlug"] = mark["planSlug"]
                 else:
                     item["mapPageId"] = mark["mapPageId"]
                     for block in item.get("blocks") or []:
                         block["mapBlockId"] = mark["blocks"].get(str(block.get("id")), "")
-            return changed
+                item["decision"] = cards.ACCEPTED
+    return changed
+
+
+def _find_card(board: dict, card_id: str) -> tuple[str, dict] | None:
+    for idea in board.get("ideas") or []:
+        if not isinstance(idea, dict):
+            continue
+        for kind, key in (("scenario", "scenarios"), ("page", "pages")):
+            for item in idea.get(key) or []:
+                if isinstance(item, dict) and item.get("id") == card_id:
+                    return kind, item
+    return None
+
+
+def transfer_card(state, data: dict) -> dict:
+    """Перенести одну карточку на карту (свайп вверх или «На карту»), сверив её с кодом.
+
+    Ответ: ``transferred`` (создано ли что-то), ``verdict`` (new/exists/partial, где найдено),
+    ``mark`` (что записано на карточку). Работает на любом этапе; уже перенесённую повторно
+    не переносит, если не передан ``force``.
+    """
+    card_id = str(data.get("id") or "")
+    force = data.get("force") is True
+    with state.lock:
+        found = _find_card(state.load_ideas(), card_id)
+        if found is None:
+            raise _invalid("Карточка не найдена на доске идей: обновите страницу")
+        kind, item = found
+        mapped = cards.mapped(kind, item)
+        if mapped and not force:
+            return {"transferred": False, "already": mapped, "verdict": None, "mark": {}}
+        graph = state.rescan("reconcile")
+        prefix = read_env(state.root).api_prefix
+        front = front_graph.build_front_graph(state.root) if kind == "page" else {}
+        try:
+            mark, verdict = _transfer_item(state, kind, item, graph, front, prefix, force)
+        except Exception as exc:  # noqa: BLE001 — причину показываем человеку как есть
+            raise _invalid(f"Перенос не удался: {getattr(exc, 'message', None) or exc}") from exc
+        state.mutate_ideas(lambda board: _apply_marks(board, {card_id: mark}))
+        graph = state.rescan("transfer-card")
+        result = {"transferred": "inCode" not in mark, "already": "", "verdict": verdict,
+                  "mark": {k: v for k, v in mark.items() if k != "blocks"},
+                  "graph": graph.model_dump(), "links_missing": []}
+        if kind == "page" and "mapPageId" in mark:
+            result["links_missing"] = _missing_calls(state, mark)
+        return result
+
+
+def _missing_calls(state, mark: dict) -> list[str]:
+    """Вызовы перенесённой страницы, для которых в бэкенде нет эндпоинта (подсказка человеку)."""
+    mine = {mark["mapPageId"], *mark.get("blocks", {}).values()}
+    try:
+        links = state.check_front_links(front_graph.build_front_graph(state.root))
+    except Exception:  # noqa: BLE001 — подсказка не должна ломать уже сделанный перенос
+        return []
+    rows = links.get("rows") if isinstance(links, dict) else []
+    return sorted({
+        str(row.get("call")) for row in rows or []
+        if row.get("node") in mine and row.get("status") != "ok" and row.get("call")
+    })
+
+
+def transfer(state) -> dict:
+    """«Да»: перенести принятые карточки на карту и перейти к выбору задач.
+
+    Каждая карточка сверяется с кодом: что уже реализовано, не переносится (помечается
+    ``inCode``), это не ошибка и перенос остальных не останавливает.
+    """
+    with state.lock:
+        if state.workflow.data["stage"] != "confirm":
+            raise MetadataError("wrong_stage", "Перенос возможен на этапе «Перенос на карту»")
+        board = state.load_ideas()
+        graph = state.rescan("reconcile")
+        prefix = read_env(state.root).api_prefix
+        front = front_graph.build_front_graph(state.root)
+        marks: dict[str, dict] = {}
+        errors: list[dict] = []
+        done = {"plans": 0, "pages": 0, "in_code": 0}
+        for _idea, kind, item in cards.to_transfer(board):
+            title = str(item.get("title") or item.get("id"))
+            try:
+                mark, _verdict = _transfer_item(state, kind, item, graph, front, prefix)
+            except Exception as exc:  # noqa: BLE001 — ошибка одной карточки не рушит остальные
+                message = getattr(exc, "message", None) or str(exc)
+                errors.append({"id": item["id"], "title": title, "message": str(message)})
+                continue
+            marks[item["id"]] = mark
+            if "inCode" in mark:
+                done["in_code"] += 1
+            else:
+                done["plans" if kind == "scenario" else "pages"] += 1
 
         if marks:
-            state.mutate_ideas(apply)
+            state.mutate_ideas(lambda board: _apply_marks(board, marks))
             state.rescan("transfer")
         if not errors:
             state.workflow.advance("select")
@@ -746,4 +841,5 @@ __all__ = [
     "stage",
     "start",
     "transfer",
+    "transfer_card",
 ]

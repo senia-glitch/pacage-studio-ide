@@ -13,7 +13,7 @@ export function blockFrom(raw,index){
 
 export function pageFrom(raw,index){
   const source=raw.source&&typeof raw.source==="object"&&!Array.isArray(raw.source)?raw.source:{...raw};
-  return {id:text(raw.id)||id(),source,title:text(raw.title||raw.name)||`Страница ${index+1}`,name:text(raw.name),description:text(raw.description),acceptance:strings(raw.acceptance),domain:text(raw.domain),route:text(raw.route),calls:strings(raw.calls),blocks:(Array.isArray(raw.blocks)?raw.blocks:[]).map(blockFrom),mapPageId:text(raw.mapPageId),decision:text(raw.decision),implemented:raw.implemented===true};
+  return {id:text(raw.id)||id(),source,title:text(raw.title||raw.name)||`Страница ${index+1}`,name:text(raw.name),description:text(raw.description),acceptance:strings(raw.acceptance),domain:text(raw.domain),route:text(raw.route),calls:strings(raw.calls),blocks:(Array.isArray(raw.blocks)?raw.blocks:[]).map(blockFrom),mapPageId:text(raw.mapPageId),inCode:text(raw.inCode),decision:text(raw.decision),implemented:raw.implemented===true};
 }
 
 export function pagesFrom(list){
@@ -35,10 +35,11 @@ export function railLabel(idea){return railCounts(idea)+(idea.created_by==="agen
 
 /* ---------- группы идей в левой панели ---------- */
 
-/* Карточка (сценарий или страница) реализована: её пометили при приёмке или узел на карте уже не плановый. */
+/* Карточка (сценарий или страница) реализована: её пометили при приёмке, студия нашла её в коде
+   (inCode при сверке перед переносом) или узел на карте уже не плановый. */
 export function isCardDone(card,findNode){
   if(!card)return false;
-  if(card.implemented===true)return true;
+  if(card.implemented===true||!!card.inCode)return true;
   const node=card.mapNodeId&&findNode?findNode(card.mapNodeId):null;
   return !!(node&&node.planned===false);
 }

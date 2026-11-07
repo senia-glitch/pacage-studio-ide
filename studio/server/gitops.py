@@ -44,9 +44,21 @@ def _git(root: Path, *args: str, check: bool = True) -> str:
 
 
 def is_repo(root: Path) -> bool:
+    """Корень проекта сам является корнем git-репозитория.
+
+    Проект внутри чужого (более крупного) репозитория не подходит: чекпоинт переключал бы
+    ветку и откатывал бы файлы всего репозитория, а не только проекта.
+    """
+    root = Path(root)
     try:
-        return _git(Path(root), "rev-parse", "--is-inside-work-tree", check=False) == "true"
+        top = _git(root, "rev-parse", "--show-toplevel", check=False)
     except GitError:
+        return False
+    if not top:
+        return False
+    try:
+        return Path(top).resolve() == root.resolve()
+    except OSError:
         return False
 
 

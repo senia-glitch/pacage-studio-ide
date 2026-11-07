@@ -61,6 +61,9 @@ from studio.metadata import (
     save_node_metadata,
     save_planned_change,
 )
+from studio.metadata.facts import finish_plans
+from studio.metadata.facts import journal as plan_journal
+from studio.metadata.plans import PlanError, build_plan, layer_file, layer_name
 from studio.metamodel import EDGE_KINDS, NODE_KINDS, Graph, Node
 from studio.scanner import scan
 from studio.scanner.anchors import AnchorResolver
@@ -130,6 +133,7 @@ class ProjectState:
             self.scanning = True
             try:
                 graph = scan(self.root)
+                graph = self._finish_plans(graph)
                 metadata = read_metadata(self.root)
                 planned_changes = metadata.extra.get("planned_changes")
                 if not isinstance(planned_changes, dict):
@@ -181,6 +185,18 @@ class ProjectState:
                 return graph
             finally:
                 self.scanning = False
+
+    def _finish_plans(self, graph: Graph) -> Graph:
+        """План → факт: найденный в коде план закрывается сам, граф пересобирается."""
+        try:
+            closed = finish_plans(self.root, graph)
+        except Exception as exc:  # noqa: BLE001 — сбой автоматики не должен ломать скан
+            slog.step(f"план→факт не выполнен: {exc}")
+            return graph
+        if not closed:
+            return graph
+        slog.step("план→факт: " + ", ".join(item["slug"] for item in closed))
+        return scan(self.root)
 
     def ensure_graph(self) -> Graph:
         with self.lock:
@@ -310,6 +326,17 @@ class ProjectState:
                 raise MetadataError("invalid_input", "Укажите название узла")
             if len(name) > 180:
                 raise MetadataError("invalid_input", "Название узла слишком длинное")
+            # Имя узла в коде берётся из slug (латиница), а не из заголовка карточки.
+            title = name
+            slug = str(data.get("slug") or "").strip()
+            slug_target = ""
+            if slug and kind in ("endpoint", "scenario"):
+                try:
+                    plan = build_plan(title, slug, "", [], "", "", "", False, False,
+                                      read_env(self.root))
+                except PlanError as exc:
+                    raise MetadataError("invalid_input", str(exc)) from exc
+                name, slug_target = layer_name(plan, kind), layer_file(plan, kind)
             description = data.get("description") or ""
             acceptance = data.get("acceptance") or []
             domain = data.get("domain") or ""
@@ -365,6 +392,9 @@ class ProjectState:
             details = dict((existing.details or {}) if existing is not None else {"name": name})
             if existing is None and data.get("_actor") == "agent":
                 details["created_by"] = "agent"
+            if slug_target:
+                details["slug"] = slug
+                details["title"] = title
             if kind == "endpoint":
                 details.update(
                     {
@@ -403,6 +433,7 @@ class ProjectState:
                 )
             target_file = str(
                 data.get("target_file")
+                or slug_target
                 or (parent.file_path if parent else (existing.file_path if existing else ""))
             )
             result = save_graph_node(
@@ -783,7 +814,9 @@ class ProjectState:
         with self.lock:
             graph = self.ensure_graph()
             try:
-                report = check_sync_response(graph, extract_json(data.get("json")))
+                report = check_sync_response(
+                    graph, extract_json(data.get("json")), plan_journal(self.root)
+                )
             except SyncJsonError as exc:
                 raise MetadataError("invalid_input", str(exc)) from exc
             report["applied"] = 0

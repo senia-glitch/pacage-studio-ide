@@ -110,8 +110,12 @@ def sync_known_nodes(graph: Graph) -> dict[str, dict]:
     }
 
 
-def _resolver(graph: Graph, known: dict[str, dict]):
-    """Запись ответа → узел: по id/якорю или по паре plan + layer (слой плана в коде)."""
+def _resolver(graph: Graph, known: dict[str, dict], finished: dict[str, dict] | None = None):
+    """Запись ответа → узел: по id/якорю или по паре plan + layer (слой плана в коде).
+
+    ``finished`` — журнал закрытых планов (план → факт): отчёт агента пришёл уже после того,
+    как студия закрыла выполненный план, и слой ищется в журнале.
+    """
     states = {state.slug: state for state in graph.plans}
     anchors = AnchorResolver(graph)
     by_id = graph.by_id()
@@ -139,10 +143,21 @@ def _resolver(graph: Graph, known: dict[str, dict]):
         if not has_plan:
             return None, "нет id узла или пары plan и layer"
         state = states.get(plan.strip())
-        if state is None:
+        closed = (finished or {}).get(plan.strip())
+        if state is None and closed is None:
             return None, f"план «{plan.strip()}» не найден"
         if not isinstance(layer, str) or not layer.strip():
             return None, "для плана нужен layer"
+        if state is None:
+            ids = [
+                i for i in (closed.get("layers") or {}).get(layer.strip(), [])
+                if i in by_id and not by_id[i].planned
+            ]
+            if not ids:
+                return None, f"в закрытом плане «{plan.strip()}» нет слоя «{layer.strip()}»"
+            if len(ids) > 1:
+                return None, "слой содержит несколько узлов — укажите id узла: " + ", ".join(ids)
+            return pick(ids[0], "")
         item_layer = next((entry for entry in state.layers if entry.layer == layer.strip()), None)
         if item_layer is None:
             return None, f"в плане «{state.slug}» нет слоя «{layer.strip()}»"
@@ -156,7 +171,7 @@ def _resolver(graph: Graph, known: dict[str, dict]):
     return resolve
 
 
-def check_sync_response(graph: Graph, payload) -> dict:
+def check_sync_response(graph: Graph, payload, finished: dict[str, dict] | None = None) -> dict:
     """Разбор JSON-ответа агента против узлов графа; ничего не записывает.
 
     Узел указывается по id (якорю) или по паре plan + layer — вторая форма нужна
@@ -164,7 +179,7 @@ def check_sync_response(graph: Graph, payload) -> dict:
     """
     known = sync_known_nodes(graph)
     return check_sync_payload(
-        payload, known, resolve=_resolver(graph, known), extra_keys=("plan", "layer")
+        payload, known, resolve=_resolver(graph, known, finished), extra_keys=("plan", "layer")
     )
 
 

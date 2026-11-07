@@ -24,6 +24,7 @@ from collections import deque
 from pathlib import Path
 
 from studio._atomic import atomic_write
+from studio.agent import projectenv
 from studio.metadata import MetadataError
 from studio.server import gitops
 from studio.server.settings import Settings
@@ -425,9 +426,16 @@ class Runner:
                          "или поменяйте команду в настройках автозапуска.")
             return
         env = {**os.environ, "STUDIO_PROJECT": str(self.root), "STUDIO_RUN_STAGE": stage}
+        venv = projectenv.activate(env, self.root)  # агент работает в окружении проекта
         try:
             log.parent.mkdir(parents=True, exist_ok=True)
             with open(log, "wb") as stream:
+                stream.write(
+                    (f"[studio] окружение проекта: {venv}\n" if venv
+                     else "[studio] окружение проекта не найдено (.venv, venv): "
+                          "агент запущен в окружении студии\n").encode("utf-8")
+                )
+                stream.flush()
                 proc = subprocess.Popen(  # noqa: S603 — команду задал человек в интерфейсе
                     argv, cwd=self.root, env=env, stdout=stream, stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL,
@@ -520,9 +528,11 @@ class Runner:
     def agent_view(self) -> dict:
         """Всё для окна агента и страницы «Настройки агента» (только интерфейс)."""
         ask = self.pending_ask()
+        venv = projectenv.venv_dir(self.root)
         return {
             **self.public(),
             "claude_found": shutil.which("claude") is not None,
+            "venv": venv.name if venv else "",
             "has_session": bool(self.session_id()),
             "log_tail": self._tail(self.root / ".studio" / LOG_FILE, 15),
             "ask": (
