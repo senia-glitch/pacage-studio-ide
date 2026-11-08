@@ -38,6 +38,11 @@ START_TIMEOUT = 90  # секунд ждать, пока сервер начнё�
 PORT_PLACEHOLDER = "{port}"
 NOTHING_TO_RUN = "Нечего запускать: не найден ни бэкенд, ни фронтенд"
 TAIL_LINES = 12
+MAX_CAUSES = 4
+# Строка итога исключения («ImportError: …») и подсказка библиотеки «pip install …».
+_CAUSE = re.compile(r"^(?:[A-Za-z_][\w.]*\.)?[A-Za-z_]\w*(?:Error|Exception)\b:\s*\S.*")
+_PIP = re.compile(r"pip install\s+['\"]?([^'\"\s]+)")
+_STARTUP_FAILED = re.compile(r"startup failed", re.IGNORECASE)
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _NEW_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 _URL = re.compile(r"https?://(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):(\d+)[^\s]*")
@@ -127,6 +132,50 @@ def _kill_tree(proc: subprocess.Popen) -> None:
             proc.kill()
 
 
+def _oem_codepage() -> str:
+    """Кодовая страница консоли Windows (cp866 в русской системе): так cmd.exe печатает ошибки."""
+    if os.name != "nt":
+        return "utf-8"
+    with contextlib.suppress(Exception):
+        import ctypes  # noqa: PLC0415 — только Windows
+
+        return f"cp{ctypes.windll.kernel32.GetOEMCP()}"
+    return "cp866"
+
+
+def decode_line(raw: bytes) -> str:
+    """Строка вывода: UTF-8, а если не она (сообщения cmd.exe, «'vite' не является…»), то OEM."""
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            return raw.decode(_oem_codepage())
+        except (UnicodeDecodeError, LookupError):
+            return raw.decode("utf-8", "replace")
+
+
+NPM_HINT = {
+    "cause": "Не установлены зависимости фронтенда: нет frontend/node_modules",
+    "chain": [], "fix": "npm install", "where": "в папке frontend",
+}
+
+
+def diagnose(causes: list[str]) -> dict:
+    """Первопричина сбоя запуска и готовая команда исправления из сообщений об ошибках.
+
+    Python печатает цепочку исключений от первопричины к последнему, а библиотеки часто прячут её
+    за общим сообщением («установите fastbase[full]»), поэтому берём первую строку и первую
+    подсказку ``pip install`` из всех. В хвост она не попадает: трассировка длинная."""
+    fix = ""
+    for line in causes:
+        found = _PIP.search(line)
+        if found:
+            fix = f"pip install {found.group(1)}"
+            break
+    return {"cause": causes[0] if causes else "", "chain": causes[1:], "fix": fix,
+            "where": "в окружении проекта (.venv)"}
+
+
 def _tail(server) -> list[str]:
     """Последние строки вывода; читатель дописывает их параллельно, копию берём с повтором."""
     for _ in range(3):
@@ -154,6 +203,8 @@ class _Server:
         self.ready = False
         self.stopping = False
         self.lines: deque[str] = deque(maxlen=200)
+        self.causes: list[str] = []  # строки «XxxError: …» из вывода: первопричина сбоя запуска
+        self.crashed = False  # приложение не стартовало (uvicorn --reload при этом остаётся жить)
 
     def alive(self) -> bool:
         return self.proc.poll() is None
@@ -329,10 +380,15 @@ class DevServers:
             stream = open(log, "w", encoding="utf-8")  # noqa: SIM115 — закрываем в finally
         try:
             for raw in iter(server.proc.stdout.readline, b""):
-                line = _ANSI.sub("", raw.decode("utf-8", "replace")).rstrip()
+                line = _ANSI.sub("", decode_line(raw)).rstrip()
                 if not line:
                     continue
                 server.lines.append(line)
+                new = _CAUSE.match(line) and line not in server.causes
+                if new and len(server.causes) < MAX_CAUSES:
+                    server.causes.append(line[:300])
+                if _STARTUP_FAILED.search(line):
+                    server.crashed = True
                 if stream is not None:
                     stream.write(line + "\n")
                     stream.flush()
@@ -352,6 +408,7 @@ class DevServers:
                     self._exited[server.name] = {
                         "code": server.proc.returncode, "stopped": server.stopping,
                         "tail": _tail(server), "port": server.port,
+                        "causes": list(server.causes),
                     }
                     del self._servers[server.name]
 
@@ -462,7 +519,13 @@ class DevServers:
                 out["url"] = server.url or f"http://localhost:{server.port}"
             else:
                 out["state"] = "starting"
-                if time.monotonic() - server.started > START_TIMEOUT:
+                if server.crashed and server.causes:
+                    # uvicorn --reload после сбоя приложения продолжает жить и ждёт правки файлов
+                    out["message"] = (
+                        "Приложение не запустилось: исправьте причину, затем перезапустите (■ и ▶)"
+                    )
+                    out["hint"] = diagnose(server.causes)
+                elif time.monotonic() - server.started > START_TIMEOUT:
                     out["message"] = "Долго не отвечает: посмотрите вывод ниже"
             if server.port != plan["port"]:
                 out["note"] = f"Порт {plan['port']} занят, выбран {server.port}"
@@ -472,8 +535,10 @@ class DevServers:
             out["state"] = "failed"
             out["tail"] = done["tail"]
             out["message"] = f"Сервер остановился (код {done['code']})"
+            if done.get("causes"):
+                out["hint"] = diagnose(done["causes"])
             if name == "frontend" and not (self.root / "frontend" / "node_modules").is_dir():
-                out["message"] += ": нет frontend/node_modules, выполните npm install"
+                out["hint"] = dict(NPM_HINT)  # важнее любых строк вывода: без пакетов vite не найти
         elif name == "frontend" and self._waiting:  # фронтенд ждёт, пока бэкенд начнёт отвечать
             out["state"] = "starting"
             out["message"] = "Ждёт, пока бэкенд начнёт отвечать"

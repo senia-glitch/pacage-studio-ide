@@ -280,3 +280,12 @@ test("сценарии реализации: сделан, с замечания
   assert.deepEqual(unitRows(flow)[1].remarks, ["нет проверки прав"]);
   assert.deepEqual(unitRows({stage: "implement"}), []);
 });
+
+test("серверы проекта: причина сбоя и команда исправления доходят до строки", () => {
+  const rows = serverRows({servers: [
+    srv("backend", "starting", {hint: {cause: "ImportError: нужен greenlet", fix: "pip install greenlet", where: "в .venv", chain: []}}),
+    srv("frontend", "stopped"),
+  ]});
+  assert.deepEqual(rows[0].hint, {cause: "ImportError: нужен greenlet", fix: "pip install greenlet", where: "в .venv"});
+  assert.equal(rows[1].hint, null);
+});

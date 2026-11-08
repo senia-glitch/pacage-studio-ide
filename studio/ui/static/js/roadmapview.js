@@ -338,7 +338,8 @@ function serversBlock() {
       ${row.canStop ? `<button type="button" data-srv="stop" data-name="${esc(row.name)}" title="Остановить">■</button>`
         : `<button type="button" data-srv="start" data-name="${esc(row.name)}" title="Запустить"${row.canStart ? "" : " disabled"}>▶</button>`}
       ${row.url ? `<a class="srv-link" href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.url)}</a>` : ""}
-      ${row.note ? `<small class="hint srv-note">${esc(row.note)}</small>` : ""}</div>`).join("");
+      ${row.note ? `<small class="hint srv-note">${esc(row.note)}</small>` : ""}
+      ${row.hint ? `<small class="hint srv-hint">Причина: ${esc(row.hint.cause)}${row.hint.fix ? ` · Что сделать${row.hint.where ? ` (${esc(row.hint.where)})` : ""}: <code>${esc(row.hint.fix)}</code>` : ""}</small>` : ""}</div>`).join("");
   const failed = rows.find((row) => row.tail.length && (row.state === "failed" || row.state === "starting"));
   const tail = failed
     ? `<details class="dock-log" data-srv-log${serversLogOpen ? " open" : ""}><summary>Вывод: ${esc(failed.title)}</summary><pre>${esc(failed.tail.join("\n"))}</pre></details>` : "";

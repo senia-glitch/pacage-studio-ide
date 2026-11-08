@@ -290,6 +290,8 @@ export function serverRows(data) {
       text: item.message || (!available && state === "stopped" ? item.reason || "не найден" : SERVER_TEXT[state]),
       url: state === "running" ? item.url || "" : "",
       note: item.note || "",
+      hint: item.hint && item.hint.cause
+        ? {cause: String(item.hint.cause), fix: String(item.hint.fix || ""), where: String(item.hint.where || "")} : null,
       tail: Array.isArray(item.tail) ? item.tail : [],
       available,
       canStart: available && !live,

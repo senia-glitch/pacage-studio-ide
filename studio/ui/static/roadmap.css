@@ -290,3 +290,5 @@ body[data-active-tab="agent"] .header-canvas { display: none; }
 .dock-units li.done .u-mark { color: #4ade80; }
 .dock-units li.issues .u-mark { color: #fbbf24; }
 .dock-units small { color: var(--dim); font-weight: 400; }
+.srv-hint { grid-column: 2 / -1; font-size: 11px; white-space: normal; overflow-wrap: anywhere; }
+.srv-hint code { user-select: all; }

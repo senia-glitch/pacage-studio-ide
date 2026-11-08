@@ -233,3 +233,78 @@ def test_ссылка_берётся_с_нашим_портом_а_не_с_пе�
     run.start("backend")
     item = _wait(run, "backend", "running")
     assert item["url"] == f"http://localhost:{item['port']}"
+
+
+# --------------------------------------------------------------- причина сбоя запуска
+
+# Приложение упало при старте (как fastbase с event-infra), но uvicorn --reload остаётся жить.
+# Первопричина (greenlet) печатается далеко выше итога, который видно в хвосте вывода.
+CRASH = (
+    "import sys, time\n"
+    "print('Traceback (most recent call last):')\n"
+    "print('ImportError: The SQLAlchemy asyncio module requires greenlet. '\n"
+    "      \"Use: 'pip install sqlalchemy[asyncio]'\")\n"
+    "print('The above exception was the direct cause of the following exception:')\n"
+    "for _ in range(40):\n"
+    "    print('  File \"routing.py\", line 248, in merged_lifespan')\n"
+    "print(\"ImportError: FAT_INTEGRATIONS requires event-infra. Install with: pip install 'fastbase[full]'\")\n"
+    "print('ERROR:    Application startup failed. Exiting.', flush=True)\n"
+    "time.sleep(60)\n"
+)
+
+
+def test_сбой_запуска_приложения_показывает_первопричину_и_команду(tmp_path: Path, cleanup) -> None:
+    run = DevServers(tmp_path)
+    cleanup.append(run)
+    run.save_config({"backend": {"command": [sys.executable, "-u", "-c", CRASH]}})
+    run.start("backend")
+    deadline = time.monotonic() + 15
+    item = run.item("backend")
+    while time.monotonic() < deadline and "hint" not in item:
+        time.sleep(0.15)
+        item = run.item("backend")
+    assert item["state"] == "starting" and "не запустилось" in item["message"]
+    hint = item["hint"]
+    assert "greenlet" in hint["cause"]  # первопричина, а не общее сообщение fastbase
+    assert hint["fix"] == "pip install sqlalchemy[asyncio]"
+    assert "event-infra" in hint["chain"][0]
+    assert not any("greenlet" in line for line in item["tail"])  # в хвосте её уже нет
+
+
+def test_упавший_процесс_тоже_получает_подсказку(tmp_path: Path) -> None:
+    run = DevServers(tmp_path)
+    code = ("import sys\nprint(\"ModuleNotFoundError: No module named 'uvicorn'\")\nsys.exit(1)\n")
+    run.save_config({"backend": {"command": [sys.executable, "-c", code]}})
+    run.start("backend")
+    item = _wait(run, "backend", "failed")
+    assert "uvicorn" in item["hint"]["cause"] and item["hint"]["fix"] == ""
+
+
+def test_диагноз_берёт_первую_подсказку_pip() -> None:
+    found = devservers.diagnose([
+        "ImportError: нужен greenlet: pip install greenlet",
+        "ImportError: Install with: pip install 'fastbase[full]'",
+    ])
+    assert found["fix"] == "pip install greenlet" and found["cause"].startswith("ImportError: нужен")
+    empty = devservers.diagnose([])
+    assert empty["cause"] == "" and empty["chain"] == [] and empty["fix"] == ""
+
+
+def test_вывод_cmd_в_кодировке_консоли_читается() -> None:
+    text = "\"vite\" не является внутренней или внешней командой"
+    assert devservers.decode_line(text.encode("utf-8")) == text
+    cp866 = text.encode("cp866")
+    assert devservers.decode_line(cp866).isprintable()  # не падает на байтах не-UTF-8
+    if devservers.os.name == "nt":
+        assert devservers.decode_line(cp866) == text  # на Windows это OEM-страница консоли
+    assert devservers.decode_line(b"\xff\xfe ok")  # любые байты дают строку
+
+
+def test_без_node_modules_упавший_фронтенд_подсказывает_npm_install(tmp_path: Path) -> None:
+    (tmp_path / "frontend").mkdir()
+    run = DevServers(tmp_path)
+    run.save_config({"frontend": {"command": [sys.executable, "-c", "import sys; sys.exit(1)"]}})
+    run.start("frontend")
+    item = _wait(run, "frontend", "failed")
+    assert item["hint"]["fix"] == "npm install" and item["hint"]["where"] == "в папке frontend"
+    assert "node_modules" in item["hint"]["cause"] and item["message"] == "Сервер остановился (код 1)"
