@@ -53,18 +53,50 @@ export function agentInfo(view) {
   return {name: "claude", label: "Claude Code", found: !!(view && view.claude_found), needsModel: false};
 }
 
+/* Два исполнителя: кто строит план и кто реализует. Без поля roles (старый ответ) — один агент на оба. */
+export function roleViews(view) {
+  if (view && view.roles && view.roles.plan && view.roles.implement) {
+    return ["plan", "implement"].map((role) => {
+      const item = view.roles[role];
+      return {
+        role, title: item.title || (role === "plan" ? "План" : "Реализация"), label: item.label,
+        model: item.model || "", found: item.found !== false, needsModel: !!item.needs_model,
+        reason: item.reason || "",
+      };
+    });
+  }
+  const info = agentInfo(view);
+  const model = (view && view.model) || "";
+  return ["plan", "implement"].map((role) => ({
+    role, title: role === "plan" ? "План" : "Реализация", label: info.label, model,
+    found: info.found, needsModel: info.needsModel, reason: "",
+  }));
+}
+
+/* Название исполнителей для заголовка окна: один агент или «План: A · Реализация: B». */
+export function agentTitle(view) {
+  const [plan, implement] = roleViews(view);
+  return plan.label === implement.label
+    ? plan.label : `${plan.title}: ${plan.label} · ${implement.title}: ${implement.label}`;
+}
+
 /* Состояние связи с агентом для индикатора: tone = off | ok | run | wait | bad. */
 export function agentStatus(view) {
   if (!view) return {tone: "off", text: "нет связи со студией", connected: false};
-  const info = agentInfo(view);
-  if (!info.found) return {tone: "bad", text: `${info.label} не найден`, connected: false};
+  const roles = roleViews(view);
+  const lost = roles.find((item) => !item.found);
+  if (lost) return {tone: "bad", text: `${lost.label} не найден`, connected: false};
   const mcp = view.mcp || {};
   if (mcp.ok === false && mcp.code && mcp.code !== "no_config") {
     // MCP-сервер не отвечает на initialize: агент остался бы без инструментов studio_*.
     const why = String(mcp.reason || "").split("\n")[0];
     return {tone: "bad", text: `MCP не запускается: ${why}`.slice(0, 120), connected: false};
   }
-  if (info.needsModel && !view.model) return {tone: "off", text: "выберите модель", connected: false};
+  const unset = roles.find((item) => item.needsModel && !item.model);
+  if (unset) {
+    const both = roles.filter((item) => item.needsModel && !item.model).length > 1;
+    return {tone: "off", text: both ? "выберите модели" : `выберите модель (${unset.title})`, connected: false};
+  }
   if (!view.enabled) return {tone: "off", text: "не подключён", connected: false};
   const last = String(view.message || "").trim().split("\n").pop();
   switch (view.state) {

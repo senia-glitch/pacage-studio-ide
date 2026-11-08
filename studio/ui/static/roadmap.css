@@ -254,3 +254,12 @@ body[data-active-tab="agent"] .header-canvas { display: none; }
 .agent-error { border: 1px solid var(--bad, #c0392b); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
 .agent-error p { margin: 0 0 6px; }
 .agent-card pre.agent-fix { white-space: pre-wrap; word-break: break-all; user-select: all; }
+
+/* ---------- «Настройки агента»: два исполнителя ---------- */
+.role-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 10px 0; }
+.role-panel { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; background: #0d162622; }
+.role-panel h4 { margin: 0 0 6px; font-size: 14px; }
+.role-panel h4 small { color: var(--dim); font-weight: 400; font-size: 11px; }
+.role-panel label { display: block; margin: 6px 0; }
+.role-panel select, .role-panel input { max-width: 100%; }
+.role-cmd { margin: 8px 0 12px; }

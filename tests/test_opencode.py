@@ -101,13 +101,19 @@ def test_конфиг_opencode_лежит_в_studio_и_не_трогает_пр�
 def test_выбор_агента_сбрасывает_подключение_и_модель(tmp_path: Path) -> None:
     run, wf = _runner(tmp_path)
     run.save_config({"enabled": True, "model": ""})
-    saved = run.save_config({"agent": "opencode"})
-    assert saved["agent"] == "opencode" and saved["enabled"] is False
-    assert saved["command"] == adapters.OPENCODE_COMMAND and wf.auto_agent is False
+    saved = run.save_config({"agent": "opencode"})  # плоские ключи — сразу обе роли
+    both = saved["roles"]
+    assert both["plan"]["agent"] == both["implement"]["agent"] == "opencode"
+    assert saved["enabled"] is False and wf.auto_agent is False
+    assert saved["commands"]["opencode"] == adapters.OPENCODE_COMMAND
+    assert saved["command"] == adapters.OPENCODE_COMMAND  # команда роли «реализация»
     saved = run.save_config({"model": MODEL, "variant": "high"})
-    assert saved["model"] == MODEL and saved["variant"] == "high"
+    assert saved["roles"]["implement"]["model"] == MODEL
+    assert saved["roles"]["plan"]["variant"] == "high"
     back = run.save_config({"agent": "claude"})
-    assert back["model"] == "" and back["variant"] == "" and back["command"] == runner.DEFAULT_COMMAND
+    for role in ("plan", "implement"):
+        assert back["roles"][role] == {"agent": "claude", "model": "", "variant": ""}
+    assert back["command"] == runner.DEFAULT_COMMAND
     assert run.config() == back
 
 
@@ -124,7 +130,9 @@ def test_старый_runner_json_без_агента_читается_как_cl
     run.config_path.parent.mkdir(parents=True)
     run.config_path.write_text(json.dumps({"enabled": True, "command": ["x", "{prompt}"]}), encoding="utf-8")
     config = run.config()
-    assert config["agent"] == "claude" and config["model"] == "" and config["command"] == ["x", "{prompt}"]
+    for role in ("plan", "implement"):
+        assert config["roles"][role] == {"agent": "claude", "model": "", "variant": ""}
+    assert config["command"] == ["x", "{prompt}"] and config["commands"]["claude"] == ["x", "{prompt}"]
 
 
 def test_команда_через_cmd_не_несёт_метасимволов(tmp_path: Path, monkeypatch) -> None:
@@ -258,3 +266,4 @@ def test_модели_и_проверка_связи_opencode(tmp_path: Path, mo
     monkeypatch.setattr(runner.shutil, "which", lambda name: None)
     assert run.models()["error"].startswith("Команда opencode не найдена")
     assert "agents" in run.agent_view() and run.agent_view()["agent"] == "opencode"
+    assert run.agent_view()["roles"]["plan"]["label"] == "OpenCode"

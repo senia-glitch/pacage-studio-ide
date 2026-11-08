@@ -72,21 +72,94 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _FATAL = re.compile(r"level=ERROR.*?error\.error=(?P<text>.+)$", re.MULTILINE)
 
 
-def clean_model(value) -> str:
-    """Модель в формате ``провайдер/модель`` или пустая строка; иначе ValueError."""
+CLAUDE_MODEL_RE = re.compile(r"^[A-Za-z0-9][\w.:@+\[\]-]*$")
+# Короткие имена, которые понимает ``claude --model``; можно вписать и полное имя модели.
+CLAUDE_MODELS = ["opus", "sonnet", "haiku"]
+
+
+def clean_model(value, agent: str = OPENCODE) -> str:
+    """Модель агента или пустая строка (взять по умолчанию); иначе ValueError.
+
+    OpenCode: ``провайдер/модель``. Claude Code: короткое имя (``opus``) или полное имя модели."""
     text = str(value or "").strip()
     if not text:
         return ""
+    if agent == CLAUDE:
+        if len(text) > 100 or not CLAUDE_MODEL_RE.match(text):
+            raise ValueError("model: короткое имя (opus, sonnet, haiku) или полное имя модели")
+        return text
     if len(text) > 200 or not MODEL_RE.match(text):
         raise ValueError("model: формат провайдер/модель, например opencode-go/deepseek-v4.1-flash")
     return text
 
 
-def clean_variant(value) -> str:
+# Уровни усилий Claude Code (``claude --effort``); какие из них доступны, зависит от модели.
+CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+_CLAUDE_EFFORT_VALUES = (*CLAUDE_EFFORTS, "ultracode")
+# Уровни усилий и модели, которые студия предлагает. ``tier``: free — бесплатная, subscription —
+# входит в подписку, paid — оплата по токенам или кредитам (в интерфейсе по умолчанию скрыта).
+TIER_FREE, TIER_SUBSCRIPTION, TIER_PAID = "free", "subscription", "paid"
+CLAUDE_CATALOG = [
+    {"id": "opus", "name": "Opus", "provider": "claude", "tier": TIER_SUBSCRIPTION},
+    {"id": "sonnet", "name": "Sonnet", "provider": "claude", "tier": TIER_SUBSCRIPTION},
+    {"id": "haiku", "name": "Haiku", "provider": "claude", "tier": TIER_SUBSCRIPTION},
+    {"id": "fable", "name": "Fable", "provider": "claude", "tier": TIER_PAID},
+]
+
+
+def clean_variant(value, agent: str = OPENCODE) -> str:
+    """Уровень усилий (рассуждений) или пустая строка (по умолчанию); иначе ValueError.
+
+    Claude Code: ``low``…``max``. OpenCode: название варианта модели (``high``, ``max``, …)."""
     text = str(value or "").strip()
+    if agent == CLAUDE:
+        if text and text not in _CLAUDE_EFFORT_VALUES:
+            raise ValueError("variant: low, medium, high, xhigh, max или пусто (по умолчанию)")
+        return text
     if not VARIANT_RE.match(text):
         raise ValueError("variant: до 40 букв, цифр, «.», «_» и «-»")
     return text
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(text).lower())
+
+
+def classify(provider: str, cost: dict | None, credentials: list[dict]) -> str:
+    """Нужны ли кредиты: бесплатная, по подписке или оплата по токенам.
+
+    Подписочными считаются OpenCode Go и провайдеры со входом через аккаунт (``oauth``:
+    ChatGPT, Claude, Copilot); модели, которых нет ни там ни там, — платные по токенам."""
+    cost = cost or {}
+    if cost.get("input") == 0 and cost.get("output") == 0:
+        return TIER_FREE
+    if provider == "opencode-go":
+        return TIER_SUBSCRIPTION
+    key = _norm(provider)
+    for item in credentials:
+        name = _norm(item.get("name", ""))
+        if item.get("type") == "oauth" and name and (key in name or name in key):
+            return TIER_SUBSCRIPTION
+    return TIER_PAID
+
+
+def parse_models_verbose(text: str) -> list[dict]:
+    """Вывод ``opencode models --verbose``: строки ``провайдер/модель`` и за каждой объект JSON."""
+    clean, found = _strip(text), []
+    decoder, pos = json.JSONDecoder(), 0
+    while True:
+        start = clean.find("{", pos)
+        if start < 0:
+            break
+        try:
+            obj, end = decoder.raw_decode(clean[start:])
+        except ValueError:
+            pos = start + 1
+            continue
+        pos = start + end
+        if isinstance(obj, dict) and obj.get("id") and obj.get("providerID"):
+            found.append(obj)
+    return found
 
 
 def _strip(text: str) -> str:
@@ -138,6 +211,14 @@ class Adapter:
     def providers(self, exe: str) -> list[str]:
         return []
 
+    def catalog(self, exe: str) -> list[dict]:
+        """Модели для выбора: ``id``, ``name``, ``provider``, ``tier``, ``variants`` (уровни)."""
+        return [
+            {"id": name, "name": name, "provider": name.split("/")[0],
+             "tier": TIER_SUBSCRIPTION, "variants": []}
+            for name in self.models(exe)
+        ]
+
 
 class ClaudeAdapter(Adapter):
     name = CLAUDE
@@ -157,7 +238,17 @@ class ClaudeAdapter(Adapter):
             out += ["--output-format", "json"]
         if session and "--resume" not in out:
             out += ["--resume", session]
+        if model and "--model" not in out:
+            out += ["--model", model]
+        if variant and "--effort" not in out:
+            out += ["--effort", variant]
         return out
+
+    def models(self, exe):
+        return list(CLAUDE_MODELS)
+
+    def catalog(self, exe):
+        return [{**item, "variants": list(CLAUDE_EFFORTS)} for item in CLAUDE_CATALOG]
 
     def parse(self, text):
         found: dict = {}
@@ -254,19 +345,42 @@ class OpenCodeAdapter(Adapter):
         lines = (line.strip() for line in _strip(out).splitlines())
         return sorted({line for line in lines if MODEL_RE.match(line)})
 
-    def providers(self, exe):
+    def credentials(self, exe):
+        """Провайдеры со входом: ``[{"name", "type"}]`` (api или oauth); данные входа не читаем."""
         out = _strip(_run([exe, "providers", "list"], 25))
-        names = []
+        found = []
         for line in out.splitlines():
             line = line.strip()
             if line.startswith("●"):
-                # «● OpenCode Go  api»: имя провайдера и тип входа; сами данные входа не читаем
+                # «● OpenCode Go  api»: имя провайдера и тип входа
                 parts = line.lstrip("●").split()
-                if len(parts) > 1:
-                    parts = parts[:-1]
+                kind = parts.pop() if len(parts) > 1 else ""
                 if parts:
-                    names.append(" ".join(parts))
-        return names
+                    found.append({"name": " ".join(parts), "type": kind})
+        return found
+
+    def providers(self, exe):
+        return [item["name"] for item in self.credentials(exe)]
+
+    def catalog(self, exe):
+        """Модели со всеми уровнями усилий (``variants``) и признаком «нужны ли кредиты»."""
+        verbose = parse_models_verbose(_run([exe, "models", "--verbose"], 90))
+        if not verbose:
+            return super().catalog(exe)
+        credentials = self.credentials(exe)
+        order = {TIER_SUBSCRIPTION: 0, TIER_FREE: 1, TIER_PAID: 2}
+        items = []
+        for model in verbose:
+            variants = model.get("variants")
+            provider = str(model["providerID"])
+            items.append({
+                "id": f"{provider}/{model['id']}",
+                "name": str(model.get("name") or model["id"]),
+                "provider": provider,
+                "tier": classify(provider, model.get("cost"), credentials),
+                "variants": list(variants) if isinstance(variants, dict) else [],
+            })
+        return sorted(items, key=lambda item: (order[item["tier"]], item["provider"], item["id"]))
 
 
 def _run(argv: list[str], timeout: int) -> str:
@@ -288,6 +402,9 @@ def get(name: str) -> Adapter:
 
 
 __all__ = [
-    "AGENTS", "ALLOWED_BASH", "CLAUDE", "CLAUDE_COMMAND", "DENIED_TOOLS", "OPENCODE",
+    "AGENTS", "ALLOWED_BASH", "CLAUDE", "CLAUDE_CATALOG", "CLAUDE_COMMAND", "CLAUDE_EFFORTS",
+    "CLAUDE_MODELS", "DENIED_TOOLS", "TIER_FREE", "TIER_PAID", "TIER_SUBSCRIPTION", "classify",
+    "parse_models_verbose",
+    "OPENCODE",
     "OPENCODE_COMMAND", "OPENCODE_FILE", "Adapter", "clean_model", "clean_variant", "get",
 ]

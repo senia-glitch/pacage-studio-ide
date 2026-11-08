@@ -1,8 +1,8 @@
 import {api} from "./api.js";
 import {$, esc, toast} from "./core.js";
-import {agentInfo, agentStatus, gitNote} from "./dockmodel.js";
+import {agentStatus, gitNote, roleViews} from "./dockmodel.js";
 
-/* Страница «Настройки агента»: выбор агента и модели, подключение, права, git, запуск и инструкции
+/* Страница «Настройки агента»: кто строит план и кто реализует (агент и модель), подключение, права, git, запуск и инструкции
    человеческим языком. Агент работает в фоне: студия запускает его на ваш шаг. */
 
 let loading = false;
@@ -17,46 +17,102 @@ async function load() {
 }
 
 const EXE = {claude: "claude", opencode: "opencode"};
+/* Claude Code: модели, которые входят в подписку; Fable требует отдельных кредитов использования. */
+const CLAUDE_MODELS = [
+  {id: "opus", name: "Opus", tier: "subscription"},
+  {id: "sonnet", name: "Sonnet", tier: "subscription"},
+  {id: "haiku", name: "Haiku", tier: "subscription"},
+  {id: "fable", name: "Fable", tier: "paid"},
+];
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+const EFFORT_LABEL = {
+  none: "Без рассуждений", minimal: "Минимальный", low: "Низкий", medium: "Средний", high: "Высокий",
+  xhigh: "Сверхвысокий", max: "Максимальный", thinking: "С размышлением", ultracode: "Ultracode",
+};
+const TIER_NOTE = {free: " · бесплатная", paid: " · платная (кредиты)", subscription: ""};
+const PAID_KEY = "studio:show-paid-models";
+let showPaid = (() => { try { return localStorage.getItem(PAID_KEY) === "1"; } catch (_) { return false; } })();
+let catalog = null; // ответ /api/agent/models?agent=opencode
 
-/* Выбор агента и (для OpenCode) модели из подписки. Список моделей подгружается отдельно. */
-function agentPicker(view) {
-  const info = agentInfo(view);
-  const agents = Array.isArray(view.agents) && view.agents.length
+const ROLE_HELP = {
+  plan: "изучает проект, присылает идеи и карточки сценариев",
+  implement: "пишет код по выбранным задачам и присылает отчёт",
+};
+
+function agentList(view) {
+  return Array.isArray(view.agents) && view.agents.length
     ? view.agents : [{name: "claude", label: "Claude Code", found: !!view.claude_found}];
-  const options = agents.map((item) => `<option value="${esc(item.name)}"${item.name === info.name ? " selected" : ""}>${esc(item.label)}${item.found ? "" : " (не найден)"}</option>`).join("");
-  const model = info.needsModel ? `
-    <label class="rm-task">Модель из вашей подписки
-      <select id="agentModel"><option value="">— выберите модель —</option>${view.model ? `<option value="${esc(view.model)}" selected>${esc(view.model)}</option>` : ""}</select></label>
-    <button type="button" id="modelsRefresh">Обновить список</button>
-    <label class="rm-task">Режим рассуждений (необязательно)
-      <input id="agentVariant" value="${esc(view.variant || "")}" placeholder="high, max, minimal" size="14"></label>
-    <p class="hint" id="modelsHint">Список берётся командой <code>opencode models</code>: в нём только модели провайдеров, в которые вы вошли (<code>opencode auth login</code>). Без выбранной модели агент не запускается.</p>` : "";
-  return `<div class="agent-row"><label class="rm-task">Агент <select id="agentKind">${options}</select></label></div>${model}`;
+}
+
+/* Уровни усилий: у Claude Code одинаковый набор, у OpenCode — тот, что умеет выбранная модель. */
+function effortOptions(levels, current) {
+  const list = levels.includes(current) || !current ? levels : [...levels, current];
+  return `<option value="">по умолчанию</option>${list.map((level) => `<option value="${esc(level)}"${level === current ? " selected" : ""}>${esc(EFFORT_LABEL[level] || level)}</option>`).join("")}`;
+}
+
+/* Исполнитель одной роли: агент, модель (OpenCode — из подписки, Claude Code — из коротких имён) и уровень усилий. */
+function rolePanel(role, item, view) {
+  const options = agentList(view).map((entry) => `<option value="${esc(entry.name)}"${entry.name === item.agent ? " selected" : ""}>${esc(entry.label)}${entry.found ? "" : " (не найден)"}</option>`).join("");
+  const opencode = item.agent === "opencode";
+  const model = opencode
+    ? `<label class="rm-task">Модель из вашей подписки
+        <select data-role-model="${role}"><option value="">— выберите модель —</option>${item.model ? `<option value="${esc(item.model)}" selected>${esc(item.model)}</option>` : ""}</select></label>
+       <label class="rm-task">Уровень усилий
+        <select data-role-effort="${role}">${effortOptions([], item.variant || "")}</select></label>`
+    : `<label class="rm-task">Модель
+        <input data-role-model="${role}" list="claudeModels" value="${esc(item.model || "")}" placeholder="по умолчанию Claude Code" size="26"></label>
+       <label class="rm-task">Уровень усилий
+        <select data-role-effort="${role}">${effortOptions(CLAUDE_EFFORTS, item.variant || "")}</select></label>`;
+  return `<div class="role-panel" data-role="${role}">
+    <h4>${esc(item.title)} <small>— ${esc(ROLE_HELP[role])}</small></h4>
+    <div class="agent-row"><label class="rm-task">Агент <select data-role-agent="${role}">${options}</select></label></div>
+    ${model}
+    <p class="hint" data-role-hint="${role}">${esc(item.reason || (opencode ? "Список строит команда opencode models: только провайдеры, в которые вы вошли (opencode auth login)." : "Доступные уровни усилий зависят от модели."))}</p>
+  </div>`;
+}
+
+function claudeDatalist() {
+  const list = CLAUDE_MODELS.filter((item) => showPaid || item.tier !== "paid");
+  return `<datalist id="claudeModels">${list.map((item) => `<option value="${item.id}" label="${esc(item.name + (TIER_NOTE[item.tier] || ""))}">`).join("")}</datalist>`;
+}
+
+function rolesBlock(view) {
+  const roles = view.roles || {};
+  const slots = ["plan", "implement"].map((role) => ({
+    ...(roles[role] || {agent: view.agent || "claude", model: view.model || "", variant: view.variant || "", title: role === "plan" ? "План" : "Реализация"}),
+  }));
+  const refresh = slots.some((slot) => slot.agent === "opencode")
+    ? '<button type="button" id="modelsRefresh">Обновить список моделей</button>' : "";
+  return `${claudeDatalist()}
+    <div class="role-grid">${rolePanel("plan", slots[0], view)}${rolePanel("implement", slots[1], view)}</div>
+    <div class="agent-row">${refresh}
+      <label class="rm-check"><input type="checkbox" id="showPaid"${showPaid ? " checked" : ""}>
+        <span><b>Показывать платные модели</b><small>оплата по токенам или отдельные кредиты; по умолчанию в списке только бесплатные и входящие в подписку</small></span></label></div>`;
 }
 
 function connectionCard(view) {
   const status = agentStatus(view);
-  const info = agentInfo(view);
-  const exe = EXE[info.name] || info.name;
-  const found = info.found
-    ? `${info.label} найден на этом компьютере.`
-    : `${info.label} не найден: установите его (команда <code>${esc(exe)}</code> должна запускаться в терминале) и вернитесь сюда.`;
+  const roles = roleViews(view);
+  const names = [...new Set(roles.map((item) => item.label))];
+  const exes = [...new Set(agentList(view).filter((entry) => roles.some((item) => item.label === entry.label)).map((entry) => EXE[entry.name] || entry.name))];
+  const lines = roles.map((item) => `<li><b>${esc(item.title)}:</b> ${esc(item.label)}${item.model ? ` · ${esc(item.model)}` : ""} — ${item.found ? (item.reason ? esc(item.reason) : "готов к запуску") : `не найден (команда <code>${esc((exes[0] || ""))}</code> должна запускаться в терминале)`}</li>`).join("");
   return `<section class="agent-card" id="agentConn">
-    <h3>Подключение</h3>
-    ${agentPicker(view)}
-    <p><span class="dock-dot ${esc(status.tone)}"></span> <b>${esc(info.label)}</b> — ${esc(status.text)}</p>
-    <p class="hint">${found}</p>
+    <h3>Исполнители</h3>
+    <p class="hint">План (идеи, карточки) и реализацию кода можно отдать разным агентам и моделям: например, анализ — Claude Code, код — OpenCode. Можно оставить одного агента на оба этапа.</p>
+    ${rolesBlock(view)}
+    <p><span class="dock-dot ${esc(status.tone)}"></span> <b>${esc(names.join(" + "))}</b> — ${esc(status.text)}</p>
+    <ul class="agent-list">${lines}</ul>
     ${mcpBlock(view.mcp)}
     <p class="hint">${view.venv
       ? `Окружение проекта: <code>${esc(view.venv)}</code>. Агент и тесты запускаются в нём, поэтому видят зависимости проекта.`
       : "Окружение проекта (<code>.venv</code> или <code>venv</code>) не найдено: агент запускается в окружении студии и может не увидеть зависимости проекта."}</p>
     <div class="agent-row">
-      <button type="button" class="primary" id="agentConnect">${view.enabled ? "Переподключить" : `Подключить ${esc(info.label)}`}</button>
+      <button type="button" class="primary" id="agentConnect">${view.enabled ? "Переподключить" : (names.length > 1 ? "Подключить агентов" : `Подключить ${esc(names[0])}`)}</button>
       <button type="button" id="agentCheck">Проверить связь</button>
       ${view.enabled ? '<button type="button" id="agentDisconnect">Отключить</button>' : ""}
       <button type="button" id="agentManual">Строка подключения вручную…</button>
     </div>
-    <p class="hint" id="agentCheckResult">«Подключить» записывает конфигурацию в <code>.studio/</code> (файлы вашего проекта не трогаются) и включает автозапуск. «Проверить связь» запускает <code>${esc(exe)} --version</code> и выполняет рукопожатие <code>initialize</code> с MCP-сервером студии (теми же командой и окружением, что получит агент); токены не тратятся.</p>
+    <p class="hint" id="agentCheckResult">«Подключить» записывает конфигурацию в <code>.studio/</code> (файлы вашего проекта не трогаются) и включает автозапуск. «Проверить связь» запускает <code>--version</code> каждого выбранного агента и выполняет рукопожатие <code>initialize</code> с MCP-сервером студии (теми же командой и окружением, что получит агент); токены не тратятся. Пока оба исполнителя не готовы, «Начать» в окне агента недоступно.</p>
   </section>`;
 }
 
@@ -87,7 +143,7 @@ function howCard() {
 }
 
 function manualCard(view) {
-  const manual = agentInfo(view).name === "opencode"
+  const manual = roleViews(view).some((item) => item.label === "OpenCode") && !roleViews(view).some((item) => item.label === "Claude Code")
     ? `<p>Студия кладёт MCP и права OpenCode в свой файл <code>.studio/opencode.json</code> и передаёт его через <code>OPENCODE_CONFIG</code>; <code>opencode.json</code> проекта она не трогает. Чтобы подключить вручную, добавьте в свой конфиг OpenCode (<code>opencode mcp add</code>) локальный сервер <code>studio mcp</code> с переменной <code>STUDIO_PROJECT</code> и выполните <code>studio skill --target all</code>.</p>`
     : `<p>Те же шаги в терминале, из папки проекта:</p>
     <pre>claude mcp add pacage-studio -- studio mcp
@@ -126,8 +182,12 @@ function gitCard(view) {
   </section>`;
 }
 
-function runCard(runner, tests) {
+const AGENT_LABEL = {claude: "Claude Code", opencode: "OpenCode"};
+
+function runCard(runner, tests, view) {
   const testsOn = !!(tests && tests.config && tests.config.enabled);
+  const roles = (runner && runner.roles) || {};
+  const used = [...new Set(["plan", "implement"].map((role) => (roles[role] || {}).agent || (view && view.agent) || "claude"))];
   return `<section class="agent-card">
     <h3>Запуск</h3>
     <label class="rm-task">Предел одного запуска, минут
@@ -136,11 +196,12 @@ function runCard(runner, tests) {
       <span><b>Запускать тесты проекта, когда агент прислал отчёт</b>
       <small>независимая проверка; команда — <code>.studio/tests.json</code> (по умолчанию pytest)</small></span></label>
     <details><summary>Команда запуска (для опытных)</summary>
-      <p class="hint">По аргументу на строку; <code>{prompt}</code> — текст запроса агенту. ${runner.agent === "opencode"
-        ? "<code>--model</code>, <code>--variant</code> и <code>--session</code> студия добавляет сама, а MCP и права передаёт через <code>OPENCODE_CONFIG</code>."
-        : "<code>--output-format</code>, <code>--resume</code> и <code>--mcp-config</code> студия добавляет сама."}</p>
-      <textarea id="runCommand" rows="10" spellcheck="false" style="width:100%">${esc(runner.command.join("\n"))}</textarea>
-      <div class="agent-row"><button type="button" id="runDefault">Вернуть стандартную</button></div>
+      ${used.map((name) => `<div class="role-cmd" data-cmd-agent="${esc(name)}">
+        <p class="hint"><b>${esc(AGENT_LABEL[name] || name)}.</b> По аргументу на строку; <code>{prompt}</code> — текст запроса агенту. ${name === "opencode"
+          ? "<code>--model</code>, <code>--variant</code> и <code>--session</code> студия добавляет сама, а MCP и права передаёт через <code>OPENCODE_CONFIG</code>."
+          : "<code>--output-format</code>, <code>--resume</code>, <code>--model</code> и <code>--mcp-config</code> студия добавляет сама."}</p>
+        <textarea rows="10" spellcheck="false" style="width:100%">${esc(((runner.commands || {})[name] || runner.command || []).join("\n"))}</textarea>
+        <div class="agent-row"><button type="button" data-cmd-default="${esc(name)}">Вернуть стандартную</button></div></div>`).join("")}
     </details>
     <div class="agent-row"><button type="button" class="primary" id="runSave">Сохранить</button></div>
   </section>`;
@@ -154,44 +215,61 @@ function bind(root, data) {
     button.disabled = false;
   };
   const on = (id, job) => { const el = root.querySelector(id); if (el) el.onclick = () => run(el, job); };
-  const kind = root.querySelector("#agentKind");
-  if (kind) kind.onchange = async () => {
+  const patchRole = async (role, change, message) => {
     try {
-      await api("/api/runner/config", "POST", {agent: kind.value});
-      toast("Агент выбран. Подключите его: у каждого агента свои модель и подключение");
+      await api("/api/runner/config", "POST", {roles: {[role]: change}});
+      if (message) toast(message);
     } catch (error) { toast(error.message); }
-    await reload();
   };
-  const model = root.querySelector("#agentModel");
-  if (model) {
-    model.onchange = async () => {
-      try { await api("/api/runner/config", "POST", {model: model.value}); toast(model.value ? "Модель сохранена" : "Модель сброшена"); }
-      catch (error) { toast(error.message); }
+  root.querySelectorAll("[data-role-agent]").forEach((el) => {
+    el.onchange = async () => {
+      await patchRole(el.dataset.roleAgent, {agent: el.value}, "Агент выбран. Подключите: у каждого агента свои модель и подключение");
+      await reload();
     };
-    const variant = root.querySelector("#agentVariant");
-    if (variant) variant.onchange = async () => {
-      try { await api("/api/runner/config", "POST", {variant: variant.value.trim()}); toast("Режим рассуждений сохранён"); }
-      catch (error) { toast(error.message); }
+  });
+  root.querySelectorAll("[data-role-model]").forEach((el) => {
+    el.onchange = async () => {
+      const role = el.dataset.roleModel;
+      const change = {model: el.value.trim()};
+      const effort = root.querySelector(`[data-role-effort="${role}"]`);
+      if (el.tagName === "SELECT" && effort) {
+        // уровень усилий — свойство модели: непригодный для новой модели сбрасываем
+        const item = catalogItem(el.value);
+        if (effort.value && !(item && item.variants.includes(effort.value))) change.variant = "";
+      }
+      await patchRole(role, change, change.model ? "Модель сохранена" : "Модель сброшена");
+      await reload();
     };
-    loadModels(root, data.view);
-  }
+  });
+  root.querySelectorAll("[data-role-effort]").forEach((el) => {
+    el.onchange = () => patchRole(el.dataset.roleEffort, {variant: el.value}, "Уровень усилий сохранён");
+  });
+  const paid = root.querySelector("#showPaid");
+  if (paid) paid.onchange = () => {
+    showPaid = paid.checked;
+    try { localStorage.setItem(PAID_KEY, showPaid ? "1" : "0"); } catch (_) { /* без хранилища */ }
+    reload();
+  };
+  if (root.querySelector("select[data-role-model]")) loadModels(root, data.view);
   on("#modelsRefresh", async () => { await loadModels(root, data.view, true); });
   on("#agentConnect", async () => {
     const view = await api("/api/agent/connect", "POST", {});
-    const label = agentInfo(view).label;
+    const unset = roleViews(view).find((item) => item.needsModel && !item.model);
     toast(view && view.enabled
-      ? `${label} подключён: студия будет запускать его на ваши шаги`
-      : agentInfo(view).needsModel && !view.model
-        ? "Выберите модель и подключите ещё раз"
-        : "Агент не подключён: MCP-сервер студии не отвечает (причина и команда ниже)");
+      ? "Агенты подключены: студия будет запускать их на ваши шаги"
+      : unset
+        ? `Выберите модель (${unset.title}) и подключите ещё раз`
+        : "Агенты не подключены: MCP-сервер студии не отвечает (причина и команда ниже)");
     await reload();
   });
   on("#agentCheck", async () => {
     const result = await api("/api/agent/check", "POST", {});
     const box = root.querySelector("#agentCheckResult");
-    const via = result.providers && result.providers.length ? ` Вход: ${result.providers.join(", ")}; модель: ${result.model}.` : "";
+    const parts = Object.values(result.roles || {}).map((item) => item.ok
+      ? `${item.label}${item.model ? ` (${item.model})` : ""} ${item.version || ""}${item.providers && item.providers.length ? `, вход: ${item.providers.join(", ")}` : ""}`.trim()
+      : `${item.title || item.role}: ${item.error}`);
     box.textContent = result.ok
-      ? `Связь есть: ${result.version}; MCP-сервер ответил на initialize.${via}${result.mcp_config ? "" : " MCP-конфиг ещё не записан — нажмите «Подключить»."}`
+      ? `Связь есть. ${parts.join("; ")}. MCP-сервер ответил на initialize.${result.mcp_config ? "" : " MCP-конфиг ещё не записан — нажмите «Подключить»."}`
       : `Проблема: ${result.error}`;
     await reload();
   });
@@ -216,12 +294,19 @@ function bind(root, data) {
     toast("Проект возвращён к состоянию до работы агента");
     await reload();
   });
-  on("#runDefault", async () => {
-    root.querySelector("#runCommand").value = data.runner.default_command.join("\n");
+  root.querySelectorAll("[data-cmd-default]").forEach((el) => {
+    el.onclick = () => {
+      const name = el.dataset.cmdDefault;
+      const box = root.querySelector(`[data-cmd-agent="${name}"] textarea`);
+      const commands = data.runner.default_commands || {};
+      if (box) box.value = (commands[name] || data.runner.default_command || []).join("\n");
+    };
   });
   on("#runSave", async () => {
+    const commands = {};
+    root.querySelectorAll("[data-cmd-agent]").forEach((el) => { commands[el.dataset.cmdAgent] = el.querySelector("textarea").value; });
     await api("/api/runner/config", "POST", {
-      command: root.querySelector("#runCommand").value,
+      commands,
       timeout_minutes: Number(root.querySelector("#runTimeout").value),
     });
     await api("/api/tests/config", "POST", {enabled: root.querySelector("#runTests").checked});
@@ -230,32 +315,53 @@ function bind(root, data) {
   });
 }
 
-/* Подписочные модели: список спрашиваем у агента (занимает секунды) и кладём в выпадающий список. */
+function catalogItem(id) {
+  return catalog && Array.isArray(catalog.items) ? catalog.items.find((item) => item.id === id) : null;
+}
+
+/* Подписочные модели: список спрашиваем у OpenCode и кладём в выпадающие списки ролей.
+   Платные (по токенам) скрыты, пока не включён переключатель; выбранная модель остаётся видна. */
 async function loadModels(root, view, force = false) {
-  const select = root.querySelector("#agentModel");
-  const hint = root.querySelector("#modelsHint");
-  if (!select || (select.dataset.loaded && !force)) return;
+  const selects = [...root.querySelectorAll("select[data-role-model]")];
   const refresh = root.querySelector("#modelsRefresh");
+  if (!selects.length) return;
   if (refresh) refresh.disabled = true;
-  if (hint) hint.dataset.text = hint.textContent;
+  const hints = [...root.querySelectorAll("[data-role-hint]")].filter((el) => root.querySelector(`select[data-role-model="${el.dataset.roleHint}"]`));
   try {
-    const result = await api(`/api/agent/models?agent=${encodeURIComponent(agentInfo(view).name)}`);
-    const current = select.value || view.model || "";
-    const groups = new Map();
-    for (const name of result.models || []) {
-      const provider = name.split("/")[0];
-      if (!groups.has(provider)) groups.set(provider, []);
-      groups.get(provider).push(name);
+    if (!catalog || force) catalog = await api(`/api/agent/models?agent=opencode${force ? "&refresh=1" : ""}`);
+    const items = catalog.items || [];
+    for (const select of selects) {
+      const current = select.value || "";
+      const shown = items.filter((item) => showPaid || item.tier !== "paid" || item.id === current);
+      const groups = new Map();
+      for (const item of shown) {
+        if (!groups.has(item.provider)) groups.set(item.provider, []);
+        groups.get(item.provider).push(item);
+      }
+      const known = new Set(shown.map((item) => item.id));
+      const extra = current && !known.has(current) ? `<option value="${esc(current)}" selected>${esc(current)} (нет в списке подписки)</option>` : "";
+      select.innerHTML = `<option value="">— выберите модель —</option>${extra}`
+        + [...groups].map(([provider, list]) => `<optgroup label="${esc(provider)}">${list.map((item) => `<option value="${esc(item.id)}"${item.id === current ? " selected" : ""}>${esc(item.name + (TIER_NOTE[item.tier] || ""))}</option>`).join("")}</optgroup>`).join("");
+      // уровни усилий выбранной модели
+      const role = select.dataset.roleModel;
+      const effort = root.querySelector(`[data-role-effort="${role}"]`);
+      if (effort) {
+        const levels = (catalogItem(current) || {variants: []}).variants;
+        const now = effort.value;
+        effort.innerHTML = effortOptions(levels, now);
+        effort.disabled = !!current && !levels.length;
+        effort.title = effort.disabled ? "У этой модели нет настраиваемых уровней" : "";
+      }
     }
-    const list = new Set(result.models || []);
-    const extra = current && !list.has(current) ? `<option value="${esc(current)}" selected>${esc(current)} (нет в списке подписки)</option>` : "";
-    select.innerHTML = `<option value="">— выберите модель —</option>${extra}`
-      + [...groups].map(([provider, names]) => `<optgroup label="${esc(provider)}">${names.map((name) => `<option value="${esc(name)}"${name === current ? " selected" : ""}>${esc(name.slice(provider.length + 1))}</option>`).join("")}</optgroup>`).join("");
-    select.dataset.loaded = "1";
-    if (result.error && hint) hint.textContent = result.error;
-    else if (hint) hint.textContent = `Моделей в подписке: ${(result.models || []).length}.`;
+    for (const hint of hints) {
+      if (catalog.error) hint.textContent = catalog.error;
+      else if (!hint.textContent.startsWith("Выберите")) {
+        const hidden = showPaid ? 0 : items.filter((item) => item.tier === "paid").length;
+        hint.textContent = `Моделей в списке: ${items.length - hidden}${hidden ? ` (платных по токенам скрыто: ${hidden})` : ""}.`;
+      }
+    }
   } catch (error) {
-    if (hint) hint.textContent = `Не удалось получить список моделей: ${error.message}`;
+    for (const hint of hints) hint.textContent = `Не удалось получить список моделей: ${error.message}`;
   }
   if (refresh) refresh.disabled = false;
 }
@@ -267,7 +373,7 @@ export async function renderAgentSettings() {
   try {
     const data = await load();
     root.innerHTML = connectionCard(data.view) + howCard() + rightsCard(data.view)
-      + gitCard(data.view) + runCard(data.runner, data.tests) + manualCard(data.view);
+      + gitCard(data.view) + runCard(data.runner, data.tests, data.view) + manualCard(data.view);
     bind(root, data);
   } catch (error) {
     root.innerHTML = `<p class="hint">Не удалось загрузить настройки агента: ${esc(error.message)}</p>`;

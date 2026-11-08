@@ -389,8 +389,10 @@ def make_handler(ctx):
                 return self._json(state.runner.agent_view())
             if url.path == "/api/agent/models":
                 # Список моделей подписки (может занять секунды: вызывает ``opencode models``)
-                agent = urllib.parse.parse_qs(url.query).get("agent", [""])[0]
-                return self._json(state.runner.models(agent))
+                query = urllib.parse.parse_qs(url.query)
+                return self._json(state.runner.models(
+                    query.get("agent", [""])[0], refresh=query.get("refresh", [""])[0] == "1"
+                ))
             if url.path == "/api/ui":
                 return self._json(state.settings.get())
             return self._error(404, "not_found", "Не найдено")
@@ -430,6 +432,12 @@ def make_handler(ctx):
             if url.path == "/api/workflow/ideas-ready":
                 return self._json(chain.ideas_ready(state))
             if url.path == "/api/workflow/start":
+                blockers = state.runner.start_blockers(str(data.get("mode") or ""))
+                if blockers:
+                    # Идеи на одном агенте при неготовом другом — потраченные токены впустую
+                    return self._error(
+                        409, "agent_not_ready", "Агент не готов: " + "; ".join(blockers)
+                    )
                 return self._json(chain.start(state, data))
             if url.path == "/api/workflow/stage":
                 return self._json(chain.stage(state, data))

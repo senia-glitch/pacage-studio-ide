@@ -36,6 +36,9 @@ SESSION_FILE = "agent-session.json"
 ASK_FILE = "agent-ask.json"
 MCP_FILE = "mcp.json"
 AGENT_STAGES = ("ideas", "implement")
+# Два независимых исполнителя: кто строит план (идеи, карточки) и кто пишет код.
+ROLES = ("plan", "implement")
+STAGE_ROLE = {"ideas": "plan", "implement": "implement"}
 DEFAULT_TIMEOUT = 45
 MAX_TIMEOUT = 240
 MAX_ANSWER = 4000
@@ -71,6 +74,10 @@ NO_MODEL = (
 )
 
 
+ROLE_TITLES = {"plan": "План", "implement": "Реализация"}
+CATALOG_TTL = 300  # секунд: каталог моделей OpenCode строится долго
+
+
 def _cmd_safe(text: str) -> str:
     """Убрать из аргумента символы, которые cmd.exe читает как команду (``&|<>^%"``)."""
     return "".join(" " if ch in "&|<>^%" else "'" if ch == '"' else ch
@@ -99,29 +106,56 @@ class Runner:
         self._note: str = ""  # что добавить к запросу следующего запуска (ответ, доработка)
         self._cancel = False
         self._git_note = ""
+        self._catalogs: dict = {}  # агент -> (время, каталог моделей)
         self._mcp: dict = {"ok": None}  # итог последнего рукопожатия с MCP-сервером студии
         self.status: dict = {"state": "idle", "stage": "", "message": ""}
         self._sync_workflow()
 
     # ------------------------------------------------------------- сессия и вопросы
 
-    def session_id(self) -> str:
+    def _sessions(self) -> dict:
+        """Сессии по агентам: у каждого агента своя, перенести контекст между ними нельзя."""
         try:
             raw = json.loads((self.root / ".studio" / SESSION_FILE).read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return ""
-        value = raw.get("id") if isinstance(raw, dict) else ""
-        return value if isinstance(value, str) else ""
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        found = raw.get("sessions")
+        if isinstance(found, dict):
+            return {
+                name: entry for name, entry in found.items()
+                if name in adapters.AGENTS and isinstance(entry, dict)
+                and isinstance(entry.get("id"), str) and entry["id"]
+            }
+        legacy = raw.get("id")  # старый файл: одна сессия единственного агента (Claude Code)
+        if isinstance(legacy, str) and legacy:
+            return {adapters.CLAUDE: {"id": legacy, "updated_at": str(raw.get("updated_at") or "")}}
+        return {}
 
-    def _save_session(self, session_id: str) -> None:
+    def session_id(self, agent: str = "") -> str:
+        entry = self._sessions().get(agent or self.config()["roles"]["implement"]["agent"])
+        return entry["id"] if entry else ""
+
+    def _save_session(self, session_id: str, agent: str | None = None) -> None:
+        """Запомнить сессию агента; пустой id забывает её (все сессии, если агент не задан)."""
         target = self.root / ".studio" / SESSION_FILE
-        if not session_id:
+        if not session_id and agent is None:
+            with contextlib.suppress(OSError):
+                target.unlink()
+            return
+        name = agent or self.config()["roles"]["implement"]["agent"]
+        sessions = self._sessions()
+        if session_id:
+            sessions[name] = {"id": session_id, "updated_at": _now()}
+        else:
+            sessions.pop(name, None)
+        if not sessions:
             with contextlib.suppress(OSError):
                 target.unlink()
             return
         target.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"id": session_id, "updated_at": _now()}
-        atomic_write(target, json.dumps(payload, ensure_ascii=False) + "\n")
+        atomic_write(target, json.dumps({"sessions": sessions}, ensure_ascii=False) + "\n")
 
     def _read_log(self, log: Path) -> str:
         try:
@@ -191,18 +225,27 @@ class Runner:
     def mcp_config_path(self) -> Path:
         return self.root / ".studio" / MCP_FILE
 
-    def adapter(self) -> adapters.Adapter:
-        return adapters.get(self.config()["agent"])
+    def role_config(self, role: str) -> dict:
+        return self.config()["roles"][role]
+
+    def adapter(self, role: str = "implement") -> adapters.Adapter:
+        return adapters.get(self.role_config(role)["agent"])
+
+    def used_agents(self) -> list[str]:
+        """Агенты, выбранные хотя бы для одной роли (без повторов, в порядке ролей)."""
+        roles = self.config()["roles"]
+        return list(dict.fromkeys(roles[role]["agent"] for role in ROLES))
 
     def connect(self) -> dict:
-        """Подключить выбранного агента: найти его, записать MCP-конфиг студии, включить запуск."""
-        adapter = self.adapter()
-        if shutil.which(adapter.exe) is None:
-            raise MetadataError(
-                "agent_not_found",
-                f"{adapter.label} (команда {adapter.exe}) не найден в PATH: "
-                "установите его и повторите",
-            )
+        """Подключить выбранных агентов: найти их, записать MCP-конфиг студии, включить запуск."""
+        for name in self.used_agents():
+            adapter = adapters.get(name)
+            if shutil.which(adapter.exe) is None:
+                raise MetadataError(
+                    "agent_not_found",
+                    f"{adapter.label} (команда {adapter.exe}) не найден в PATH: "
+                    "установите его и повторите",
+                )
         config = {
             "mcpServers": {
                 "pacage-studio": {
@@ -216,13 +259,40 @@ class Runner:
         text = json.dumps(config, ensure_ascii=False, indent=2) + "\n"
         if not atomic_write(self.mcp_config_path, text):
             raise MetadataError("not_writable", "Не удалось записать MCP-конфиг студии")
-        settings = self.config()
-        adapter.prepare(self.root, mcpcheck.default_server(self.root), settings["model"])
+        roles = self.config()["roles"]
+        for role in ROLES:
+            adapters.get(roles[role]["agent"]).prepare(
+                self.root, mcpcheck.default_server(self.root), roles[role]["model"]
+            )
         # «Подключён» только после настоящего рукопожатия: иначе агент получил бы пустоту.
         # Агенту с выбором модели (OpenCode) без модели запускать нечего.
-        ready = bool(self.probe()["ok"]) and not (adapter.needs_model and not settings["model"])
+        ready = bool(self.probe()["ok"]) and not self.readiness()["problems"]
         self.save_config({"enabled": ready})
         return self.agent_view()
+
+    def readiness(self) -> dict:
+        """Что мешает запуску, не вызывая агентов: не найден, нет модели, MCP не отвечает.
+
+        ``ok`` — по обоим ролям; ``roles`` — причина по каждой (пусто, если роль готова)."""
+        config = self.config()
+        out: dict = {"roles": {}, "problems": []}
+        mcp = self.mcp_state()
+        for role in ROLES:
+            slot = config["roles"][role]
+            adapter = adapters.get(slot["agent"])
+            reason = ""
+            # запускается команда роли (она может быть своей), поэтому ищем её программу
+            if shutil.which(config["commands"][adapter.name][0]) is None:
+                reason = f"{adapter.label} не найден"
+            elif adapter.needs_model and not slot["model"]:
+                reason = NO_MODEL
+            elif mcp.get("ok") is False and mcp.get("code") not in (None, "", "no_config"):
+                reason = "MCP-сервер студии не отвечает"
+            out["roles"][role] = reason
+            if reason:
+                out["problems"].append(f"{ROLE_TITLES[role]}: {reason}")
+        out["ok"] = not out["problems"]
+        return out
 
     def probe(self) -> dict:
         """Рукопожатие с MCP-сервером теми же командой и окружением, что получит агент."""
@@ -249,66 +319,100 @@ class Runner:
 
         threading.Thread(target=work, name="mcp-probe", daemon=True).start()
 
-    def _uses_mcp(self) -> bool:
-        exe = shutil.which(self.config()["command"][0])
+    def _uses_mcp(self, role: str = "implement") -> bool:
+        config = self.config()
+        agent = config["roles"][role]["agent"]
+        exe = shutil.which(config["commands"][agent][0])
         return (
-            bool(exe) and Path(exe).stem.lower() == self.adapter().exe
+            bool(exe) and Path(exe).stem.lower() == adapters.get(agent).exe
             and self.mcp_config_path.exists()
         )
 
-    def models(self, agent: str = "") -> dict:
-        """Модели, доступные агенту по его подписке (``opencode models``)."""
-        adapter = adapters.get(agent or self.config()["agent"])
+    def models(self, agent: str = "", refresh: bool = False) -> dict:
+        """Модели агента для выбора: ``models`` (имена) и ``items`` с уровнями усилий и тарифом.
+
+        Список OpenCode строится медленно (секунды), поэтому он кэшируется на несколько минут."""
+        adapter = adapters.get(agent or self.role_config("implement")["agent"])
         exe = shutil.which(adapter.exe)
         if exe is None:
-            return {"agent": adapter.name, "models": [],
+            return {"agent": adapter.name, "models": [], "items": [],
                     "error": f"Команда {adapter.exe} не найдена в PATH"}
-        found = adapter.models(exe)
-        error = "" if found or not adapter.needs_model else (
+        cached = self._catalogs.get(adapter.name)
+        if cached and not refresh and time.monotonic() - cached[0] < CATALOG_TTL:
+            return cached[1]
+        items = adapter.catalog(exe)
+        error = "" if items or not adapter.needs_model else (
             f"{adapter.label} не показал ни одной модели: выполните «{adapter.exe} auth login»"
         )
-        return {"agent": adapter.name, "models": found, "error": error}
+        result = {"agent": adapter.name, "models": [item["id"] for item in items],
+                  "items": items, "error": error}
+        if items:
+            self._catalogs[adapter.name] = (time.monotonic(), result)
+        return result
 
-    def check(self) -> dict:
-        """Проверка без расхода токенов: агент запускается, а MCP-сервер студии отвечает.
-
-        ``ok`` — только если успешно и то и другое (рукопожатие ``initialize`` с сервером);
-        агенту с выбором модели нужна ещё выбранная модель и вход в подписку."""
-        adapter = self.adapter()
+    def _check_role(self, role: str, mcp: dict, versions: dict) -> dict:
+        slot = self.role_config(role)
+        adapter = adapters.get(slot["agent"])
+        out = {"ok": False, "role": role, "agent": adapter.name, "label": adapter.label,
+               "model": slot["model"]}
         exe = shutil.which(adapter.exe)
         if exe is None:
-            return {"ok": False, "error": f"Команда {adapter.exe} не найдена в PATH"}
-        try:
-            done = subprocess.run(  # noqa: S603 — фиксированная команда без пользовательского ввода
-                [exe, "--version"], capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=20, stdin=subprocess.DEVNULL,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return {"ok": False, "error": f"{adapter.exe} не запустился: {exc}"}
-        version = (done.stdout or done.stderr).strip()
-        if done.returncode != 0:
-            return {"ok": False, "error": version or f"Код выхода {done.returncode}"}
-        mcp = self.probe()
-        settings = self.config()
-        out = {
-            "ok": bool(mcp["ok"]),
-            "agent": adapter.name,
-            "version": version,
-            "mcp_config": self.mcp_config_path.exists(),
-            "enabled": bool(settings["enabled"]),
-            "mcp": mcp,
-        }
+            out["error"] = f"Команда {adapter.exe} не найдена в PATH"
+            return out
+        if adapter.name not in versions:
+            try:
+                done = subprocess.run(  # noqa: S603 — фиксированная команда без ввода пользователя
+                    [exe, "--version"], capture_output=True, text=True, encoding="utf-8",
+                    errors="replace", timeout=20, stdin=subprocess.DEVNULL,
+                )
+                text = (done.stdout or done.stderr).strip()
+                versions[adapter.name] = (
+                    (text, "") if done.returncode == 0
+                    else ("", text or f"Код выхода {done.returncode}")
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                versions[adapter.name] = ("", f"{adapter.exe} не запустился: {exc}")
+        version, error = versions[adapter.name]
+        out["version"] = version
+        if error:
+            out["error"] = error
+            return out
         if not mcp["ok"]:
             out["error"] = _mcp_message(mcp)
         elif adapter.needs_model:
-            out["model"] = settings["model"]
             out["providers"] = adapter.providers(exe)
-            if not settings["model"]:
-                out["ok"] = False
+            if not slot["model"]:
                 out["error"] = NO_MODEL
             elif not out["providers"]:
-                out["ok"] = False
                 out["error"] = f"Нет входа в подписку: выполните «{adapter.exe} auth login»"
+        out["ok"] = "error" not in out
+        return out
+
+    def check(self) -> dict:
+        """Проверка без расхода токенов: оба агента запускаются, а MCP-сервер студии отвечает.
+
+        ``ok`` — только если успешно всё (рукопожатие ``initialize`` с сервером; агенту с выбором
+        модели нужны ещё модель и вход в подписку). Подробности по ролям — в ``roles``; плоские
+        поля (``version``, ``model``, ``providers``) — по роли «реализация»."""
+        first = self.config()["roles"]["plan"]["agent"]
+        if shutil.which(adapters.get(first).exe) is None and len(self.used_agents()) == 1:
+            return {"ok": False, "error": f"Команда {adapters.get(first).exe} не найдена в PATH"}
+        mcp = self.probe()
+        versions: dict = {}
+        roles = {role: self._check_role(role, mcp, versions) for role in ROLES}
+        bad = next((item for item in roles.values() if not item["ok"]), None)
+        out = {
+            **roles["implement"],
+            "ok": bad is None,
+            "roles": roles,
+            "mcp_config": self.mcp_config_path.exists(),
+            "enabled": bool(self.config()["enabled"]),
+            "mcp": mcp,
+        }
+        out.pop("error", None)
+        if bad is not None:
+            prefix = f"{ROLE_TITLES[bad['role']]}: " if len(self.used_agents()) > 1 else ""
+            out["error"] = prefix + bad["error"]
         return out
 
     def set_note(self, text: str) -> None:
@@ -321,61 +425,61 @@ class Runner:
     def config_path(self) -> Path:
         return self.root / ".studio" / CONFIG_FILE
 
+    @staticmethod
+    def _read_role(slot: dict, raw) -> None:
+        if not isinstance(raw, dict):
+            return
+        if raw.get("agent") in adapters.AGENTS:
+            slot["agent"] = raw["agent"]
+        with contextlib.suppress(ValueError):
+            slot["model"] = adapters.clean_model(raw.get("model"), slot["agent"])
+        with contextlib.suppress(ValueError):
+            slot["variant"] = adapters.clean_variant(raw.get("variant"), slot["agent"])
+
+    @staticmethod
+    def _command_ok(value) -> bool:
+        return isinstance(value, list) and bool(value) and all(
+            isinstance(i, str) and i for i in value
+        )
+
     def config(self) -> dict:
         data = {
             "enabled": False,
-            "agent": adapters.CLAUDE,
-            "command": list(DEFAULT_COMMAND),
-            "model": "",
-            "variant": "",
+            "roles": {
+                role: {"agent": adapters.CLAUDE, "model": "", "variant": ""} for role in ROLES
+            },
+            "commands": {
+                name: list(adapters.get(name).default_command) for name in adapters.AGENTS
+            },
             "timeout_minutes": DEFAULT_TIMEOUT,
         }
         try:
             raw = json.loads(self.config_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return data
-        if not isinstance(raw, dict):
-            return data
-        data["enabled"] = raw.get("enabled") is True
-        if raw.get("agent") in adapters.AGENTS:
-            data["agent"] = raw["agent"]
-            data["command"] = list(adapters.get(data["agent"]).default_command)
-        with contextlib.suppress(ValueError):
-            data["model"] = adapters.clean_model(raw.get("model"))
-        with contextlib.suppress(ValueError):
-            data["variant"] = adapters.clean_variant(raw.get("variant"))
-        command = raw.get("command")
-        if isinstance(command, list) and command and all(isinstance(i, str) and i for i in command):
-            data["command"] = list(command)
-        minutes = raw.get("timeout_minutes")
-        if _valid_minutes(minutes):
-            data["timeout_minutes"] = minutes
+            raw = None
+        if isinstance(raw, dict):
+            data["enabled"] = raw.get("enabled") is True
+            roles = raw.get("roles")
+            for role in ROLES:
+                # старый формат без ролей: один агент на оба этапа
+                source = roles.get(role) if isinstance(roles, dict) else raw
+                self._read_role(data["roles"][role], source)
+            commands = raw.get("commands")
+            if isinstance(commands, dict):
+                for name in adapters.AGENTS:
+                    if self._command_ok(commands.get(name)):
+                        data["commands"][name] = list(commands[name])
+            elif self._command_ok(raw.get("command")):
+                data["commands"][data["roles"]["implement"]["agent"]] = list(raw["command"])
+            minutes = raw.get("timeout_minutes")
+            if _valid_minutes(minutes):
+                data["timeout_minutes"] = minutes
+        # «command» — команда агента роли «реализация» (для совместимости со старым видом)
+        data["command"] = list(data["commands"][data["roles"]["implement"]["agent"]])
         return data
 
-    def save_config(self, data: dict) -> dict:
-        """Сохранить настройку автозапуска (только из интерфейса); возвращает её же."""
-        current = self.config()
-        enabled = data.get("enabled", current["enabled"])
-        agent = data.get("agent", current["agent"])
-        if agent not in adapters.AGENTS:
-            raise MetadataError("invalid_input", f"agent: {' или '.join(adapters.AGENTS)}")
-        # Другой агент — другая команда запуска (если её не задали явно) и другая модель
-        switched = agent != current["agent"]
-        command = data.get(
-            "command", list(adapters.get(agent).default_command) if switched else current["command"]
-        )
-        try:
-            model = adapters.clean_model(data.get("model", "" if switched else current["model"]))
-            variant = adapters.clean_variant(
-                data.get("variant", "" if switched else current["variant"])
-            )
-        except ValueError as exc:
-            raise MetadataError("invalid_input", str(exc)) from exc
-        minutes = data.get("timeout_minutes", current["timeout_minutes"])
-        if not isinstance(enabled, bool):
-            raise MetadataError("invalid_input", "enabled: true или false")
-        if switched and "enabled" not in data:
-            enabled = False  # новый агент нужно подключить заново (и выбрать модель)
+    @staticmethod
+    def _clean_command(command) -> list[str]:
         if isinstance(command, str):
             command = [line.strip() for line in command.splitlines() if line.strip()]
         if not isinstance(command, list) or not command or not all(
@@ -384,16 +488,65 @@ class Runner:
             raise MetadataError("invalid_input", "command: список аргументов, первый — программа")
         if not any("{prompt}" in item for item in command):
             raise MetadataError("invalid_input", "В command нужен аргумент с {prompt}")
+        return [i.strip() for i in command]
+
+    def save_config(self, data: dict) -> dict:
+        """Сохранить настройку автозапуска (только из интерфейса); возвращает новую настройку.
+
+        ``roles`` — правка по ролям (``{"plan": {"agent", "model", "variant"}, "implement": …}``);
+        плоские ``agent``/``model``/``variant`` относятся сразу к обеим ролям. ``commands`` —
+        команды по агентам; плоский ``command`` — команда агентов, выбранных сейчас."""
+        current = self.config()
+        enabled = data.get("enabled", current["enabled"])
+        roles = {role: dict(slot) for role, slot in current["roles"].items()}
+        updates: dict = {}
+        flat = {key: data[key] for key in ("agent", "model", "variant") if key in data}
+        if flat:
+            updates = {role: dict(flat) for role in ROLES}
+        patch = data.get("roles")
+        if patch is not None:
+            if not isinstance(patch, dict) or not set(patch) <= set(ROLES):
+                raise MetadataError("invalid_input", "roles: plan и/или implement")
+            for role, change in patch.items():
+                if not isinstance(change, dict):
+                    raise MetadataError("invalid_input", f"roles.{role}: объект")
+                updates.setdefault(role, {}).update(change)
+        switched = False
+        for role, change in updates.items():
+            slot = roles[role]
+            agent = change.get("agent", slot["agent"])
+            if agent not in adapters.AGENTS:
+                raise MetadataError("invalid_input", f"agent: {' или '.join(adapters.AGENTS)}")
+            if agent != slot["agent"]:
+                switched = True  # у другого агента свои модели: прежняя не подходит
+                slot.update({"agent": agent, "model": "", "variant": ""})
+            try:
+                if "model" in change:
+                    slot["model"] = adapters.clean_model(change["model"], agent)
+                if "variant" in change:
+                    slot["variant"] = adapters.clean_variant(change["variant"], agent)
+            except ValueError as exc:
+                raise MetadataError("invalid_input", str(exc)) from exc
+        commands = dict(current["commands"])
+        by_agent = data.get("commands")
+        if by_agent is not None:
+            if not isinstance(by_agent, dict) or not set(by_agent) <= set(adapters.AGENTS):
+                raise MetadataError("invalid_input", f"commands: {' и/или '.join(adapters.AGENTS)}")
+            for name, command in by_agent.items():
+                commands[name] = self._clean_command(command)
+        if "command" in data:
+            clean = self._clean_command(data["command"])
+            for role in ROLES:
+                commands[roles[role]["agent"]] = clean
+        minutes = data.get("timeout_minutes", current["timeout_minutes"])
+        if not isinstance(enabled, bool):
+            raise MetadataError("invalid_input", "enabled: true или false")
         if not _valid_minutes(minutes):
             raise MetadataError("invalid_input", f"timeout_minutes: от 1 до {MAX_TIMEOUT}")
-        payload = {
-            "enabled": enabled,
-            "agent": agent,
-            "command": [i.strip() for i in command],
-            "model": model,
-            "variant": variant,
-            "timeout_minutes": minutes,
-        }
+        if switched and "enabled" not in data:
+            enabled = False  # новых агентов нужно подключить заново (и выбрать модели)
+        payload = {"enabled": enabled, "roles": roles, "commands": commands,
+                   "timeout_minutes": minutes}
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
         if not atomic_write(self.config_path, text):
@@ -401,7 +554,7 @@ class Runner:
         self._sync_workflow()
         if not enabled:
             self.stop()
-        return payload
+        return self.config()
 
     def _sync_workflow(self) -> None:
         # С автозапуском «синхронизация» выполнена заранее: агент появится сам, когда понадобится.
@@ -470,7 +623,10 @@ class Runner:
         prompt = PROMPTS[stage]
         if note:
             prompt += f"\n\nОт человека: {note}"
-        argv = [item.replace("{prompt}", prompt) for item in self.config()["command"]]
+        config = self.config()
+        slot = config["roles"][STAGE_ROLE[stage]]
+        adapter = adapters.get(slot["agent"])
+        argv = [item.replace("{prompt}", prompt) for item in config["commands"][adapter.name]]
         exe = shutil.which(argv[0])
         if exe is None:
             raise FileNotFoundError(argv[0])
@@ -478,25 +634,24 @@ class Runner:
         if Path(exe).suffix.lower() in (".cmd", ".bat"):
             # Скрипты-обёртки (npm) идут через cmd.exe: его метасимволы в запросе недопустимы
             argv = [argv[0], *[_cmd_safe(item) for item in argv[1:]]]
-        adapter = self.adapter()
         if Path(exe).stem.lower() == adapter.exe:
-            config = self.config()
-            session = self.session_id() if resume else ""
-            argv = adapter.extend(argv, self.root, session, config["model"], config["variant"])
+            session = self.session_id(adapter.name) if resume else ""
+            argv = adapter.extend(argv, self.root, session, slot["model"], slot["variant"])
         return argv
 
     def _run(self, stage: str, note: str = "") -> None:
         started = _now()
         entries = self.workflow.data["entries"]
         log = self.root / ".studio" / LOG_FILE
-        if self._uses_mcp():
+        role = STAGE_ROLE[stage]
+        if self._uses_mcp(role):
             mcp = self.probe()
             if not mcp["ok"]:
                 # Сервер не запускается: агент остался бы без studio_*, а токены ушли бы впустую.
                 self._finish("failed", stage, started, _mcp_message(mcp))
                 return
-        adapter = self.adapter()
-        model = self.config()["model"]
+        adapter = self.adapter(role)
+        model = self.role_config(role)["model"]
         if adapter.needs_model and not model:
             # Без модели агент не стартует: запуск вслепую потратил бы подписку на случайную модель.
             self._finish("failed", stage, started, NO_MODEL)
@@ -568,12 +723,12 @@ class Runner:
         result = adapter.parse(self._read_log(log))
         if code != 0 and adapter.resume_flag and adapter.resume_flag in argv:
             # Сессия потеряна или устарела: один раз начинаем заново без неё.
-            self._save_session("")
+            self._save_session("", adapter.name)
             self._run(stage, note)
             return
         session = result.get("session_id")
         if code == 0 and isinstance(session, str) and session:
-            self._save_session(session)
+            self._save_session(session, adapter.name)
         if code != 0:
             self._finish("failed", stage, started, self._tail(log) or f"Код выхода {code}", code)
         elif result.get("error"):
@@ -635,6 +790,30 @@ class Runner:
         with self._lock:
             return {"enabled": bool(self.config()["enabled"]), **self.status}
 
+    def start_blockers(self, mode: str) -> list[str]:
+        """Что не даёт начать цикл: нужен готовый агент каждой роли, которая в нём работает.
+
+        Если автозапуск выключен (агента ведёт человек вручную), ничто не мешает."""
+        if not self.config()["enabled"]:
+            return []
+        ready = self.readiness()["roles"]
+        roles = ROLES if mode == "plan" else ("implement",)
+        return [f"{ROLE_TITLES[role]}: {ready[role]}" for role in roles if ready[role]]
+
+    def _roles_view(self) -> dict:
+        """Кто сейчас на каждой роли и готов ли он (без запуска агентов)."""
+        ready = self.readiness()["roles"]
+        config = self.config()
+        out = {}
+        for role, slot in config["roles"].items():
+            adapter = adapters.get(slot["agent"])
+            out[role] = {
+                **slot, "title": ROLE_TITLES[role], "label": adapter.label,
+                "found": shutil.which(config["commands"][adapter.name][0]) is not None,
+                "needs_model": adapter.needs_model, "reason": ready[role],
+            }
+        return out
+
     def agent_view(self) -> dict:
         """Всё для окна агента и страницы «Настройки агента» (только интерфейс)."""
         ask = self.pending_ask()
@@ -642,9 +821,11 @@ class Runner:
         return {
             **self.public(),
             "claude_found": shutil.which("claude") is not None,
-            "agent": self.config()["agent"],
-            "model": self.config()["model"],
-            "variant": self.config()["variant"],
+            "agent": self.role_config("implement")["agent"],
+            "model": self.role_config("implement")["model"],
+            "variant": self.role_config("implement")["variant"],
+            "roles": self._roles_view(),
+            "readiness": self.readiness(),
             "agents": [
                 {"name": name, "label": adapters.get(name).label,
                  "found": shutil.which(adapters.get(name).exe) is not None,
@@ -653,7 +834,7 @@ class Runner:
             ],
             "mcp": self.mcp_state(),
             "venv": venv.name if venv else "",
-            "has_session": bool(self.session_id()),
+            "has_session": bool(self._sessions()),
             "log_tail": self._tail(self.root / ".studio" / LOG_FILE, 15),
             "ask": (
                 {"question": ask["question"], "options": ask.get("options") or []} if ask else None

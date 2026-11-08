@@ -136,9 +136,33 @@ test("индикатор OpenCode: без модели — «выберите м
     {name: "opencode", label: "OpenCode", found: true, needs_model: true},
   ];
   const base = {agent: "opencode", agents, enabled: true, mcp: {ok: true}, state: "idle"};
-  assert.equal(agentStatus({...base, model: ""}).text, "выберите модель");
+  assert.equal(agentStatus({...base, model: ""}).text, "выберите модели");
   assert.equal(agentStatus({...base, model: ""}).connected, false);
   assert.equal(agentStatus({...base, model: "opencode-go/kimi-k3"}).tone, "ok");
   const missing = agents.map((a) => (a.name === "opencode" ? {...a, found: false} : a));
   assert.equal(agentStatus({...base, agents: missing}).text, "OpenCode не найден");
+});
+
+import {agentTitle, roleViews} from "../../studio/ui/static/js/dockmodel.js";
+
+const roleView = (plan, implement, extra = {}) => ({
+  enabled: true, mcp: {ok: true}, state: "idle", ...extra,
+  roles: {
+    plan: {title: "План", found: true, needs_model: false, model: "", reason: "", label: "Claude Code", ...plan},
+    implement: {title: "Реализация", found: true, needs_model: true, model: "", reason: "", label: "OpenCode", ...implement},
+  },
+});
+
+test("исполнители: заголовок окна и состояние по ролям", () => {
+  const mixed = roleView({}, {model: "opencode-go/kimi-k3"});
+  assert.equal(agentTitle(mixed), "План: Claude Code · Реализация: OpenCode");
+  assert.equal(agentTitle(roleView({}, {label: "Claude Code", needs_model: false})), "Claude Code");
+  assert.deepEqual(roleViews(mixed).map((item) => item.role), ["plan", "implement"]);
+  assert.equal(agentStatus(mixed).tone, "ok");
+  // модель нужна только роли, чей агент её требует
+  assert.equal(agentStatus(roleView({}, {model: ""})).text, "выберите модель (Реализация)");
+  assert.equal(agentStatus(roleView({needs_model: true, label: "OpenCode"}, {model: ""})).text, "выберите модели");
+  // неготовый агент любой роли блокирует связь
+  assert.equal(agentStatus(roleView({found: false}, {model: "a/b"})).text, "Claude Code не найден");
+  assert.equal(agentStatus(roleView({}, {found: false, model: "a/b"})).connected, false);
 });
