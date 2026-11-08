@@ -213,3 +213,70 @@ test("опрос ускоряется, пока что-то запускаетс
   assert.equal(serversBusy({servers: [srv("backend", "running")]}), false);
   assert.equal(serversBusy(null), false);
 });
+
+import {
+  GOAL_DEFAULTS, ideasAutomatic, optionsSummary, pipelineNote, startPayload, unitRows,
+} from "../../studio/ui/static/js/dockmodel.js";
+
+test("цель: настройки цикла уходят в запрос «Начать»", () => {
+  assert.deepEqual(startPayload({...GOAL_DEFAULTS, text: " сайт "}), {
+    mode: "plan", task: "сайт",
+    options: {iterations: 1, auto_decide: false, verify: false, tests: false},
+  });
+  const full = startPayload({...GOAL_DEFAULTS, text: "x", iterations: 3, autoDecide: true, verify: true, tests: true});
+  assert.deepEqual(full.options, {iterations: 3, auto_decide: true, verify: true, tests: true});
+  // без идей итерации и автоприём не нужны, а проверки остаются
+  const skip = startPayload({...GOAL_DEFAULTS, skipIdeas: true, iterations: 4, autoDecide: true, tests: true});
+  assert.deepEqual(skip, {mode: "implement", task: "", options: {iterations: 1, auto_decide: false, verify: false, tests: true}});
+  // мусор в числе итераций сводится к границам
+  assert.equal(startPayload({...GOAL_DEFAULTS, iterations: 99}).options.iterations, 5);
+  assert.equal(startPayload({...GOAL_DEFAULTS, iterations: "abc"}).options.iterations, 1);
+  assert.equal(startPayload({...GOAL_DEFAULTS, iterations: 0}).options.iterations, 1);
+});
+
+test("сводка настроек и признак автоматических идей", () => {
+  assert.equal(optionsSummary({iterations: 1}), "");
+  assert.equal(
+    optionsSummary({iterations: 3, auto_decide: true, verify: true, tests: true}),
+    "идей: 3 итерации · карточки решает агент · проверка сценариев · усиленные тесты",
+  );
+  assert.equal(ideasAutomatic({options: {iterations: 2}}), true);
+  assert.equal(ideasAutomatic({options: {iterations: 1, auto_decide: true}}), true);
+  assert.equal(ideasAutomatic({options: {iterations: 1, verify: true}}), false);
+  assert.equal(ideasAutomatic(null), false);
+});
+
+test("заметка: итерация идей, решение карточек, сценарий и его шаг", () => {
+  const ideas = {stage: "ideas", options: {iterations: 3}, pipeline: {iteration: 2, phase: ""}};
+  assert.equal(pipelineNote(ideas), "Агент готовит идеи: итерация 2 из 3.");
+  assert.match(pipelineNote({...ideas, pipeline: {iteration: 2, phase: "decide"}}), /принимает и отклоняет/);
+  assert.equal(pipelineNote({stage: "ideas", options: {iterations: 1}, pipeline: {}}), ""); // обычный ход
+  const build = {stage: "implement", options: {verify: true},
+    pipeline: {unit: 1, step: "verify", final: false, units: [{title: "A"}, {title: "Список"}]}};
+  assert.equal(pipelineNote(build), "Сценарий 2 из 2 «Список»: проверка.");
+  assert.match(pipelineNote({...build, pipeline: {...build.pipeline, final: true}}), /итоговый отчёт/);
+});
+
+test("без кнопки «К разбору», пока студия сама ведёт идеи; заметка показывает причину остановки", () => {
+  const view = {...ready, state: "idle"};
+  const manual = {stage: "ideas", cards: {total: 2, pending: 2}, options: {iterations: 1}};
+  assert.ok(dockActions(manual, view).some((a) => a.id === "to-review"));
+  const auto = {...manual, options: {iterations: 3}};
+  assert.ok(!dockActions(auto, view).some((a) => a.id === "to-review"));
+  const stalled = {...ready, state: "stalled", message: "Контроль не решил по 2 карточкам"};
+  assert.equal(dockNote(auto, stalled), "Контроль не решил по 2 карточкам");
+  assert.ok(dockActions(auto, stalled).some((a) => a.id === "retry"));
+});
+
+test("сценарии реализации: сделан, с замечаниями, текущий и ожидающие", () => {
+  const flow = {stage: "implement", pipeline: {unit: 2, step: "tests", final: false, units: [
+    {title: "A", state: "done", checks: {}},
+    {title: "B", state: "issues", checks: {verify: {ok: false, remarks: ["нет проверки прав"]}}},
+    {title: "C", state: "todo", checks: {}},
+    {title: "D", state: "todo", checks: {}},
+  ]}};
+  assert.deepEqual(unitRows(flow).map((r) => r.state), ["done", "issues", "current", "todo"]);
+  assert.equal(unitRows(flow)[2].step, "тесты");
+  assert.deepEqual(unitRows(flow)[1].remarks, ["нет проверки прав"]);
+  assert.deepEqual(unitRows({stage: "implement"}), []);
+});

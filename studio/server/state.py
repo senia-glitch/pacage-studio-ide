@@ -67,7 +67,7 @@ from studio.metadata.plans import PlanError, build_plan, layer_file, layer_name
 from studio.metamodel import EDGE_KINDS, NODE_KINDS, Graph, Node
 from studio.scanner import scan
 from studio.scanner.anchors import AnchorResolver
-from studio.server import access
+from studio.server import access, autopilot
 from studio.server.devservers import DevServers
 from studio.server.runner import Runner
 from studio.server.settings import Settings
@@ -121,6 +121,8 @@ class ProjectState:
         self.settings = Settings(self.root)
         self.runner = Runner(self.root, self.workflow, self.settings)
         self.workflow.listeners.append(self.runner.on_stage)
+        self.runner.planner = lambda stage: autopilot.job_for(self, stage)
+        self.runner.after = lambda job: autopilot.after_job(self, job)
         # Независимая проверка тестами проекта (кнопка или этап «Отчёт»).
         self.tester = TestRunner(self.root, lambda: self.graph)
         self.workflow.listeners.append(self.tester.on_stage)

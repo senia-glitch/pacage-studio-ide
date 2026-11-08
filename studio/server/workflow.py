@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 import time
@@ -55,6 +56,8 @@ AGENT_WRITE_STAGES = {
     "plan": frozenset({"ideas", "review"}),
     "implement": frozenset({"implement", "report"}),
 }
+MAX_ITERATIONS = 5  # больше итераций идей — лишний расход подписки
+DEFAULT_OPTIONS = {"iterations": 1, "auto_decide": False, "verify": False, "tests": False}
 SEEN_TTL = 75.0  # агент «подключён», если обращался к студии не позже этого срока (с)
 FILENAME = "workflow.json"
 _MAX_TASK = 4000
@@ -63,6 +66,48 @@ _MAX_SUMMARY = 20000
 
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def blank_pipeline() -> dict:
+    """Ход автоматической части цикла: итерации идей, решение карточек, сценарии реализации."""
+    return {
+        "iteration": 1,  # номер итерации идей (1…iterations)
+        "cards_before": 0,  # сколько карточек было на доске, когда началась итерация
+        "phase": "",  # ideas | decide | build | final (пусто — классический ход)
+        "ready": False,  # агент сказал studio_ideas_ready, но студия ещё не перешла дальше
+        "units": [],  # сценарии реализации: {kind, id, title, state, checks, remarks}
+        "unit": 0,  # индекс текущего сценария
+        "step": "",  # implement | verify | tests | fix
+        "fixes": 0,  # исправлений в текущей проверке
+        "final": False,  # идёт итоговый отчёт (или доработка): отчёт агента переводит этап
+    }
+
+
+def clean_options(raw, mode: str = "plan") -> dict:
+    """Настройки цикла с «Цели»: проверка типов и границ; для реализации без идей их нет."""
+    out = dict(DEFAULT_OPTIONS)
+    if raw is None:
+        return out
+    if not isinstance(raw, dict):
+        raise MetadataError("invalid_input", "options: объект")
+    unknown = set(raw) - set(DEFAULT_OPTIONS)
+    if unknown:
+        raise MetadataError("invalid_input", f"options: неизвестные поля {sorted(unknown)}")
+    if "iterations" in raw:
+        value = raw["iterations"]
+        if isinstance(value, bool) or not isinstance(value, int) or not (
+            1 <= value <= MAX_ITERATIONS
+        ):
+            raise MetadataError("invalid_input", f"iterations: целое от 1 до {MAX_ITERATIONS}")
+        out["iterations"] = value
+    for key in ("auto_decide", "verify", "tests"):
+        if key in raw:
+            if not isinstance(raw[key], bool):
+                raise MetadataError("invalid_input", f"{key}: true или false")
+            out[key] = raw[key]
+    if mode == "implement":  # без идей итерациям и автоприёму нечего делать
+        out["iterations"], out["auto_decide"] = 1, False
+    return out
 
 
 def _blank() -> dict:
@@ -77,6 +122,8 @@ def _blank() -> dict:
         "summary": "",
         "report_id": "",
         "selected": {"plans": 0, "nodes": 0, "pages": 0},
+        "options": dict(DEFAULT_OPTIONS),
+        "pipeline": blank_pipeline(),
         "updated_at": _now(),
     }
 
@@ -119,6 +166,16 @@ class Workflow:
         for key in ("revision", "cycle", "entries"):
             if isinstance(raw.get(key), int) and not isinstance(raw.get(key), bool):
                 data[key] = max(0, raw[key])
+        with contextlib.suppress(MetadataError):
+            data["options"] = clean_options(raw.get("options"))
+        pipeline = raw.get("pipeline")
+        if isinstance(pipeline, dict):
+            for key, default in data["pipeline"].items():
+                value = pipeline.get(key)
+                if isinstance(value, type(default)) and not (
+                    isinstance(default, int) and isinstance(value, bool)
+                ):
+                    data["pipeline"][key] = value
         selected = raw.get("selected")
         if isinstance(selected, dict):
             for key in data["selected"]:
@@ -166,10 +223,11 @@ class Workflow:
         self.data["stage"] = stage
         self.data["entries"] += 1  # счётчик входов на этапы: по нему UI открывает окно заново
 
-    def start(self, mode: str, task: str = "") -> dict:
+    def start(self, mode: str, task: str = "", options=None) -> dict:
         with self.lock:
             if mode not in MODES:
                 raise MetadataError("invalid_input", "Режим: plan (планирование) или implement")
+            clean = clean_options(options, mode)
             if self.data["stage"] != "mode":
                 raise MetadataError(
                     "wrong_stage", "Цепочка уже идёт: сначала завершите или сбросьте её"
@@ -179,9 +237,23 @@ class Workflow:
             self.data["task"] = str(task or "").strip()[:_MAX_TASK]
             self.data["summary"] = ""
             self.data["report_id"] = ""
+            self.data["options"] = clean
+            self.data["pipeline"] = blank_pipeline()
             self._save()
             self._emit()
             return self.data
+
+    def set_pipeline(self, **fields) -> dict:
+        """Записать ход автоматической части цикла (без смены этапа); ждущие клиенты видят его."""
+        with self.lock:
+            unknown = set(fields) - set(self.data["pipeline"])
+            if unknown:
+                raise MetadataError(
+                    "invalid_input", f"pipeline: неизвестные поля {sorted(unknown)}"
+                )
+            self.data["pipeline"].update(fields)
+            self._save()
+            return self.data["pipeline"]
 
     def advance(self, stage: str, **fields) -> dict:
         with self.lock:
@@ -203,7 +275,8 @@ class Workflow:
     def _reset_cycle(self) -> None:
         self.data.update(
             {"mode": "", "task": "", "summary": "", "report_id": "",
-             "selected": {"plans": 0, "nodes": 0, "pages": 0}}
+             "selected": {"plans": 0, "nodes": 0, "pages": 0},
+             "options": dict(DEFAULT_OPTIONS), "pipeline": blank_pipeline()}
         )
 
     def finish(self) -> dict:
@@ -230,9 +303,14 @@ class Workflow:
 
     def report_received(self, report_id: str, summary: str) -> None:
         with self.lock:
-            self.data["summary"] = str(summary or "").strip()[:_MAX_SUMMARY]
-            self.data["report_id"] = report_id
-            moved = self.data["stage"] == "implement"
+            pipeline = self.data["pipeline"]
+            # Сценарии реализуются по одному: отчёт посреди работы этап не закрывает
+            moved = self.data["stage"] == "implement" and (
+                not pipeline["units"] or pipeline["final"]
+            )
+            if moved or not pipeline["units"]:
+                self.data["summary"] = str(summary or "").strip()[:_MAX_SUMMARY]
+                self.data["report_id"] = report_id
             if moved:
                 self._go("report")
             self._save()
@@ -301,6 +379,13 @@ class Workflow:
                 "action": "propose",
                 "text": "Изучи проект и пришли идеи со сценариями (studio_idea_add: scenarios и, "
                 "если нужен интерфейс, pages), затем вызови studio_ideas_ready." + tail,
+            }
+        if stage == "implement" and self.data["pipeline"]["units"]:
+            return {
+                "action": "implement",
+                "text": "Студия ведёт реализацию по сценариям и каждый шаг ставит отдельным "
+                "запросом: следуй запросу, с которым тебя запустили. Итоговый отчёт "
+                "(studio_report) отправляй, только если об этом просят.",
             }
         if stage == "implement":
             return {

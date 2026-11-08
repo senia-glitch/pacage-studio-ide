@@ -62,6 +62,9 @@ _POST_SAFE = frozenset(
         "/api/agent/ask",  # вопрос человеку: единственная запись агента вне своих этапов
     }
 )
+# Контролёр: решение по карточкам и итог проверки. Принимаются только во время запуска
+# студией соответствующего контролёра (проверяет сама студия), поэтому этапом не ограничены.
+_POST_CONTROL = frozenset({"/api/control/decide", "/api/control/result"})
 # Запись плана: только режим планирования. Файлы кода эти маршруты не пишут.
 _POST_PLAN = frozenset(
     {
@@ -82,8 +85,8 @@ WRITE_PATHS: dict[str, frozenset[str]] = {PLAN: _POST_PLAN, IMPLEMENT: _POST_IMP
 APPLY_PATHS = frozenset({"/api/sync/apply", "/api/frontend/sync/apply"})
 
 ALLOWED: dict[str, dict[str, frozenset[str]]] = {
-    PLAN: {"GET": _GET_READ, "POST": _POST_SAFE | _POST_PLAN},
-    IMPLEMENT: {"GET": _GET_READ, "POST": _POST_SAFE | _POST_IMPLEMENT},
+    PLAN: {"GET": _GET_READ, "POST": _POST_SAFE | _POST_PLAN | _POST_CONTROL},
+    IMPLEMENT: {"GET": _GET_READ, "POST": _POST_SAFE | _POST_IMPLEMENT | _POST_CONTROL},
 }
 
 def derive_token(root_token: str, mode: str) -> str:

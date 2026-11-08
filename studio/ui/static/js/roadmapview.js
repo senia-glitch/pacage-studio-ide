@@ -5,8 +5,8 @@ import {
   selectionCount, selectionPayload, testsView,
 } from "./roadmapmodel.js";
 import {
-  agentStatus, agentTitle, canRollback, dockActions, dockNote, dockSteps, gitNote,
-  projectButton, serverRows, serversBusy,
+  GOAL_DEFAULTS, MAX_ITERATIONS, agentStatus, agentTitle, canRollback, dockActions, dockNote,
+  dockSteps, gitNote, projectButton, serverRows, serversBusy, startPayload, unitRows,
 } from "./dockmodel.js";
 import {closeSwipe, isSwipeOpen, openSwipe, refreshSwipe} from "./swipeview.js";
 
@@ -17,7 +17,7 @@ const POLL_MS = 4000;
 const OPENED_KEY = "studio:roadmap-opened";
 let flow = null;
 let agent = null; // GET /api/agent/status: связь, состояние запуска, вопрос, git
-let goalDraft = {text: "", skipIdeas: false};
+let goalDraft = {...GOAL_DEFAULTS};
 let answerDraft = "";
 let timer = null;
 let progress = null;
@@ -347,14 +347,44 @@ function serversBlock() {
       ${items}${tail}</div>`;
 }
 
+/* --- настройки цикла на шаге «Цель»: итерации идей, автоприём, проверка и тесты сценариев */
+
+function goalOptions() {
+  const skip = goalDraft.skipIdeas;
+  const levels = Array.from({length: MAX_ITERATIONS}, (_item, index) => index + 1);
+  const check = (id, checked, title, hint) => `<label class="rm-check"><input type="checkbox" id="${id}"${checked ? " checked" : ""}>
+      <span><b>${title}</b><small>${hint}</small></span></label>`;
+  return `<div class="dock-opts">
+    ${skip ? "" : `<label class="dock-iter"><span>Итераций идей</span>
+      <select id="dockIter">${levels.map((n) => `<option value="${n}"${n === goalDraft.iterations ? " selected" : ""}>${n}</option>`).join("")}</select>
+      <small>каждая следующая углубляет декомпозицию прошлой и не повторяет её карточки</small></label>
+    ${check("dockAuto", goalDraft.autoDecide, "Агент сам принимает и отклоняет карточки",
+      "отдельный запрос «Контроль»; затем перенос на карту и реализация стартуют сами, вручную остаётся «Приёмка»")}`}
+    ${check("dockVerify", goalDraft.verify, "Проверять каждый сценарий сразу после реализации",
+      "отдельный запрос контролёра на сценарий; замечания агент исправляет сам (до 2 раз)")}
+    ${check("dockTests", goalDraft.tests, "Писать усиленные тесты для каждого сценария",
+      "отдельный запрос контролёра после реализации сценария")}
+    <small class="hint">Каждый включённый шаг — отдельные запуски агента, они расходуют подписку.</small>
+  </div>`;
+}
+
+const UNIT_MARK = {done: "✓", issues: "⚠", current: "▶", todo: "○"};
+
+function unitsList(rows) {
+  if (!rows.length) return "";
+  return `<ul class="dock-units">${rows.map((row) => `<li class="${esc(row.state)}">
+      <span class="u-mark">${UNIT_MARK[row.state] || "○"}</span>${esc(row.title)}
+      ${row.step ? `<small>${esc(row.step)}</small>` : ""}
+      ${row.remarks.length ? `<small class="rm-warn" title="${esc(row.remarks.join(String.fromCharCode(10)))}">замечаний: ${row.remarks.length}</small>` : ""}</li>`).join("")}</ul>`;
+}
+
 function run(id) {
   if (id === "start") {
-    const task = goalDraft.text.trim();
-    const mode = goalDraft.skipIdeas ? "implement" : "plan";
-    if (mode === "plan" && !task) { toast("Опишите цель: что нужно сделать"); return; }
+    const body = startPayload(goalDraft);
+    if (body.mode === "plan" && !body.task) { toast("Опишите цель: что нужно сделать"); return; }
     remember(autoKey(flow));
-    post("/api/workflow/start", {mode, task: mode === "plan" ? task : ""}).then((result) => {
-      goalDraft = {text: "", skipIdeas: false};
+    post("/api/workflow/start", body).then((result) => {
+      if (result) goalDraft = {...GOAL_DEFAULTS};
       return apply(result);
     });
   } else if (id === "settings") void setTab("agent");
@@ -380,7 +410,8 @@ function render() {
   const list = dockSteps(flow);
   const actions = dockActions(flow, agent);
   let note = dockNote(flow, agent);
-  if (flow.stage === "implement" && progress && progress.total) {
+  const units = unitRows(flow);
+  if (flow.stage === "implement" && progress && progress.total && !units.length) {
     note = `Агент реализует · выполнено ${progress.done} из ${progress.total}`;
   }
   const open = !collapsed();
@@ -401,8 +432,10 @@ function render() {
         <span class="dock-name">${esc(step.title)}</span>
         ${step.state === "active" ? `<small>${esc(step.turnLabel)}</small>` : ""}</li>`).join("")}</ol>
       <div class="dock-note">${esc(note)}</div>
+      ${unitsList(units)}
       ${goal ? `<label class="dock-goal"><span>Цель</span><textarea id="dockGoal" rows="3" placeholder="Например: личный сайт с портфолио, новостями и формой заявок">${esc(goalDraft.text)}</textarea>
-        <label class="rm-check"><input type="checkbox" id="dockSkip"${goalDraft.skipIdeas ? " checked" : ""}><span>Без идей: сразу к реализации того, что уже на карте</span></label></label>` : ""}
+        <label class="rm-check"><input type="checkbox" id="dockSkip"${goalDraft.skipIdeas ? " checked" : ""}><span>Без идей: сразу к реализации того, что уже на карте</span></label></label>
+        ${goalOptions()}` : ""}
       ${ask ? `<div class="dock-ask"><b>${esc(ask.question)}</b>
         ${(ask.options || []).length ? `<div class="dock-options">${ask.options.map((option) => `<button type="button" class="${option === answerDraft.trim() ? "selected" : ""}" aria-pressed="${option === answerDraft.trim()}" data-answer="${esc(option)}">${esc(option)}</button>`).join("")}</div>` : ""}
         <textarea id="dockAnswer" rows="2" placeholder="${(ask.options || []).length ? "Выберите вариант или напишите свой" : "Ваш ответ"}">${esc(answerDraft)}</textarea>
@@ -441,7 +474,13 @@ function render() {
   const goalBox = root.querySelector("#dockGoal");
   if (goalBox) goalBox.oninput = () => { goalDraft.text = goalBox.value; };
   const skip = root.querySelector("#dockSkip");
-  if (skip) skip.onchange = () => { goalDraft.skipIdeas = skip.checked; };
+  if (skip) skip.onchange = () => { goalDraft.skipIdeas = skip.checked; root.dataset.html = ""; render(); };
+  const iter = root.querySelector("#dockIter");
+  if (iter) iter.onchange = () => { goalDraft.iterations = Number(iter.value); };
+  for (const [id, key] of [["dockAuto", "autoDecide"], ["dockVerify", "verify"], ["dockTests", "tests"]]) {
+    const box = root.querySelector("#" + id);
+    if (box) box.onchange = () => { goalDraft[key] = box.checked; };
+  }
   const answerBox = root.querySelector("#dockAnswer");
   if (answerBox) answerBox.oninput = () => { answerDraft = answerBox.value; };
   // Вариант только выбирается (текст попадает в поле и его можно дополнить); отправляет «Ответить».

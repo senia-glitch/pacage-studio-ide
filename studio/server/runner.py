@@ -37,8 +37,9 @@ ASK_FILE = "agent-ask.json"
 MCP_FILE = "mcp.json"
 AGENT_STAGES = ("ideas", "implement")
 # Два независимых исполнителя: кто строит план (идеи, карточки) и кто пишет код.
-ROLES = ("plan", "implement")
+ROLES = ("plan", "implement", "check")
 STAGE_ROLE = {"ideas": "plan", "implement": "implement"}
+STAGE_LABELS = {"ideas": "Идеи агента", "implement": "Реализация"}
 DEFAULT_TIMEOUT = 45
 MAX_TIMEOUT = 240
 MAX_ANSWER = 4000
@@ -74,8 +75,19 @@ NO_MODEL = (
 )
 
 
-ROLE_TITLES = {"plan": "План", "implement": "Реализация"}
+ROLE_TITLES = {"plan": "План", "implement": "Реализация", "check": "Контроль"}
 CATALOG_TTL = 300  # секунд: каталог моделей OpenCode строится долго
+
+
+def default_job(stage: str) -> dict:
+    """Обычный запуск этапа: один запрос агенту, как до автоматических итераций и проверок.
+
+    ``fresh`` — запуск без прежней сессии (независимый взгляд контролёра); ``begin`` — перед
+    запуском запомнить точку отката git."""
+    return {
+        "stage": stage, "kind": stage, "role": STAGE_ROLE[stage], "prompt": PROMPTS[stage],
+        "label": STAGE_LABELS[stage], "fresh": False, "begin": stage == "implement",
+    }
 
 
 def _cmd_safe(text: str) -> str:
@@ -102,7 +114,12 @@ class Runner:
         self._lock = threading.RLock()
         self._proc: subprocess.Popen | None = None
         self._thread: threading.Thread | None = None
-        self._pending: str = ""
+        self._pending: dict | None = None  # запрос следующего запуска (задание)
+        self._label = ""  # что делает агент сейчас (для окна агента)
+        self._job: dict | None = None  # запуск, который идёт сейчас
+        # Подключаются владельцем (ProjectState): что запускать на этапе и что делать после.
+        self.planner = None  # (stage) -> задание или None (тогда обычное)
+        self.after = None  # (задание) -> None (не моё), "" (продвинулись) или причина остановки
         self._note: str = ""  # что добавить к запросу следующего запуска (ответ, доработка)
         self._cancel = False
         self._git_note = ""
@@ -297,7 +314,8 @@ class Runner:
             elif mcp.get("ok") is False and mcp.get("code") not in (None, "", "no_config"):
                 reason = "MCP-сервер студии не отвечает"
             out["roles"][role] = reason
-            if reason:
+            # пока контролёр повторяет реализацию, его причина уже названа у «Реализации»
+            if reason and not (role == "check" and config["check_inherited"]):
                 out["problems"].append(f"{ROLE_TITLES[role]}: {reason}")
         out["ok"] = not out["problems"]
         return out
@@ -482,6 +500,10 @@ class Runner:
             minutes = raw.get("timeout_minutes")
             if _valid_minutes(minutes):
                 data["timeout_minutes"] = minutes
+        saved_roles = raw.get("roles") if isinstance(raw, dict) else None
+        data["check_inherited"] = not (isinstance(saved_roles, dict) and "check" in saved_roles)
+        if data["check_inherited"]:
+            data["roles"]["check"] = dict(data["roles"]["implement"])  # пока не выбрано своё
         # «command» — команда агента роли «реализация» (для совместимости со старым видом)
         data["command"] = list(data["commands"][data["roles"]["implement"]["agent"]])
         return data
@@ -514,7 +536,7 @@ class Runner:
         patch = data.get("roles")
         if patch is not None:
             if not isinstance(patch, dict) or not set(patch) <= set(ROLES):
-                raise MetadataError("invalid_input", "roles: plan и/или implement")
+                raise MetadataError("invalid_input", "roles: plan, implement и/или check")
             for role, change in patch.items():
                 if not isinstance(change, dict):
                     raise MetadataError("invalid_input", f"roles.{role}: объект")
@@ -553,6 +575,8 @@ class Runner:
             raise MetadataError("invalid_input", f"timeout_minutes: от 1 до {MAX_TIMEOUT}")
         if switched and "enabled" not in data:
             enabled = False  # новых агентов нужно подключить заново (и выбрать модели)
+        if current["check_inherited"] and "check" not in updates:
+            roles.pop("check", None)  # контролёр по-прежнему повторяет реализацию
         payload = {"enabled": enabled, "roles": roles, "commands": commands,
                    "timeout_minutes": minutes}
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -581,15 +605,25 @@ class Runner:
         if stage in AGENT_STAGES and self.config()["enabled"]:
             self.request(stage)
 
-    def request(self, stage: str) -> None:
+    def request(self, target) -> None:
+        """Поставить запуск: этап (задание берётся у планировщика) или готовое задание."""
+        job = target if isinstance(target, dict) else self._job_for(target)
         with self._lock:
-            self._pending = stage
-            self.status = {"state": "queued", "stage": stage, "message": "Ждёт запуска агента"}
+            self._pending = job
+            self.status = {"state": "queued", "stage": job["stage"], "label": job["label"],
+                           "message": "Ждёт запуска агента"}
             if self._thread is None or not self._thread.is_alive():
                 self._thread = threading.Thread(
                     target=self._worker, name="studio-runner", daemon=True
                 )
                 self._thread.start()
+
+    def _job_for(self, stage: str) -> dict:
+        job = self.planner(stage) if self.planner else None
+        return job or default_job(stage)
+
+    def _as_job(self, target) -> dict:
+        return target if isinstance(target, dict) else default_job(target)
 
     def retry(self) -> dict:
         stage = self.workflow.data["stage"]
@@ -607,7 +641,7 @@ class Runner:
 
     def stop(self) -> None:
         with self._lock:
-            self._pending = ""
+            self._pending = None
             self._cancel = True
             proc = self._proc
         if proc is not None and proc.poll() is None:
@@ -625,19 +659,28 @@ class Runner:
     def _worker(self) -> None:
         while True:
             with self._lock:
-                stage, self._pending = self._pending, ""
+                job, self._pending = self._pending, None
                 note, self._note = self._note, ""
-                if not stage:
+                if not job:
                     return
                 self._cancel = False
-            self._run(stage, note)
+            try:
+                self._run(job, note)
+            finally:
+                self._job = None
 
-    def _argv(self, stage: str, note: str = "", resume: bool = True) -> list[str]:
-        prompt = PROMPTS[stage]
+    def running_kind(self) -> str:
+        """Вид запуска, который идёт сейчас (ideas, decide, check…), иначе пустая строка."""
+        job = self._job
+        return str(job["kind"]) if job else ""
+
+    def _argv(self, target, note: str = "", resume: bool = True) -> list[str]:
+        job = self._as_job(target)
+        prompt = job["prompt"]
         if note:
             prompt += f"\n\nОт человека: {note}"
         config = self.config()
-        slot = config["roles"][STAGE_ROLE[stage]]
+        slot = config["roles"][job["role"]]
         adapter = adapters.get(slot["agent"])
         argv = [item.replace("{prompt}", prompt) for item in config["commands"][adapter.name]]
         exe = shutil.which(argv[0])
@@ -648,15 +691,19 @@ class Runner:
             # Скрипты-обёртки (npm) идут через cmd.exe: его метасимволы в запросе недопустимы
             argv = [argv[0], *[_cmd_safe(item) for item in argv[1:]]]
         if Path(exe).stem.lower() == adapter.exe:
-            session = self.session_id(adapter.name) if resume else ""
+            session = self.session_id(adapter.name) if resume and not job["fresh"] else ""
             argv = adapter.extend(argv, self.root, session, slot["model"], slot["variant"])
         return argv
 
-    def _run(self, stage: str, note: str = "") -> None:
+    def _run(self, target, note: str = "") -> None:
+        job = self._as_job(target)
+        stage = job["stage"]
+        self._job = job
         started = _now()
         entries = self.workflow.data["entries"]
         log = self.root / ".studio" / LOG_FILE
-        role = STAGE_ROLE[stage]
+        role = job["role"]
+        self._label = job["label"]
         if self._uses_mcp(role):
             mcp = self.probe()
             if not mcp["ok"]:
@@ -670,14 +717,18 @@ class Runner:
             self._finish("failed", stage, started, NO_MODEL)
             return
         use_git = False
-        if stage == "implement" and self.settings.get()["git"]["checkpoints"]:
-            began = gitops.begin(self.root, self.workflow.data["cycle"])
-            use_git = began["ok"]
-            self._git_note = began["reason"]
-        elif stage == "implement":
+        writes = stage == "implement"  # задания реализации и контроля меняют файлы проекта
+        if writes and self.settings.get()["git"]["checkpoints"]:
+            if job["begin"]:
+                began = gitops.begin(self.root, self.workflow.data["cycle"])
+                use_git = began["ok"]
+                self._git_note = began["reason"]
+            else:  # точка отката уже запомнена первым заданием цикла: только коммитим дальше
+                use_git = bool(gitops.load_state(self.root).get("branch"))
+        elif writes:
             self._git_note = ""
         try:
-            argv = self._argv(stage, note)
+            argv = self._argv(job, note)
         except FileNotFoundError as exc:
             self._finish("failed", stage, started, f"Команда не найдена: {exc}. Установите агента "
                          "или поменяйте команду в настройках автозапуска.")
@@ -705,7 +756,7 @@ class Runner:
                 with self._lock:
                     self._proc = proc
                     self.status = {"state": "running", "stage": stage, "started_at": started,
-                                   "message": "Агент запущен студией"}
+                                   "label": self._label, "message": "Агент запущен студией"}
                 limit = time.monotonic() + self.config()["timeout_minutes"] * 60
                 ticks = 0
                 while proc.poll() is None:
@@ -737,10 +788,10 @@ class Runner:
         if code != 0 and adapter.resume_flag and adapter.resume_flag in argv:
             # Сессия потеряна или устарела: один раз начинаем заново без неё.
             self._save_session("", adapter.name)
-            self._run(stage, note)
+            self._run(job, note)
             return
         session = result.get("session_id")
-        if code == 0 and isinstance(session, str) and session:
+        if code == 0 and isinstance(session, str) and session and not job["fresh"]:
             self._save_session(session, adapter.name)
         if code != 0:
             self._finish("failed", stage, started, self._tail(log) or f"Код выхода {code}", code)
@@ -748,18 +799,24 @@ class Runner:
             self._finish("failed", stage, started, redact(str(result["error"])), code)
         elif self.pending_ask() is not None:
             self._finish("waiting_user", stage, started, "Агент ждёт вашего ответа", code)
-        elif not advanced and stage == self.workflow.data["stage"]:
-            self._finish(
-                "stalled", stage, started,
-                "Агент завершился, но этап не продвинулся: загляните в .studio/runner.log", code,
-            )
         else:
+            verdict = self.after(job) if self.after else None
+            if verdict:  # автоматический ход не смог продолжиться: причина человеку
+                self._finish("stalled", stage, started, verdict, code)
+                return
+            if verdict is None and not advanced and stage == self.workflow.data["stage"]:
+                self._finish(
+                    "stalled", stage, started,
+                    "Агент завершился, но этап не продвинулся: загляните в .studio/runner.log",
+                    code,
+                )
+                return
             message = "Агент выполнил этап и завершился"
             if use_git:
                 git = self.settings.get()["git"]
                 saved = gitops.checkpoint(
                     self.root,
-                    f"studio: реализация (цикл {self.workflow.data['cycle']})",
+                    f"studio: {job['label'].lower()} (цикл {self.workflow.data['cycle']})",
                     push=git["push"],
                     remote=git["remote"],
                 )
@@ -774,7 +831,12 @@ class Runner:
     def _finish(self, state: str, stage: str, started: str, message: str, code=None) -> None:
         with self._lock:
             self.status = {"state": state, "stage": stage, "started_at": started,
-                           "finished_at": _now(), "exit_code": code, "message": message}
+                           "finished_at": _now(), "exit_code": code, "message": message,
+                           "label": self._label}
+            nxt = self._pending
+            if nxt and state == "done":  # автоматический ход уже поставил следующий запуск
+                self.status = {"state": "queued", "stage": nxt["stage"], "label": nxt["label"],
+                               "message": f"Дальше: {nxt['label']}"}
 
     @staticmethod
     def _tail(log: Path, lines: int = 12) -> str:
@@ -803,14 +865,22 @@ class Runner:
         with self._lock:
             return {"enabled": bool(self.config()["enabled"]), **self.status}
 
-    def start_blockers(self, mode: str) -> list[str]:
+    def start_blockers(self, mode: str, options=None) -> list[str]:
         """Что не даёт начать цикл: нужен готовый агент каждой роли, которая в нём работает.
 
         Если автозапуск выключен (агента ведёт человек вручную), ничто не мешает."""
         if not self.config()["enabled"]:
             return []
         ready = self.readiness()["roles"]
-        roles = ROLES if mode == "plan" else ("implement",)
+        options = options if isinstance(options, dict) else {}
+        roles = ["plan", "implement"] if mode == "plan" else ["implement"]
+        wants_check = (mode == "plan" and options.get("auto_decide")) or (
+            options.get("verify") or options.get("tests")
+        )
+        if wants_check:
+            roles.append("check")  # контролёр работает только в этих режимах
+        if self.config()["check_inherited"] and "check" in roles:
+            roles.remove("check")  # та же причина уже названа у «Реализации»
         return [f"{ROLE_TITLES[role]}: {ready[role]}" for role in roles if ready[role]]
 
     def _roles_view(self) -> dict:
@@ -824,6 +894,7 @@ class Runner:
                 **slot, "title": ROLE_TITLES[role], "label": adapter.label,
                 "found": shutil.which(config["commands"][adapter.name][0]) is not None,
                 "needs_model": adapter.needs_model, "reason": ready[role],
+                "inherited": role == "check" and config["check_inherited"],
             }
         return out
 
@@ -869,4 +940,4 @@ def _mcp_message(mcp: dict) -> str:
     return text
 
 
-__all__ = ["AGENT_STAGES", "DEFAULT_COMMAND", "PROMPTS", "Runner"]
+__all__ = ["AGENT_STAGES", "ASK_HINT", "DEFAULT_COMMAND", "PROMPTS", "Runner", "default_job"]

@@ -23,7 +23,7 @@ from studio.frontend.brief import FRONT_BRIEF_FILENAME, LAST_FRONT_BRIEF, brief_
 from studio.metadata import MetadataError
 from studio.metadata.plans import SLUG_RE
 from studio.scanner.routes_check import shadow_notes
-from studio.server import reconcile
+from studio.server import autopilot, reconcile
 
 MAX_TASK = 4000
 
@@ -64,7 +64,7 @@ def start(state, data: dict) -> dict:
         # новый цикл начинается с чистого счёта карточек и без старых ТЗ
         _archive_cards(state)
         _clear_briefs(state.root)
-        state.workflow.start(mode, task)
+        state.workflow.start(mode, task, data.get("options"))
     return info(state)
 
 
@@ -392,6 +392,9 @@ def ideas_ready(state) -> dict:
         stage = state.workflow.data["stage"]
         if stage != "ideas":
             return {"stage": stage, "changed": False}
+        if autopilot.ideas_steps(state):
+            # итерации и автоприём: куда дальше, студия решит, когда агент завершит работу
+            return autopilot.on_ideas_ready(state)
         pending = cards.counts(state.load_ideas())[cards.PENDING]
         if not pending:
             raise _invalid("Карточек для валидации нет: сначала пришлите идеи (studio_idea_add)")
@@ -464,6 +467,7 @@ def stage(state, data: dict) -> dict:
                 raise _invalid(f"Осталось карточек без решения: {counts[cards.PENDING]}")
             wf.advance("confirm")
         elif target == "ideas":
+            wf.set_pipeline(phase="", ready=False, cards_before=counts["total"])
             wf.advance("ideas")
         elif target == "select":
             if current not in ("implement", "report"):
@@ -472,6 +476,8 @@ def stage(state, data: dict) -> dict:
         elif target == "report":
             if current != "implement":
                 raise _invalid("Принять работу можно только на этапе «Реализация»")
+            if wf.data["pipeline"]["units"]:
+                wf.set_pipeline(final=True)  # ручная приёмка закрывает и ход по сценариям
             wf.report_received("", "Работа принята вручную, без отчёта агента.")
         else:
             raise _invalid(f"Неизвестный переход: {target or '—'}")
@@ -779,6 +785,7 @@ def select(state, data: dict, check_links=None) -> dict:
                 )
             except ValueError as exc:
                 raise _invalid(str(exc)) from exc
+        autopilot.start_units(state, autopilot.make_units(state, plans, nodes, pages))
         state.workflow.advance(
             "implement",
             selected={"plans": len(plans), "nodes": len(nodes), "pages": len(pages)},

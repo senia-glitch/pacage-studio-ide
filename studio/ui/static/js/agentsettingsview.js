@@ -38,6 +38,7 @@ let catalog = null; // ответ /api/agent/models?agent=opencode
 const ROLE_HELP = {
   plan: "изучает проект, присылает идеи и карточки сценариев",
   implement: "пишет код по выбранным задачам и присылает отчёт",
+  check: "принимает карточки, проверяет сценарии и пишет усиленные тесты (если включены на шаге «Цель»)",
 };
 
 function agentList(view) {
@@ -68,7 +69,7 @@ function rolePanel(role, item, view) {
     <h4>${esc(item.title)} <small>— ${esc(ROLE_HELP[role])}</small></h4>
     <div class="agent-row"><label class="rm-task">Агент <select data-role-agent="${role}">${options}</select></label></div>
     ${model}
-    <p class="hint" data-role-hint="${role}">${esc(item.reason || (opencode ? "Список строит команда opencode models: только провайдеры, в которые вы вошли (opencode auth login)." : "Доступные уровни усилий зависят от модели."))}</p>
+    <p class="hint" data-role-hint="${role}">${esc(item.reason || (item.inherited ? "Пока свой не выбран, контролёр повторяет «Реализацию». Лучше выбрать другую модель: чужой взгляд находит больше." : opencode ? "Список строит команда opencode models: только провайдеры, в которые вы вошли (opencode auth login)." : "Доступные уровни усилий зависят от модели."))}</p>
   </div>`;
 }
 
@@ -79,13 +80,14 @@ function claudeDatalist() {
 
 function rolesBlock(view) {
   const roles = view.roles || {};
-  const slots = ["plan", "implement"].map((role) => ({
-    ...(roles[role] || {agent: view.agent || "claude", model: view.model || "", variant: view.variant || "", title: role === "plan" ? "План" : "Реализация"}),
+  const titles = {plan: "План", implement: "Реализация", check: "Контроль"};
+  const slots = ["plan", "implement", "check"].map((role) => ({
+    ...(roles[role] || {agent: view.agent || "claude", model: view.model || "", variant: view.variant || "", title: titles[role]}),
   }));
   const refresh = slots.some((slot) => slot.agent === "opencode")
     ? '<button type="button" id="modelsRefresh">Обновить список моделей</button>' : "";
   return `${claudeDatalist()}
-    <div class="role-grid">${rolePanel("plan", slots[0], view)}${rolePanel("implement", slots[1], view)}</div>
+    <div class="role-grid">${rolePanel("plan", slots[0], view)}${rolePanel("implement", slots[1], view)}${rolePanel("check", slots[2], view)}</div>
     <div class="agent-row">${refresh}
       <label class="rm-check"><input type="checkbox" id="showPaid"${showPaid ? " checked" : ""}>
         <span><b>Показывать платные модели</b><small>оплата по токенам или отдельные кредиты; по умолчанию в списке только бесплатные и входящие в подписку</small></span></label></div>`;
@@ -99,7 +101,7 @@ function connectionCard(view) {
   const lines = roles.map((item) => `<li><b>${esc(item.title)}:</b> ${esc(item.label)}${item.model ? ` · ${esc(item.model)}` : ""} — ${item.found ? (item.reason ? esc(item.reason) : "готов к запуску") : `не найден (команда <code>${esc((exes[0] || ""))}</code> должна запускаться в терминале)`}</li>`).join("");
   return `<section class="agent-card" id="agentConn">
     <h3>Исполнители</h3>
-    <p class="hint">План (идеи, карточки) и реализацию кода можно отдать разным агентам и моделям: например, анализ — Claude Code, код — OpenCode. Можно оставить одного агента на оба этапа.</p>
+    <p class="hint">План (идеи, карточки), реализацию кода и контроль (автоприём карточек, проверка и тесты сценариев) можно отдать разным агентам и моделям: например, анализ — Claude Code, код — OpenCode. Можно оставить одного агента на все роли.</p>
     ${rolesBlock(view)}
     <p><span class="dock-dot ${esc(status.tone)}"></span> <b>${esc(names.join(" + "))}</b> — ${esc(status.text)}</p>
     <ul class="agent-list">${lines}</ul>
@@ -211,7 +213,7 @@ function serversCard(servers) {
 function runCard(runner, tests, view) {
   const testsOn = !!(tests && tests.config && tests.config.enabled);
   const roles = (runner && runner.roles) || {};
-  const used = [...new Set(["plan", "implement"].map((role) => (roles[role] || {}).agent || (view && view.agent) || "claude"))];
+  const used = [...new Set(["plan", "implement", "check"].map((role) => (roles[role] || {}).agent || (view && view.agent) || "claude"))];
   return `<section class="agent-card">
     <h3>Запуск</h3>
     <label class="rm-task">Предел одного запуска, минут

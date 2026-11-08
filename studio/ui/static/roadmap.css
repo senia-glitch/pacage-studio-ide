@@ -277,3 +277,16 @@ body[data-active-tab="agent"] .header-canvas { display: none; }
 .role-panel label { display: block; margin: 6px 0; }
 .role-panel select, .role-panel input { max-width: 100%; }
 .role-cmd { margin: 8px 0 12px; }
+
+/* Настройки цикла на шаге «Цель» и список сценариев реализации */
+.dock-opts { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.dock-opts .rm-check small, .dock-iter small { display: block; color: var(--dim); font-size: 11px; font-weight: 400; }
+.dock-iter { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.dock-iter small { flex-basis: 100%; }
+.dock-iter select { width: 56px; }
+.dock-units { list-style: none; margin: 6px 0; padding: 0; max-height: 150px; overflow: auto; font-size: 12px; }
+.dock-units li { display: flex; gap: 6px; align-items: baseline; padding: 1px 0; color: var(--dim); }
+.dock-units li.current { color: var(--txt, inherit); font-weight: 600; }
+.dock-units li.done .u-mark { color: #4ade80; }
+.dock-units li.issues .u-mark { color: #fbbf24; }
+.dock-units small { color: var(--dim); font-weight: 400; }

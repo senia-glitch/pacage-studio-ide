@@ -45,6 +45,83 @@ export function dockSteps(flow) {
   }));
 }
 
+/* Настройки цикла на шаге «Цель». Предел итераций совпадает с серверным (MAX_ITERATIONS). */
+export const MAX_ITERATIONS = 5;
+export const GOAL_DEFAULTS = {text: "", skipIdeas: false, iterations: 1, autoDecide: false, verify: false, tests: false};
+
+/* Тело запроса «Начать»: без идей итерации и автоприём не нужны, проверки остаются. */
+export function startPayload(draft) {
+  const skip = !!draft.skipIdeas;
+  const iterations = Math.min(MAX_ITERATIONS, Math.max(1, Math.floor(Number(draft.iterations)) || 1));
+  return {
+    mode: skip ? "implement" : "plan",
+    task: skip ? "" : String(draft.text || "").trim(),
+    options: {
+      iterations: skip ? 1 : iterations,
+      auto_decide: skip ? false : !!draft.autoDecide,
+      verify: !!draft.verify,
+      tests: !!draft.tests,
+    },
+  };
+}
+
+/* Что включено в цикле, одной строкой (для заметки окна). */
+export function optionsSummary(options) {
+  const o = options || {};
+  const parts = [];
+  if (o.iterations > 1) parts.push(`идей: ${o.iterations} итерации`);
+  if (o.auto_decide) parts.push("карточки решает агент");
+  if (o.verify) parts.push("проверка сценариев");
+  if (o.tests) parts.push("усиленные тесты");
+  return parts.join(" · ");
+}
+
+/* Студия сама ведёт идеи (итерации и/или автоприём): кнопка «К разбору» человеку не нужна. */
+export function ideasAutomatic(flow) {
+  const o = (flow && flow.options) || {};
+  return !!(o.iterations > 1 || o.auto_decide);
+}
+
+const UNIT_STEPS = {
+  implement: "реализация", verify: "проверка", tests: "тесты",
+  "fix-verify": "исправление замечаний", "fix-tests": "исправление после тестов",
+};
+
+/* Сценарии реализации с отметкой: сделан (done), с замечаниями (issues), текущий (current), ждёт (todo). */
+export function unitRows(flow) {
+  const p = (flow && flow.pipeline) || {};
+  const units = Array.isArray(p.units) ? p.units : [];
+  return units.map((unit, index) => {
+    const current = flow.stage === "implement" && !p.final && index === p.unit;
+    const state = current ? "current" : unit.state === "done" || unit.state === "issues"
+      ? unit.state : index < p.unit || p.final ? "done" : "todo";
+    return {
+      title: unit.title || unit.id, state,
+      step: current ? UNIT_STEPS[p.step] || "" : "",
+      remarks: [...Object.values(unit.checks || {})].flatMap((check) => (check.ok ? [] : check.remarks || [])),
+    };
+  });
+}
+
+/* Где автоматический ход сейчас: итерация идей, решение карточек, сценарий и его шаг. */
+export function pipelineNote(flow) {
+  const o = (flow && flow.options) || {};
+  const p = (flow && flow.pipeline) || {};
+  if (!flow) return "";
+  if (flow.stage === "ideas" && ideasAutomatic(flow)) {
+    return p.phase === "decide"
+      ? "Контроль принимает и отклоняет карточки идей."
+      : `Агент готовит идеи: итерация ${p.iteration || 1} из ${o.iterations || 1}.`;
+  }
+  const units = Array.isArray(p.units) ? p.units : [];
+  if (flow.stage === "implement" && units.length) {
+    if (p.final) return "Все сценарии готовы: агент готовит итоговый отчёт.";
+    const unit = units[p.unit] || {};
+    return `Сценарий ${(p.unit || 0) + 1} из ${units.length} «${unit.title || ""}»: ${UNIT_STEPS[p.step] || ""}.`;
+  }
+  return "";
+}
+
 /* Выбранный агент: имя, название для людей, найден ли он на компьютере и нужна ли ему модель. */
 export function agentInfo(view) {
   const list = view && Array.isArray(view.agents) ? view.agents : [];
@@ -130,7 +207,9 @@ export function dockActions(flow, view) {
       break;
     case "ideas":
       if (status.tone === "bad") out.push({id: "retry", label: "Запустить агента снова", primary: true});
-      else if (cards.total > 0 && !busy) out.push({id: "to-review", label: "К разбору карточек", primary: true});
+      else if (cards.total > 0 && !busy && !ideasAutomatic(flow)) {
+        out.push({id: "to-review", label: "К разбору карточек", primary: true});
+      }
       break;
     case "review":
       if (cards.pending > 0) {
@@ -165,9 +244,13 @@ export function dockNote(flow, view) {
   if (!status.connected) return "Подключите агента на странице «Настройки агента» — дальше всё идёт само.";
   if (status.tone === "wait") return "Агент задал вопрос и ждёт ответа — ответьте ниже.";
   const cards = (flow && flow.cards) || {};
-  switch (activeDockStep(flow)) {
+  const step = activeDockStep(flow);
+  if (status.tone === "bad" && view.state === "stalled" && view.message) return String(view.message);
+  const running = pipelineNote(flow);
+  if (running && (step === "ideas" || step === "implement")) return running;
+  switch (step) {
     case "goal":
-      return "Опишите цель и нажмите «Начать»: студия сама запустит агента.";
+      return "Опишите цель, отметьте нужные автоматические шаги и нажмите «Начать»: студия сама запустит агента.";
     case "ideas":
       return status.tone === "run"
         ? "Агент готовит идеи со сценариями. Страницу можно не открывать."

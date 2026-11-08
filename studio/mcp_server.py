@@ -689,6 +689,29 @@ def create_server(session: Session | None = None):
         }
 
     @tool
+    def studio_cards_decide(decisions: list[dict]) -> dict:
+        """Контролёр: принять или отклонить карточки идей (если студия запустила тебя для этого).
+
+        decisions — [{id, decision: "accepted"|"rejected", reason}]; id берётся из запроса
+        студии или studio_ideas. Можно вызывать частями. Карточки с решением человека не меняются.
+        """
+        result = session.need().post("/api/control/decide", {"decisions": decisions}, mode="plan")
+        return {**result, "next": "Когда решения по всем карточкам переданы, заверши работу."}
+
+    @tool
+    def studio_check_result(ok: bool, remarks: list[str] | None = None) -> dict:
+        """Контролёр: итог проверки или тестов сценария (только если тебя запустила студия).
+
+        ok=true — сценарий проверен и замечаний нет; ok=false — в remarks перечисли
+        конкретные замечания (что не так и где): реализующий агент исправит их. Вызови один
+        раз в конце работы, затем заверши её.
+        """
+        result = session.need().post(
+            "/api/control/result", {"ok": ok, "remarks": remarks or []}, mode="implement"
+        )
+        return {**result, "next": "Итог записан. Заверши работу."}
+
+    @tool
     def studio_ask(question: str, options: list[str] | None = None) -> dict:
         """Спросить человека, когда без его ответа продолжать нельзя.
 

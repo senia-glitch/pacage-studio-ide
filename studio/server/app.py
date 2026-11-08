@@ -24,7 +24,7 @@ from studio.frontend import scan_frontend
 from studio.frontend import sync as front_sync
 from studio.frontend import verify as front_verify
 from studio.metadata import MetadataError
-from studio.server import access, chain, discovery, gitops
+from studio.server import access, autopilot, chain, discovery, gitops
 from studio.server.security import (
     CSP,
     SECURITY_HEADERS,
@@ -435,8 +435,14 @@ def make_handler(ctx):
                 return self._json(chain.withdraw(state, data))
             if url.path == "/api/workflow/ideas-ready":
                 return self._json(chain.ideas_ready(state))
+            if url.path == "/api/control/decide":
+                return self._json(autopilot.decide_cards(state, data))
+            if url.path == "/api/control/result":
+                return self._json(autopilot.record_check(state, data))
             if url.path == "/api/workflow/start":
-                blockers = state.runner.start_blockers(str(data.get("mode") or ""))
+                blockers = state.runner.start_blockers(
+                    str(data.get("mode") or ""), data.get("options")
+                )
                 if blockers:
                     # Идеи на одном агенте при неготовом другом — потраченные токены впустую
                     return self._error(
