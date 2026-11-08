@@ -6,6 +6,7 @@ import {
 } from "./roadmapmodel.js";
 import {
   agentStatus, agentTitle, canRollback, dockActions, dockNote, dockSteps, gitNote,
+  projectButton, serverRows, serversBusy,
 } from "./dockmodel.js";
 import {closeSwipe, isSwipeOpen, openSwipe, refreshSwipe} from "./swipeview.js";
 
@@ -22,6 +23,9 @@ let timer = null;
 let progress = null;
 let busy = false;
 let hooks = {};
+let servers = null; // GET /api/devservers: серверы проекта (бэкенд, фронтенд)
+let serversLogOpen = false;
+let serversTimer = null;
 
 function opened() {
   try { return new Set(JSON.parse(sessionStorage.getItem(OPENED_KEY) || "[]")); }
@@ -291,11 +295,56 @@ async function finishCycle() {
 
 async function answerAgent(text) {
   const reply = String(text || "").trim();
-  if (!reply) { toast("Напишите ответ"); return; }
-  answerDraft = "";
+  if (!reply) { toast("Выберите вариант или напишите ответ"); return; }
   const result = await post("/api/agent/answer", {text: reply});
-  if (result) toast("Ответ отправлен: студия запускает агента");
+  if (result) {
+    answerDraft = ""; // при отказе сервера черновик остаётся: ответ не пропадает
+    toast("Ответ отправлен: студия запускает агента");
+  }
   await refreshRoadmap();
+}
+
+/* --- серверы проекта: кнопки блока «Проект» */
+
+async function loadServers() {
+  try { servers = await api("/api/devservers"); } catch (_) { servers = null; }
+}
+
+/* Быстрый опрос, пока сервер запускается (ссылка появится сразу), и редкий — в остальное время. */
+function scheduleServers() {
+  clearTimeout(serversTimer);
+  serversTimer = setTimeout(async () => {
+    await loadServers();
+    render();
+    scheduleServers();
+  }, serversBusy(servers) ? 1200 : 5000);
+}
+
+async function serverCommand(act, name) {
+  const result = await post(`/api/devservers/${act}`, {name});
+  if (result) { servers = {...servers, ...result}; render(); }
+  scheduleServers();
+}
+
+function serversBlock() {
+  const rows = serverRows(servers);
+  if (!rows.length) return "";
+  const main = projectButton(servers);
+  const dots = {stopped: "", starting: "run", running: "ok", failed: "bad"};
+  const items = rows.map((row) => `<div class="srv-row ${esc(row.state)}">
+      <span class="dock-dot ${dots[row.state]}"></span>
+      <b>${esc(row.title)}</b>
+      <span class="srv-text">${esc(row.text)}</span>
+      ${row.canStop ? `<button type="button" data-srv="stop" data-name="${esc(row.name)}" title="Остановить">■</button>`
+        : `<button type="button" data-srv="start" data-name="${esc(row.name)}" title="Запустить"${row.canStart ? "" : " disabled"}>▶</button>`}
+      ${row.url ? `<a class="srv-link" href="${esc(row.url)}" target="_blank" rel="noopener">${esc(row.url)}</a>` : ""}
+      ${row.note ? `<small class="hint srv-note">${esc(row.note)}</small>` : ""}</div>`).join("");
+  const failed = rows.find((row) => row.tail.length && (row.state === "failed" || row.state === "starting"));
+  const tail = failed
+    ? `<details class="dock-log" data-srv-log${serversLogOpen ? " open" : ""}><summary>Вывод: ${esc(failed.title)}</summary><pre>${esc(failed.tail.join("\n"))}</pre></details>` : "";
+  return `<div class="dock-servers">
+      <div class="dock-servers-head"><b>Проект</b>${main ? `<button type="button" data-srv="${esc(main.id)}">${esc(main.label)}</button>` : ""}</div>
+      ${items}${tail}</div>`;
 }
 
 function run(id) {
@@ -355,10 +404,11 @@ function render() {
       ${goal ? `<label class="dock-goal"><span>Цель</span><textarea id="dockGoal" rows="3" placeholder="Например: личный сайт с портфолио, новостями и формой заявок">${esc(goalDraft.text)}</textarea>
         <label class="rm-check"><input type="checkbox" id="dockSkip"${goalDraft.skipIdeas ? " checked" : ""}><span>Без идей: сразу к реализации того, что уже на карте</span></label></label>` : ""}
       ${ask ? `<div class="dock-ask"><b>${esc(ask.question)}</b>
-        ${(ask.options || []).length ? `<div class="dock-options">${ask.options.map((option) => `<button type="button" data-answer="${esc(option)}">${esc(option)}</button>`).join("")}</div>` : ""}
-        <textarea id="dockAnswer" rows="2" placeholder="Ваш ответ">${esc(answerDraft)}</textarea>
+        ${(ask.options || []).length ? `<div class="dock-options">${ask.options.map((option) => `<button type="button" class="${option === answerDraft.trim() ? "selected" : ""}" aria-pressed="${option === answerDraft.trim()}" data-answer="${esc(option)}">${esc(option)}</button>`).join("")}</div>` : ""}
+        <textarea id="dockAnswer" rows="2" placeholder="${(ask.options || []).length ? "Выберите вариант или напишите свой" : "Ваш ответ"}">${esc(answerDraft)}</textarea>
         <button type="button" class="primary" data-dock="send-answer">Ответить</button></div>` : ""}
       <div class="dock-actions">${actions.map((action) => `<button type="button" class="${action.primary ? "primary" : ""}" data-rm="${esc(action.id)}">${esc(action.label)}</button>`).join("")}</div>
+      ${serversBlock()}
       ${tail}
       <div class="dock-foot">
         <span class="hint">${esc(gitNote(agent))}</span>
@@ -377,6 +427,16 @@ function render() {
   root.dataset.html = html;
   root.innerHTML = html;
   root.querySelectorAll("[data-rm]").forEach((button) => { button.onclick = () => run(button.dataset.rm); });
+  root.querySelectorAll("button[data-srv]").forEach((button) => {
+    button.onclick = () => {
+      const act = button.dataset.srv;
+      if (act === "start-all") void serverCommand("start", "all");
+      else if (act === "stop-all") void serverCommand("stop", "all");
+      else void serverCommand(act, button.dataset.name);
+    };
+  });
+  const srvLog = root.querySelector("[data-srv-log]");
+  if (srvLog) srvLog.ontoggle = () => { serversLogOpen = srvLog.open; };
   root.querySelector("[data-dock=toggle]").onclick = () => { setCollapsed(!collapsed()); root.dataset.html = ""; render(); };
   const goalBox = root.querySelector("#dockGoal");
   if (goalBox) goalBox.oninput = () => { goalDraft.text = goalBox.value; };
@@ -384,7 +444,10 @@ function render() {
   if (skip) skip.onchange = () => { goalDraft.skipIdeas = skip.checked; };
   const answerBox = root.querySelector("#dockAnswer");
   if (answerBox) answerBox.oninput = () => { answerDraft = answerBox.value; };
-  root.querySelectorAll("[data-answer]").forEach((button) => { button.onclick = () => answerAgent(button.dataset.answer); });
+  // Вариант только выбирается (текст попадает в поле и его можно дополнить); отправляет «Ответить».
+  root.querySelectorAll("[data-answer]").forEach((button) => {
+    button.onclick = () => { answerDraft = button.dataset.answer; render(); };
+  });
   const send = root.querySelector("[data-dock=send-answer]");
   if (send) send.onclick = () => answerAgent(answerDraft);
 }
@@ -406,6 +469,7 @@ export async function refreshRoadmap() {
   try {
     flow = await api("/api/workflow");
     try { agent = await api("/api/agent/status"); } catch (_) { agent = null; }
+    await loadServers();
     await updateProgress();
     render();
     if (isSwipeOpen()) {
@@ -421,7 +485,12 @@ export function initRoadmap(options = {}) {
   hooks = options;
   void refreshRoadmap();
   timer = setInterval(refreshRoadmap, POLL_MS);
+  scheduleServers();
   document.addEventListener("visibilitychange", () => { if (!document.hidden) void refreshRoadmap(); });
 }
 
-export function stopRoadmap() { if (timer) clearInterval(timer); timer = null; }
+export function stopRoadmap() {
+  if (timer) clearInterval(timer);
+  timer = null;
+  clearTimeout(serversTimer);
+}

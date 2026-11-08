@@ -41,6 +41,10 @@ GITIGNORE_ARTIFACTS = (
     "agent-session.json",
     "agent-git.json",
     "opencode.json",
+    # Серверы проекта: свои команды и порты, вывод процессов.
+    "servers.json",
+    "devserver-backend.log",
+    "devserver-frontend.log",
 )
 METADATA_IGNORE = "metadata.json"
 

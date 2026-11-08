@@ -837,6 +837,13 @@ def rework(state, data: dict) -> dict:
 
 
 def finish(state) -> dict:
+    # Агент мог прислать лишь часть отчётов (бэкенд) и ещё работает над остальными (фронтенд):
+    # после завершения цикла студия отказала бы ему в записи.
+    if state.runner.busy():
+        raise MetadataError(
+            "agent_busy",
+            "Агент ещё работает: дождитесь, пока он закончит (или нажмите «Стоп»), и примите отчёт",
+        )
     state.workflow.finish()
     return info(state)
 

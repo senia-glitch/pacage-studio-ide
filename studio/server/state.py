@@ -68,6 +68,7 @@ from studio.metamodel import EDGE_KINDS, NODE_KINDS, Graph, Node
 from studio.scanner import scan
 from studio.scanner.anchors import AnchorResolver
 from studio.server import access
+from studio.server.devservers import DevServers
 from studio.server.runner import Runner
 from studio.server.settings import Settings
 from studio.server.tester import TestRunner
@@ -123,6 +124,8 @@ class ProjectState:
         # Независимая проверка тестами проекта (кнопка или этап «Отчёт»).
         self.tester = TestRunner(self.root, lambda: self.graph)
         self.workflow.listeners.append(self.tester.on_stage)
+        # Серверы самого проекта (бэкенд, фронтенд) по кнопке; останавливаются вместе со студией.
+        self.devservers = DevServers(self.root)
 
     # ------------------------------------------------------------------ scan
 

@@ -431,3 +431,30 @@ def test_чекпоинт_git_после_реализации(tmp_path: Path, mo
     assert status["state"] == "done" and "Чекпоинт" in status["message"]
     git_state = run.agent_view()["git"]
     assert git_state["branch"].startswith("studio/") and git_state["clean"] is True
+
+
+def test_вопрос_вне_этапов_агента_не_принимается_и_устаревший_скрыт(tmp_path: Path) -> None:
+    run, wf = _runner(tmp_path)
+    with pytest.raises(MetadataError) as late:
+        run.ask("Как быть?")  # цепочка на этапе «Режим»: отвечать некому
+    assert late.value.code == "wrong_stage" and run.pending_ask() is None
+    wf.start("plan")
+    run.ask("Какую БД брать?", ["sqlite"])
+    assert run.pending_ask() is not None
+    wf.advance("mode")  # вопрос остался в файле, но цепочка ушла: показывать его нельзя
+    (tmp_path / ".studio" / "agent-ask.json").write_text(
+        json.dumps({"question": "Старый", "options": [], "answer": ""}), encoding="utf-8"
+    )
+    assert run.pending_ask() is None
+    assert run.agent_view()["ask"] is None
+
+
+def test_занят_агент_пока_идёт_или_ждёт_запуска(tmp_path: Path) -> None:
+    run, _ = _runner(tmp_path)
+    assert run.busy() is False
+    run.status = {"state": "running", "stage": "implement"}
+    assert run.busy() is True
+    run.status = {"state": "queued", "stage": "implement"}
+    assert run.busy() is True
+    run.status = {"state": "waiting_user", "stage": "implement"}
+    assert run.busy() is False

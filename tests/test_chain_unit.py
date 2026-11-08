@@ -546,3 +546,14 @@ def test_отзыв_идеи_подтверждение_extends_и_предуп�
     with pytest.raises(MetadataError) as human:
         chain.withdraw(state, {"idea_id": left["id"], "_actor": "agent"})
     assert human.value.code == "mode_forbidden"
+
+
+def test_принять_отчёт_нельзя_пока_агент_работает(demo: Path) -> None:
+    state = _state(demo)
+    state.workflow.data["stage"] = "report"
+    state.runner.status = {"state": "running", "stage": "implement", "message": ""}
+    with pytest.raises(MetadataError) as busy:
+        chain.finish(state)  # агент ещё шлёт второй отчёт (фронтенд): цикл не закрываем
+    assert _code(busy) == "agent_busy" and state.workflow.data["stage"] == "report"
+    state.runner.status = {"state": "idle", "stage": "", "message": ""}
+    assert chain.finish(state)["stage"] == "mode"

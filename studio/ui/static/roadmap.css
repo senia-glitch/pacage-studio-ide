@@ -184,7 +184,21 @@ body[data-ui-mode="manual"] #roadmap.roadmap { display: none; }
 .dock-goal { display: flex; flex-direction: column; gap: 5px; }
 .dock-goal textarea, .dock-ask textarea { width: 100%; resize: vertical; }
 .dock-ask { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--blue); border-radius: 8px; }
-.dock-options { display: flex; flex-wrap: wrap; gap: 5px; }
+.dock-options { display: flex; flex-direction: column; gap: 5px; }
+.dock-options button { text-align: left; white-space: normal; height: auto; line-height: 1.35; padding: 6px 9px; }
+.dock-options button.selected { border-color: var(--blue); background: rgba(74, 144, 226, .22); box-shadow: inset 0 0 0 1px var(--blue); }
+.dock-options button.selected::before { content: "✓ "; color: var(--blue); font-weight: 700; }
+
+/* Блок «Проект»: серверы бэкенда и фронтенда с кнопками и ссылкой */
+.dock-servers { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); }
+.dock-servers-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dock-servers-head b { font-size: 12px; }
+.srv-row { display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; column-gap: 8px; row-gap: 2px; font-size: 12px; }
+.srv-text { color: var(--dim); font-size: 11px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srv-row button { padding: 1px 8px; }
+.srv-row.failed .srv-text { color: #e5534b; }
+.srv-link, .srv-note { grid-column: 2 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.srv-link { color: var(--blue); }
 .dock-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .dock-actions button { flex: 1 1 auto; }
 .dock-log summary { cursor: pointer; color: var(--dim); font-size: 11px; }

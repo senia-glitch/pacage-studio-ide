@@ -170,6 +170,8 @@ class Runner:
             return None
         if not isinstance(raw, dict) or raw.get("answer") or not raw.get("question"):
             return None
+        if self.workflow.data["stage"] not in AGENT_STAGES:
+            return None  # вопрос устарел: цепочка ушла с этапов агента, ответить уже нельзя
         return raw
 
     def ask(self, question, options=None) -> dict:
@@ -177,6 +179,12 @@ class Runner:
         text = str(question or "").strip()
         if not text:
             raise MetadataError("invalid_input", "question: текст вопроса обязателен")
+        if self.workflow.data["stage"] not in AGENT_STAGES:
+            raise MetadataError(
+                "wrong_stage",
+                "Вопрос не принят: цепочка уже не на этапах агента, ответить на него некому. "
+                "Завершите работу без вопроса.",
+            )
         if options is None:
             options = []
         if not isinstance(options, list) or len(options) > MAX_OPTIONS or not all(
@@ -591,6 +599,11 @@ class Runner:
             raise MetadataError("invalid_input", "Автозапуск выключен: включите его в настройках")
         self.request(stage)
         return self.public()
+
+    def busy(self) -> bool:
+        """Агент работает или ждёт запуска."""
+        with self._lock:
+            return self.status.get("state") in ("running", "queued")
 
     def stop(self) -> None:
         with self._lock:

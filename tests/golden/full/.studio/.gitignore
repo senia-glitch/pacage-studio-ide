@@ -19,3 +19,6 @@ mcp.json
 agent-session.json
 agent-git.json
 opencode.json
+servers.json
+devserver-backend.log
+devserver-frontend.log

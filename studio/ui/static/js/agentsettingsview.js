@@ -8,12 +8,13 @@ import {agentStatus, gitNote, roleViews} from "./dockmodel.js";
 let loading = false;
 
 async function load() {
-  const [view, runner, tests] = await Promise.all([
+  const [view, runner, tests, servers] = await Promise.all([
     api("/api/agent/status"),
     api("/api/runner"),
     api("/api/tests").catch(() => null),
+    api("/api/devservers").catch(() => null),
   ]);
-  return {view, runner, tests};
+  return {view, runner, tests, servers};
 }
 
 const EXE = {claude: "claude", opencode: "opencode"};
@@ -183,6 +184,29 @@ function gitCard(view) {
 }
 
 const AGENT_LABEL = {claude: "Claude Code", opencode: "OpenCode"};
+const SERVER_DEFAULT_PORT = {backend: 8000, frontend: 5173};
+const NEWLINE = String.fromCharCode(10);
+
+/* Серверы самого проекта (кнопки в окне агента): команды определяются сами, здесь их можно заменить. */
+function serversCard(servers) {
+  if (!servers || !Array.isArray(servers.servers)) return "";
+  const config = servers.config || {};
+  const rows = servers.servers.map((item) => {
+    const own = config[item.name] || {};
+    return `<div class="role-cmd" data-srv-name="${esc(item.name)}">
+      <p class="hint"><b>${esc(item.title)}.</b> ${item.custom ? "Своя команда." : item.available ? "Определено автоматически:" : esc(item.reason || "не найден")}
+        ${item.custom || !item.available ? "" : `<code>${esc(item.command)}</code>`}</p>
+      <textarea rows="4" spellcheck="false" style="width:100%" placeholder="Пусто — автоопределение. По аргументу на строку; {port} — порт.">${esc((own.command || []).join(NEWLINE))}</textarea>
+      <label class="rm-task">Предпочтительный порт
+        <input type="number" min="1024" max="65535" data-srv-port placeholder="${SERVER_DEFAULT_PORT[item.name]}" value="${esc(own.port || "")}" style="width:90px"></label></div>`;
+  }).join("");
+  return `<section class="agent-card">
+    <h3>Серверы проекта</h3>
+    <p>Кнопки «▶» в окне агента запускают бэкенд (<code>uvicorn … --reload</code>), а после него фронтенд (<code>npm run dev</code> в <code>frontend/</code>). Занятый порт заменяется ближайшим свободным, ссылка берётся из вывода сервера, а при закрытии студии серверы останавливаются.</p>
+    <details><summary>Команды и порты (для опытных)</summary>${rows}</details>
+    <div class="agent-row"><button type="button" class="primary" id="srvSave">Сохранить</button></div>
+  </section>`;
+}
 
 function runCard(runner, tests, view) {
   const testsOn = !!(tests && tests.config && tests.config.enabled);
@@ -302,6 +326,16 @@ function bind(root, data) {
       if (box) box.value = (commands[name] || data.runner.default_command || []).join("\n");
     };
   });
+  on("#srvSave", async () => {
+    const payload = {};
+    root.querySelectorAll("[data-srv-name]").forEach((el) => {
+      const port = el.querySelector("[data-srv-port]").value.trim();
+      payload[el.dataset.srvName] = {command: el.querySelector("textarea").value, port: port ? Number(port) : null};
+    });
+    await api("/api/devservers/config", "POST", payload);
+    toast("Настройки серверов проекта сохранены");
+    await reload();
+  });
   on("#runSave", async () => {
     const commands = {};
     root.querySelectorAll("[data-cmd-agent]").forEach((el) => { commands[el.dataset.cmdAgent] = el.querySelector("textarea").value; });
@@ -373,7 +407,8 @@ export async function renderAgentSettings() {
   try {
     const data = await load();
     root.innerHTML = connectionCard(data.view) + howCard() + rightsCard(data.view)
-      + gitCard(data.view) + runCard(data.runner, data.tests, data.view) + manualCard(data.view);
+      + gitCard(data.view) + runCard(data.runner, data.tests, data.view)
+      + serversCard(data.servers) + manualCard(data.view);
     bind(root, data);
   } catch (error) {
     root.innerHTML = `<p class="hint">Не удалось загрузить настройки агента: ${esc(error.message)}</p>`;

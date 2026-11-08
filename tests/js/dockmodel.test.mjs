@@ -166,3 +166,50 @@ test("исполнители: заголовок окна и состояние 
   assert.equal(agentStatus(roleView({found: false}, {model: "a/b"})).text, "Claude Code не найден");
   assert.equal(agentStatus(roleView({}, {found: false, model: "a/b"})).connected, false);
 });
+
+import {projectButton, serverRows, serversBusy} from "../../studio/ui/static/js/dockmodel.js";
+
+const srv = (name, state, extra = {}) => ({name, title: name === "backend" ? "Backend" : "Frontend", state, available: true, ...extra});
+
+test("серверы проекта: ссылка только у работающего, кнопки по состоянию", () => {
+  const rows = serverRows({servers: [
+    srv("backend", "running", {url: "http://localhost:8001", note: "Порт 8000 занят, выбран 8001"}),
+    srv("frontend", "starting", {url: "http://localhost:5173"}),
+  ]});
+  assert.equal(rows[0].url, "http://localhost:8001");
+  assert.equal(rows[0].canStop, true);
+  assert.equal(rows[0].canStart, false);
+  assert.match(rows[0].note, /8001/);
+  assert.equal(rows[1].url, ""); // пока не отвечает — ссылки нет
+  assert.equal(rows[1].text, "запускается…");
+  assert.equal(rows[1].canStop, true);
+});
+
+test("сервер не найден: кнопка запуска недоступна, причина в тексте", () => {
+  const [row] = serverRows({servers: [srv("backend", "stopped", {available: false, reason: "Не найден app/main.py или main.py"})]});
+  assert.equal(row.canStart, false);
+  assert.match(row.text, /app\/main\.py/);
+  assert.deepEqual(serverRows(null), []);
+});
+
+test("сбой показывает сообщение сервера и позволяет запустить снова", () => {
+  const [row] = serverRows({servers: [srv("frontend", "failed", {message: "Сервер остановился (код 1)"})]});
+  assert.equal(row.text, "Сервер остановился (код 1)");
+  assert.equal(row.canStart, true);
+});
+
+test("главная кнопка блока: запустить проект или остановить всё", () => {
+  assert.equal(projectButton({servers: [srv("backend", "stopped"), srv("frontend", "stopped")]}).id, "start-all");
+  assert.equal(projectButton({servers: [srv("backend", "running"), srv("frontend", "stopped")]}).id, "stop-all");
+  assert.equal(projectButton({servers: [srv("backend", "stopped"), srv("frontend", "stopped")], waiting: true}).id, "stop-all");
+  const none = {servers: [srv("backend", "stopped", {available: false}), srv("frontend", "stopped", {available: false})]};
+  assert.equal(projectButton(none), null);
+  assert.equal(projectButton(null), null);
+});
+
+test("опрос ускоряется, пока что-то запускается", () => {
+  assert.equal(serversBusy({servers: [srv("backend", "starting")]}), true);
+  assert.equal(serversBusy({servers: [srv("backend", "running")], waiting: true}), true);
+  assert.equal(serversBusy({servers: [srv("backend", "running")]}), false);
+  assert.equal(serversBusy(null), false);
+});

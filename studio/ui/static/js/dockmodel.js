@@ -191,6 +191,44 @@ export function dockNote(flow, view) {
   }
 }
 
+/* Серверы проекта (бэкенд и фронтенд): строки для блока «Проект» окна агента. */
+const SERVER_TEXT = {stopped: "остановлен", starting: "запускается…", running: "работает", failed: "сбой"};
+
+export function serverRows(data) {
+  const list = data && Array.isArray(data.servers) ? data.servers : [];
+  return list.map((item) => {
+    const state = SERVER_TEXT[item.state] ? item.state : "stopped";
+    const live = state === "starting" || state === "running";
+    const available = item.available !== false;
+    return {
+      name: item.name,
+      title: item.title || item.name,
+      state,
+      text: item.message || (!available && state === "stopped" ? item.reason || "не найден" : SERVER_TEXT[state]),
+      url: state === "running" ? item.url || "" : "",
+      note: item.note || "",
+      tail: Array.isArray(item.tail) ? item.tail : [],
+      available,
+      canStart: available && !live,
+      canStop: live,
+    };
+  });
+}
+
+/* Главная кнопка блока: запустить проект целиком (бэкенд, затем фронтенд) или остановить всё. */
+export function projectButton(data) {
+  const rows = serverRows(data);
+  if (!rows.length) return null;
+  if (rows.some((row) => row.canStop) || (data && data.waiting)) return {id: "stop-all", label: "■ Остановить всё"};
+  if (rows.some((row) => row.available)) return {id: "start-all", label: "▶ Запустить проект"};
+  return null;
+}
+
+/* Опрос чаще, пока что-то запускается: ссылка появляется, как только сервер ответил. */
+export function serversBusy(data) {
+  return !!(data && (data.waiting || (data.servers || []).some((item) => item.state === "starting")));
+}
+
 /* Откат доступен, если студия записала точку возврата в ветке studio/*. */
 export function canRollback(view) {
   return !!(view && view.git && view.git.can_rollback);

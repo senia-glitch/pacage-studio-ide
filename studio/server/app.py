@@ -228,6 +228,7 @@ def make_handler(ctx):
                     "not_writable": 422,
                     "ideas_conflict": 409,
                     "wrong_stage": 409,
+                    "agent_busy": 409,
                     "mode_forbidden": 403,
                 }.get(exc.code, 400)
                 code = "node_not_found" if exc.code == "anchor_not_found" else exc.code
@@ -395,6 +396,9 @@ def make_handler(ctx):
                 ))
             if url.path == "/api/ui":
                 return self._json(state.settings.get())
+            if url.path == "/api/devservers":
+                # серверы проекта видит и запускает только человек: агентским токенам маршрут закрыт
+                return self._json(_servers_view(state))
             return self._error(404, "not_found", "Не найдено")
 
         # --------------------------------------------------------------- POST
@@ -469,6 +473,13 @@ def make_handler(ctx):
                     return self._error(409, "git_failed", result["reason"])
                 state.rescan("rollback")
                 return self._json({**result, "git": gitops.status(state.root)})
+            if url.path == "/api/devservers/start":
+                return self._json(state.devservers.start(str(data.get("name") or "all")))
+            if url.path == "/api/devservers/stop":
+                return self._json(state.devservers.stop(str(data.get("name") or "all")))
+            if url.path == "/api/devservers/config":
+                state.devservers.save_config(data)
+                return self._json(_servers_view(state))
             if url.path == "/api/tests/run":
                 return self._json(state.tester.start())
             if url.path == "/api/tests/config":
@@ -767,6 +778,11 @@ def frontend_sync_undo_op(root: Path, data: dict) -> dict:
     return result
 
 
+def _servers_view(state: ProjectState) -> dict:
+    """Серверы проекта и их настройка (только для человека: агентским токенам маршрут закрыт)."""
+    return {**state.devservers.public(), "config": state.devservers.config()}
+
+
 def _try_bind(host: str, port: int, handler) -> ThreadingHTTPServer | None:
     """Создать сервер; занятый порт не оставляет полуоткрытый сокет."""
     server = ThreadingHTTPServer((host, port), handler, bind_and_activate=False)
@@ -870,6 +886,7 @@ def serve(
         discovery.remove(root)
         state.runner.stop()
         state.tester.stop()
+        state.devservers.stop_all()
         state.stop_watcher()
         server.server_close()
     return bound_port
