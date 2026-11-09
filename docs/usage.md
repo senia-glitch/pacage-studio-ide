@@ -15,6 +15,8 @@ studio migrate [--apply]       # убрать заглушки старой мо
 studio report [--part backend|frontend] [--section NAME ...] [--stdout | --json]
 studio skill [--target stdout|claude|agents|all]   # руководство для AI-агента
 studio mcp                     # MCP-сервер для AI-агента (stdio), см. mcp.md
+studio chain install [--dest DIR] [--force]   # роли и скиллы цепочки в OpenCode
+studio chain check [--json]    # проверки артефактов .studio/chain (merge-research N, summary)
 studio install-full            # fastbase[full] в текущий venv
 studio help                    # все команды
 studio --version               # версия пакета
@@ -273,6 +275,15 @@ models` выбирает разделы, `--part frontend` — отчёт по `
 Вкладки «Фронтенд» и «Идеи» обновляются сами, пока агент работает; если вы в этот момент вводите
 текст, перерисовка ждёт, пока вы закончите. Доска идей хранит `revision`: если вы и агент
 правите её одновременно, устаревшая запись отклоняется, а интерфейс загружает актуальную версию.
+
+## Цепочка «Продукт → Фронтенд» (прототип)
+
+Новая цепочка ведёт от сырой идеи через анализ предметной области, конкурентов и норм к обоснованным
+требованиям. Пока она работает как прототип в OpenCode (шаги 1-8): `studio chain install` ставит агентов и
+скиллы в `.opencode/` проекта (`--dest "$HOME\.config\opencode"` — глобально для всех папок), затем в `opencode` выберите агента
+`chain` и напишите идею. Артефакты лежат в `.studio/chain/`, их проверяет `studio chain check` (код выхода 0 —
+чисто, 1 — ошибки, 2 — блокирующие замечания); `studio chain merge-research N` вливает черновики исследования,
+`studio chain summary` показывает объём. Подробно — [ai-agents/README.md](ai-agents/README.md).
 
 ## Страницы фронтенда в идеях
 

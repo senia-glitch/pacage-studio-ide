@@ -49,6 +49,7 @@ version = {attr = "studio.__version__"}
 "studio.ui" = ["static/*.html", "static/*.css", "static/js/*.js", "static/js/package.json"]
 "studio.metadata" = ["rules.md"]
 "studio.agent" = ["rules.md", "guide.md"]
+"studio.productchain" = ["assets/opencode/agents/*.md", "assets/opencode/skills/*/SKILL.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

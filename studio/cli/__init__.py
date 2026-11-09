@@ -1,4 +1,4 @@
-"""CLI студии: dev, scan, list, brief, verify, doctor, install-full, help."""
+"""CLI студии: dev, scan, list, brief, verify, doctor, chain, install-full, help."""
 
 from __future__ import annotations
 
@@ -672,6 +672,72 @@ def cmd_skill(args) -> int:
     return 0
 
 
+def _chain_root(explicit: str | None) -> tuple[Path, bool]:
+    """Корень для цепочки: папка с `.studio/` в текущей, иначе обычный поиск проекта.
+
+    Папка под новую идею пуста (нет маркеров проекта), поэтому подниматься вверх мимо
+    уже начатой цепочки нельзя.
+    """
+    if not explicit and (Path.cwd() / ".studio").is_dir():
+        return Path.cwd().resolve(), False
+    return _find_root(explicit)
+
+
+def cmd_chain(args) -> int:
+    """Цепочка «Продукт → Фронтенд»: установка ролей в OpenCode и проверки артефактов."""
+    from studio import productchain
+
+    action = getattr(args, "chain_cmd", None)
+    if action is None:
+        print("studio chain install [--dest DIR] [--force]")
+        print("studio chain check [--json]")
+        print("studio chain merge-research RUN")
+        print("studio chain summary")
+        return 0
+    if action == "install":
+        if args.dest:
+            dest = Path(args.dest).resolve()
+            print(f"Папка OpenCode: {dest}")
+        else:
+            root, explicit = _find_root(getattr(args, "project", None))
+            _print_root(root, explicit)
+            dest = root / ".opencode"
+        try:
+            result = productchain.install(dest, force=args.force)
+        except OSError as exc:
+            raise CliError(str(exc)) from exc
+        for path in result.written:
+            print(f"записано: {path.relative_to(dest).as_posix()}")
+        for path in result.skipped:
+            relative = path.relative_to(dest).as_posix()
+            print(f"пропущено (изменён вручную, --force перезапишет): {relative}")
+        print(
+            f"агентов и скиллов: записано {len(result.written)}, без изменений "
+            f"{len(result.unchanged)}, пропущено {len(result.skipped)}"
+        )
+        print("Дальше: запустите opencode, выберите агента chain (Tab) и напишите идею.")
+        return 0
+
+    root, _explicit = _chain_root(getattr(args, "project", None))
+    chain_dir = root / productchain.CHAIN_DIR
+    if action == "merge-research":
+        try:
+            result = productchain.merge_research(chain_dir, args.run)
+        except (OSError, ValueError) as exc:
+            raise CliError(str(exc)) from exc
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    if action == "summary":
+        print(json.dumps(productchain.summary(chain_dir), ensure_ascii=False, indent=2))
+        return 0
+    report = productchain.validate(chain_dir)
+    if args.json:
+        print(json.dumps(productchain.report_json(report), ensure_ascii=False, indent=2))
+    else:
+        print(productchain.format_report(report))
+    return productchain.exit_code(report)
+
+
 def cmd_mcp(args) -> int:
     """MCP-сервер (stdio) для AI-агента. В stdout — только протокол, поэтому без печати."""
     if getattr(args, "project", None):
@@ -706,6 +772,10 @@ def cmd_help(_args) -> int:
     print("  skill [--target stdout|claude|agents|all] [--project .]")
     print("                                       руководство для AI-агента: печать или")
     print("                                       установка (скилл Claude Code, AGENTS.md)")
+    print("  chain install [--dest DIR] [--force]")
+    print("        check [--json] | merge-research RUN | summary")
+    print("                                       цепочка «Продукт → Фронтенд»: роли и")
+    print("                                       скиллы OpenCode, проверки артефактов")
     print("  mcp                                MCP-сервер для AI-агента (stdio)")
     print("  doctor [--project .] [--json] [--strict]  диагностика одной командой")
     print("  install-full [--project .]         установить/обновить fastbase[full]")
@@ -802,6 +872,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="stdout — напечатать; claude — .claude/skills; agents — блок в AGENTS.md",
     )
     skill_p.set_defaults(f=cmd_skill)
+
+    chain_p = sub.add_parser("chain", help="цепочка «Продукт → Фронтенд»: роли OpenCode и проверки")
+    _add_project(chain_p)
+    chain_sub = chain_p.add_subparsers(dest="chain_cmd")
+    chain_install = chain_sub.add_parser("install", help="агенты и скиллы в OpenCode")
+    _add_project(chain_install)
+    chain_install.add_argument(
+        "--dest", default=None, metavar="DIR",
+        help="папка OpenCode; по умолчанию .opencode/ проекта, глобально — ~/.config/opencode",
+    )
+    chain_install.add_argument("--force", action="store_true", help="перезаписать изменённые файлы")
+    chain_check = chain_sub.add_parser("check", help="механические проверки .studio/chain")
+    _add_project(chain_check)
+    chain_check.add_argument("--json", action="store_true")
+    chain_merge = chain_sub.add_parser("merge-research", help="влить черновики исследования")
+    _add_project(chain_merge)
+    chain_merge.add_argument("run", type=int, help="номер прогона")
+    chain_summary = chain_sub.add_parser("summary", help="сколько объектов в артефактах")
+    _add_project(chain_summary)
+    chain_p.set_defaults(f=cmd_chain)
 
     mcp_p = sub.add_parser("mcp", help="MCP-сервер для AI-агента (stdio)")
     mcp_p.add_argument(

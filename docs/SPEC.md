@@ -78,6 +78,11 @@ endpoint → scenario → io → model
 21. **Окружение проекта** (`studio/agent/projectenv.py`) — `.venv`/`venv` для тестов и для агента,
     который запускает студия (`PATH`, `VIRTUAL_ENV`).
 
+22. **Цепочка «Продукт → Фронтенд»** (`studio/productchain/`) — прототип новой цепочки в OpenCode:
+    агенты и скиллы ролей в `assets/opencode/` (`studio chain install`), механические проверки артефактов
+    `.studio/chain/*.json` и слияние черновиков исследования (`studio chain check | merge-research | summary`).
+    Спецификация — `docs/ai-agents/`.
+
 ## Граф
 
 Схема v7. Виды узлов: `endpoint`, `scenario`, `io`, `model`, `test`, `nested`.
