@@ -85,6 +85,7 @@ class Project:
         self.tokens: dict[str, dict] = {}
         self.version = 0
         self.base_url = ""
+        self.extra_env: dict[str, str] = {}  # добавка к окружению хода (токен моста в студии)
         self._flow = self._load_flow()
 
     # ------------------------------------------------------------------ состояние
@@ -931,7 +932,7 @@ class Project:
             workdir=self.dir / "agent" / name,
             system_text=system,
             note=note,
-            env={"IDEA_GRAPH_URL": self.base_url, "IDEA_GRAPH_TOKEN": token},
+            env={"IDEA_GRAPH_URL": self.base_url, "IDEA_GRAPH_TOKEN": token, **self.extra_env},
             session_id=session,
             model=slot.get("model") or "",
             effort=slot.get("effort") or "",

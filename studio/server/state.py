@@ -69,6 +69,7 @@ from studio.scanner import scan
 from studio.scanner.anchors import AnchorResolver
 from studio.server import access, autopilot
 from studio.server.devservers import DevServers
+from studio.server.idea import IdeaService
 from studio.server.runner import Runner
 from studio.server.settings import Settings
 from studio.server.tester import TestRunner
@@ -128,6 +129,8 @@ class ProjectState:
         self.workflow.listeners.append(self.tester.on_stage)
         # Серверы самого проекта (бэкенд, фронтенд) по кнопке; останавливаются вместе со студией.
         self.devservers = DevServers(self.root)
+        # Этап «Идея»: граф идеи, исследователи и помощники (граф и настройки — в .studio).
+        self.idea = IdeaService(self.root)
 
     # ------------------------------------------------------------------ scan
 

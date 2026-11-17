@@ -132,6 +132,7 @@ async function setTab(name){
   else if(name==="settings"){if(hooks.renderSettings)hooks.renderSettings()}
   else if(name==="agent"){if(hooks.renderAgentSettings)hooks.renderAgentSettings()}
   else if(name==="frontend"){hooks.renderFrontend&&hooks.renderFrontend()}
+  else if(name==="idea"){hooks.renderIdea&&hooks.renderIdea()}
   else hooks.renderIdeas();
   schedulePersist();
   return true;

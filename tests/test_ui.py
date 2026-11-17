@@ -23,10 +23,10 @@ def test_две_рабочие_области_одного_окна():
     assert 'data-map-mode="plan"' in HTML
 
 
-def test_пять_страниц_в_согласованном_порядке():
+def test_шесть_страниц_в_согласованном_порядке():
     tabs = re.findall(r'<button class="tabbtn[^"]*" id="tab-[a-z]+-button" data-tab="([a-z]+)"', HTML)
-    assert tabs == ["map", "frontend", "ideas", "settings", "agent"]
-    for title in ("Карта backend", "Карта frontend", "Генератор идей",
+    assert tabs == ["idea", "map", "frontend", "ideas", "settings", "agent"]
+    for title in ("Идея", "Карта backend", "Карта frontend", "Генератор идей",
                   "Настройки промптов", "Настройки агента"):
         assert title in HTML
 

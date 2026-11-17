@@ -16,11 +16,12 @@
   <div class="header-brand">
     <span class="logo" id="logoBtn" title="О проекте"><span class="logo-mark">⬢</span> studio</span>
     <span class="tabs" role="tablist" aria-label="Страницы">
-      <button class="tabbtn on" id="tab-map-button" data-tab="map" role="tab" aria-selected="true" aria-controls="tab-map"><span class="tab-index">01</span> Карта backend</button>
-      <button class="tabbtn" id="tab-frontend-button" data-tab="frontend" role="tab" aria-selected="false" aria-controls="tab-frontend"><span class="tab-index">02</span> Карта frontend</button>
-      <button class="tabbtn" id="tab-ideas-button" data-tab="ideas" role="tab" aria-selected="false" aria-controls="tab-ideas"><span class="tab-index">03</span> Генератор идей</button>
-      <button class="tabbtn" id="tab-settings-button" data-tab="settings" role="tab" aria-selected="false" aria-controls="tab-settings"><span class="tab-index">04</span> Настройки промптов</button>
-      <button class="tabbtn" id="tab-agent-button" data-tab="agent" role="tab" aria-selected="false" aria-controls="tab-agent"><span class="tab-index">05</span> Настройки агента</button>
+      <button class="tabbtn" id="tab-idea-button" data-tab="idea" role="tab" aria-selected="false" aria-controls="tab-idea"><span class="tab-index">01</span> Идея</button>
+      <button class="tabbtn on" id="tab-map-button" data-tab="map" role="tab" aria-selected="true" aria-controls="tab-map"><span class="tab-index">02</span> Карта backend</button>
+      <button class="tabbtn" id="tab-frontend-button" data-tab="frontend" role="tab" aria-selected="false" aria-controls="tab-frontend"><span class="tab-index">03</span> Карта frontend</button>
+      <button class="tabbtn" id="tab-ideas-button" data-tab="ideas" role="tab" aria-selected="false" aria-controls="tab-ideas"><span class="tab-index">04</span> Генератор идей</button>
+      <button class="tabbtn" id="tab-settings-button" data-tab="settings" role="tab" aria-selected="false" aria-controls="tab-settings"><span class="tab-index">05</span> Настройки промптов</button>
+      <button class="tabbtn" id="tab-agent-button" data-tab="agent" role="tab" aria-selected="false" aria-controls="tab-agent"><span class="tab-index">06</span> Настройки агента</button>
     </span>
   </div>
   <div class="header-global">
@@ -53,6 +54,9 @@
 <nav id="roadmap" class="roadmap" aria-label="Дорожная карта" hidden></nav>
 <div id="offlineBanner" class="offline-banner" role="alert" hidden>Нет связи со студией: правки не сохраняются. Перезапустите <b>studio</b> и обновите страницу.</div>
 <main>
+  <section class="tab" id="tab-idea" role="tabpanel" aria-labelledby="tab-idea-button">
+    <div id="ideaHost"></div>
+  </section>
   <section class="tab on" id="tab-map" role="tabpanel" aria-labelledby="tab-map-button">
     <div id="mapPane">
       <div class="mapbar"><span class="map-mode-caption" id="mapModeCaption">Фактическая структура проекта</span><span class="hint" id="mapSelectionHint">Выберите узел на карте · наведите курсор на узел, чтобы добавить потомка</span><span class="spacer"></span><button type="button" id="syncPromptsBtn" title="Промпт для AI-агента: синхронизировать описания узлов с реальным кодом">⇄ Синхр. описаний</button><button type="button" id="reportBtn" title="Отчёт по проекту: сводка, структура, покрытие, планы, модели, диагностика">Отчёт</button><button type="button" id="addDomainBtn">＋ Домен</button><button type="button" id="inspectorToggle" aria-label="Скрыть свойства" title="Скрыть свойства">Скрыть свойства</button></div>

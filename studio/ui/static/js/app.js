@@ -27,6 +27,8 @@ hooks.renderSettings = renderSettings;
 hooks.renderAgentSettings = renderAgentSettings;
 hooks.renderInspector = renderInspector;
 hooks.renderFrontend = renderFrontend;
+// Этап «Идея» подключается при первом открытии вкладки: остальным вкладкам он не мешает.
+hooks.renderIdea = async () => { const idea = await import("./idea/main.js"); await idea.renderIdea($("ideaHost")); };
 hooks.refreshAux = () => {
   void refreshAgentReports();
   void refreshRoadmap();
@@ -118,7 +120,7 @@ async function boot(){
   document.addEventListener("click",schedulePersist);
   document.addEventListener("change",schedulePersist);
   const initial=location.hash.replace(/^#/,"");
-  setTab(["map","ideas","frontend","settings","agent"].includes(initial)?initial:S.tab);
+  setTab(["idea","map","ideas","frontend","settings","agent"].includes(initial)?initial:S.tab);
 }
 boot();
 

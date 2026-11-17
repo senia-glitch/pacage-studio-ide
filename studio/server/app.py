@@ -23,8 +23,11 @@ from studio.frontend import meta as front_meta
 from studio.frontend import scan_frontend
 from studio.frontend import sync as front_sync
 from studio.frontend import verify as front_verify
+from studio.idea import EngineError as IdeaError
+from studio.idea.graph import GraphError as IdeaGraphError
 from studio.metadata import MetadataError
 from studio.server import access, autopilot, chain, discovery, gitops
+from studio.server.idea import PREFIX as IDEA_PREFIX
 from studio.server.security import (
     CSP,
     SECURITY_HEADERS,
@@ -161,7 +164,7 @@ def make_handler(ctx):
                         "Список разрешённого — GET /api/agent",
                     )
                 self._mode = mode
-                if mode != access.FULL:
+                if mode in access.AGENT_MODES:
                     state.workflow.seen(mode)
                     reason = state.workflow.agent_gate(
                         mode, access.WRITE_PATHS.get(mode, frozenset()), self.command, path
@@ -255,6 +258,16 @@ def make_handler(ctx):
             except Exception as exc:  # noqa: BLE001 — граница HTTP-запроса
                 slog.step(f"HTTP 500: {type(exc).__name__}: {exc}")
                 self._error(500, "internal", f"Внутренняя ошибка: {type(exc).__name__}")
+
+        def _idea(self, call) -> None:
+            """Этап «Идея»: ошибки движка — понятным ответом (мост агента ждёт плоский вид)."""
+            try:
+                self._json(call())
+            except (IdeaError, IdeaGraphError) as exc:
+                if self._mode == access.IDEA:
+                    self._json({"error": exc.code, "message": exc.message}, 400)
+                else:
+                    self._error(400, exc.code, exc.message)
 
         def do_GET(self) -> None:
             self._guard(self._get)
@@ -399,6 +412,9 @@ def make_handler(ctx):
             if url.path == "/api/devservers":
                 # серверы проекта видит и запускает только человек: агентским токенам маршрут закрыт
                 return self._json(_servers_view(state))
+            if url.path.startswith(IDEA_PREFIX + "/"):
+                query = urllib.parse.parse_qs(url.query)
+                return self._idea(lambda: state.idea.get(url.path, query))
             return self._error(404, "not_found", "Не найдено")
 
         # --------------------------------------------------------------- POST
@@ -421,6 +437,11 @@ def make_handler(ctx):
                     "mode_forbidden",
                     "Агент может только проверить ответ (без apply): применяет пользователь в UI",
                 )
+            if url.path.startswith(IDEA_PREFIX + "/"):
+                if url.path.startswith(IDEA_PREFIX + "/agent/"):
+                    token = self.headers.get("X-Idea-Graph-Token") or ""
+                    return self._idea(lambda: state.idea.agent_call(token, url.path, data))
+                return self._idea(lambda: state.idea.post(url.path, data))
             if url.path == "/api/agent/report":
                 return self._json(agent_report_submit(state, data, self._mode))
             if url.path == "/api/agent/report/decision":
@@ -875,6 +896,8 @@ def serve(
     server = _bind(host, port, make_handler(state))
     bound_port = int(server.server_address[1])
     url = f"http://{host}:{bound_port}"
+    state.idea.base_url = url  # адрес для моста агентов этапа «Идея»
+    state.idea.agent_token = access.derive_token(state.token, access.IDEA)
     _print_summary(state, url)
     state.runner.probe_async()  # MCP-сервер агента падает тихо: проверяем рукопожатием заранее
     if not no_open and not os.environ.get("CI"):
@@ -891,6 +914,7 @@ def serve(
     finally:
         discovery.remove(root)
         state.runner.stop()
+        state.idea.close()
         state.tester.stop()
         state.devservers.stop_all()
         state.stop_watcher()

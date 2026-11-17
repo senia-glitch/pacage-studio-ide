@@ -24,6 +24,10 @@ FULL = "full"
 PLAN = "plan"
 IMPLEMENT = "implement"
 AGENT_MODES = (PLAN, IMPLEMENT)
+# Агент этапа «Идея»: ход, который запускает сама студия. Ему открыт только мост инструментов;
+# что именно агент вправе делать, решает ключ хода (``studio.idea``), а не этапы дорожной карты.
+IDEA = "idea"
+_POST_IDEA = frozenset({"/api/idea/agent/tools", "/api/idea/agent/call"})
 
 # Чтение: доступно обоим режимам агента.
 _GET_READ = frozenset(
@@ -87,6 +91,7 @@ APPLY_PATHS = frozenset({"/api/sync/apply", "/api/frontend/sync/apply"})
 ALLOWED: dict[str, dict[str, frozenset[str]]] = {
     PLAN: {"GET": _GET_READ, "POST": _POST_SAFE | _POST_PLAN | _POST_CONTROL},
     IMPLEMENT: {"GET": _GET_READ, "POST": _POST_SAFE | _POST_IMPLEMENT | _POST_CONTROL},
+    IDEA: {"GET": frozenset(), "POST": _POST_IDEA},
 }
 
 def derive_token(root_token: str, mode: str) -> str:
@@ -98,13 +103,13 @@ def derive_token(root_token: str, mode: str) -> str:
 
 
 def token_mode(root_token: str, provided: str | None) -> str | None:
-    """Режим по токену из заголовка: full, plan, implement или None."""
+    """Режим по токену из заголовка: full, plan, implement, idea или None."""
     if not root_token or not provided:
         return None
     candidate = str(provided).encode("utf-8", "replace")
     if hmac.compare_digest(str(root_token).encode("utf-8"), candidate):
         return FULL
-    for mode in AGENT_MODES:
+    for mode in (*AGENT_MODES, IDEA):
         if hmac.compare_digest(derive_token(root_token, mode).encode("ascii"), candidate):
             return mode
     return None
@@ -121,6 +126,7 @@ __all__ = [
     "ALLOWED",
     "APPLY_PATHS",
     "FULL",
+    "IDEA",
     "IMPLEMENT",
     "PLAN",
     "WRITE_PATHS",

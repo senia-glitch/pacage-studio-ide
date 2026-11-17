@@ -21,15 +21,14 @@ PROTOCOL = "2024-11-05"
 def _call(path: str, payload: dict | None = None) -> dict:
     url = os.environ.get("IDEA_GRAPH_URL", "").rstrip("/") + path
     data = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=data,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "X-Idea-Graph-Token": os.environ.get("IDEA_GRAPH_TOKEN", ""),
-        },
-    )
+    headers = {
+        "Content-Type": "application/json",
+        "X-Idea-Graph-Token": os.environ.get("IDEA_GRAPH_TOKEN", ""),
+    }
+    studio_token = os.environ.get("IDEA_GRAPH_STUDIO_TOKEN", "")
+    if studio_token:  # в студии вызов агента проходит ещё и проверку токена режима «idea»
+        headers["X-Studio-Token"] = studio_token
+    request = urllib.request.Request(url, data=data, method="POST", headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=120) as response:  # noqa: S310 — локальный адрес оболочки
             return json.loads(response.read().decode("utf-8"))
