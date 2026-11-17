@@ -1,11 +1,18 @@
 import {api} from "./api.js";
 import {$,S,applyGraph,esc,KIND_NAMES,hooks,openEditorForNode,toast,schedulePersist} from "./core.js";
 import {CHILD_KINDS,relationFor} from "./relations.js";
+import {keepScroll} from "./util.js";
 
 const graphOwned=n=>!!n?.planned&&n.id.startsWith("studio:");
 const acceptanceText=a=>Array.isArray(a)?a.join("\n"):"";
 function selected(){return S.byId[S.selectedNode]||S.mapViewNodes?.[S.selectedNode]||null}
+let lastInspected=null;
 function renderInspector(){
+  const same=lastInspected===S.selectedNode;lastInspected=S.selectedNode;
+  if(same)return keepScroll($("inspBody"),[":self"],drawInspector);
+  return drawInspector();
+}
+function drawInspector(){
   const chips=$("inspChips"),body=$("inspBody"),foot=$("inspFoot");if(!chips||!body)return;
   chips.innerHTML="";body.innerHTML="";const n=selected();
   if(S.selectedNode==="__new_domain__"){

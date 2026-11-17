@@ -28,6 +28,32 @@ const ctx = {
 
 ctx.api = api;
 
+/* Экраны подгружают данные асинхронно: пока данных нет, страница короткая и прокрутка сбрасывается
+   вверх. Поэтому каждая асинхронная загрузка регистрируется здесь, а draw() ждёт их все и только
+   потом возвращает прокрутку (и пока ждёт, держит прежнюю высоту). */
+ctx.pending = [];
+ctx.track = (promise) => {
+  ctx.pending.push(promise);
+  return promise;
+};
+
+const SCROLLERS = ".pl-body, .pl-list, .pl-detail, .pl-mapwrap, .pl-gatepanel";
+
+function scrollSnapshot(host) {
+  return [...host.querySelectorAll(SCROLLERS)].map((el) => [el.className, el.scrollTop]);
+}
+
+function restoreScroll(host, snapshot) {
+  const used = new Set();
+  for (const [name, top] of snapshot) {
+    const el = [...host.querySelectorAll(SCROLLERS)].find((item, i) => item.className === name && !used.has(item));
+    if (el) {
+      used.add(el);
+      el.scrollTop = top;
+    }
+  }
+}
+
 ctx.toast = (message, kind = "") => {
   const node = ctx.host && ctx.host.querySelector(".pl-toast");
   if (!node) return;
@@ -118,7 +144,10 @@ function drawJob() {
 function draw() {
   const host = ctx.host;
   if (!host) return;
-  const scroll = host.querySelector(".pl-body") ? host.querySelector(".pl-body").scrollTop : 0;
+  const oldBody = host.querySelector(".pl-body");
+  const snapshot = scrollSnapshot(host);
+  const height = oldBody ? oldBody.scrollHeight : 0;
+  const focused = host.contains(document.activeElement) ? document.activeElement.dataset.focus || "" : "";
   clear(host);
   const state = ctx.state || {};
   const bar = h(
@@ -137,12 +166,25 @@ function draw() {
   );
   const body = h("div", {class: "pl-body"});
   host.append(bar, jobBar(), h("div", {class: "pl-toast"}), body);
+  body.style.minHeight = height ? height + "px" : "";
   if (ctx.view === "path") renderPath(ctx, body);
   else if (ctx.view === "map") renderMapView(ctx, body);
-  else if (ctx.view === "bank") renderBank(ctx, body);
-  else if (ctx.view === "requests") renderRequests(ctx, body);
-  else renderSettings(ctx, body);
-  body.scrollTop = scroll;
+  else if (ctx.view === "bank") ctx.track(renderBank(ctx, body));
+  else if (ctx.view === "requests") ctx.track(renderRequests(ctx, body));
+  else ctx.track(renderSettings(ctx, body));
+  restoreScroll(host, snapshot);
+  settle(host, body, snapshot, focused);
+}
+
+async function settle(host, body, snapshot, focused) {
+  while (ctx.pending.length) await Promise.allSettled(ctx.pending.splice(0));
+  if (!host.contains(body)) return; // за это время экран уже перерисован
+  body.style.minHeight = "";
+  restoreScroll(host, snapshot);
+  if (focused) {
+    const again = host.querySelector(`[data-focus="${focused}"]`);
+    if (again) again.focus({preventScroll: true});
+  }
 }
 
 function modeSelect(state) {
@@ -150,6 +192,7 @@ function modeSelect(state) {
     "select",
     {
       class: "pl-mode",
+      "data-focus": "bar-mode",
       title: "Кто принимает решения: вы, агенты вместе с вами или агенты сами",
       onchange: (event) => ctx.act("/api/pipeline/settings", {mode: event.target.value}),
     },

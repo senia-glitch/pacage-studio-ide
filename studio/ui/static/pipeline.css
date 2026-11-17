@@ -160,3 +160,10 @@ input.pl-num{width:64px}
 .pj-srv label{display:block;margin-top:6px;font-size:12px;color:var(--dim)}
 .pj-check{display:flex;gap:8px;align-items:flex-start}
 .pj-check small{display:block;color:var(--dim)}
+
+#projectBody{overflow:auto}
+
+/* длинные названия записей в списках не должны растягивать экран */
+.pl-host select, .pj-wrap select{max-width:100%;min-width:0;text-overflow:ellipsis}
+.pl-host input, .pl-host textarea, .pj-wrap input, .pj-wrap textarea{max-width:100%}
+.pl-tablewrap{overflow-x:auto;max-width:100%}

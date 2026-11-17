@@ -3,6 +3,7 @@ import {$,esc,S,toast,modal,schedulePersist,openEditorForNode,enableNodeDrag} fr
 import {bindViewport, applyTransform, fitView} from "./viewport.js";
 import {clearStage, measure, sizeStage} from "./edges.js";
 import {drawEdges} from "./edges.js";
+import {keepScroll} from "./util.js";
 
 /* Вкладка «Фронтенд» — аналог «Карты проекта» для frontend/: канвас
    домен → страница → блок → правило, правая панель «Свойства | Нарушения»,
@@ -225,10 +226,11 @@ function renderNoFrontend() {
     renderStatus(`<div class="front-empty">
         <div class="front-empty-icon">∅</div>
         <h3>frontend/ не заведён</h3>
-        <p class="hint">В проекте нет папки frontend/. Кнопка «⇄ ТЗ…» сгенерирует промпт-скелет по стандарту,
-        чтобы фронтенд был заведён ровно по правилам пакета.</p></div>`);
+        <p class="hint">В проекте нет папки frontend/. Каркас по стандарту стека (Vue 3, Vite, Pinia, Router)
+        создаёт шаг 3.1 «Стиль и каркас» на экране «Конвейер».</p></div>`);
     drawFrontCanvas(null);
-    renderTree(null);
+    const tree = $("frontTreeBody");
+    if (tree) tree.innerHTML = '<p class="hint">Папки frontend/ пока нет.</p>';
 }
 
 function renderErrorMessage(message) {
@@ -648,7 +650,15 @@ function propsPageId(node) {
     return parent?.id || "";
 }
 
+let lastProps = null;
 function renderProps() {
+    const same = lastProps === S0.selected;
+    lastProps = S0.selected;
+    if (!same) return drawProps();
+    return keepScroll($("frontProps"), [":self", ".front-props-body"], drawProps);
+}
+
+function drawProps() {
     const box = $("frontProps");
     if (!box) return;
     const node = S0.nodes.find((item) => item.id === S0.selected) || null;
@@ -938,6 +948,10 @@ function renderViolCount(graph) {
 }
 
 function renderViolationsPanel(graph) {
+    return keepScroll($("frontViolWrap"), [":self", "#frontViolBody"], () => drawViolationsPanel(graph));
+}
+
+function drawViolationsPanel(graph) {
     const box = $("frontViolBody");
     if (!box) return;
     const violations = graph.violations || [];
@@ -1002,6 +1016,10 @@ function wireFilters(box) {
 /* ---------- дерево структуры ---------- */
 
 function renderTree(graph) {
+    return keepScroll($("frontTreeBody"), [":self"], () => drawTree(graph));
+}
+
+function drawTree(graph) {
     const body = $("frontTreeBody");
     if (!body) return;
     if (!graph) {

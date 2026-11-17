@@ -81,7 +81,11 @@ export async function renderProject() {
     api("/api/devservers").catch(() => null),
     api("/api/pipeline/stack").catch(() => null),
   ]);
+  const top = root.scrollTop;
+  const opened = [...root.querySelectorAll("details")].map((d) => d.open);
   root.innerHTML = `<div class="pj-wrap"><h2>Настройки</h2>${pipelineCard()}${stackCard(stackInfo)}${serversCard(servers)}${testsCard(tests)}${gitCard()}</div>`;
+  root.querySelectorAll("details").forEach((d, i) => { d.open = !!opened[i]; });
+  root.scrollTop = top;
   const on = (selector, handler) => {
     const element = root.querySelector(selector);
     if (element) element.onclick = async () => {

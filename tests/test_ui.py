@@ -123,3 +123,17 @@ def test_редактор_только_vscode():
     assert "vscode://" in editor
     assert "cursor://" not in editor
     assert "pycharm://" not in editor
+
+
+def test_перерисовка_не_сбрасывает_прокрутку_и_фокус():
+    """Выбор в выпадающем списке настроек не должен кидать экран наверх."""
+    main = (JS_DIR / "pipeline" / "main.js").read_text(encoding="utf-8")
+    for part in ("ctx.track", "scrollSnapshot", "restoreScroll", "data-focus", "minHeight"):
+        assert part in main, part
+    settings = (JS_DIR / "pipeline" / "settings.js").read_text(encoding="utf-8")
+    assert 'ctx.go("settings")' not in settings.split("async function save")[1].split("function modeBlock")[0]
+    assert 'data-focus' in settings
+    assert "keepScroll" in (JS_DIR / "util.js").read_text(encoding="utf-8")
+    for name in ("inspectorview.js", "frontendview.js"):
+        assert "keepScroll" in (JS_DIR / name).read_text(encoding="utf-8"), name
+    assert "scrollTop" in (JS_DIR / "projectview.js").read_text(encoding="utf-8")

@@ -23,9 +23,7 @@ export async function renderSettings(ctx, body) {
 }
 
 async function save(ctx, path, payload) {
-  const answer = await ctx.act(path, payload);
-  if (answer) ctx.go("settings");
-  return answer;
+  return ctx.act(path, payload); // act() сам перерисовывает экран, второй раз не нужно
 }
 
 function modeBlock(ctx, data) {
@@ -40,7 +38,7 @@ function modeBlock(ctx, data) {
         h(
           "label",
           {class: "pl-modeopt" + (data.mode === key ? " on" : "")},
-          h("input", {type: "radio", name: "mode", checked: data.mode === key, onchange: () => save(ctx, "/api/pipeline/settings", {mode: key})}),
+          h("input", {type: "radio", name: "mode", "data-focus": "mode:" + key, checked: data.mode === key, onchange: () => save(ctx, "/api/pipeline/settings", {mode: key})}),
           h("b", null, name),
           h("span", {class: "hint"}, MODE_HINTS[key]),
         ),
@@ -85,7 +83,7 @@ function criterionRow(ctx, gate, c) {
   return h(
     "div",
     {class: "pl-crit" + (c.enabled ? "" : " off")},
-    h("input", {type: "checkbox", checked: c.enabled, title: "включён", onchange: (e) => save(ctx, "/api/pipeline/criterion", {gate: gate.key, key: c.key, enabled: e.target.checked})}),
+    h("input", {type: "checkbox", "data-focus": gate.key + ":" + c.key, checked: c.enabled, title: "включён", onchange: (e) => save(ctx, "/api/pipeline/criterion", {gate: gate.key, key: c.key, enabled: e.target.checked})}),
     h("b", null, c.title),
     h("span", {class: "hint"}, c.hint),
     h("span", {class: "spacer"}),
@@ -111,11 +109,11 @@ function rolesBlock(ctx, data) {
   const table = h("table", {class: "pl-table roles"}, h("thead", null, h("tr", null, h("th", null, "Роль"), h("th", null, "Рекомендация"), h("th", null, "Агент"), h("th", null, "Модель"))));
   const tbody = h("tbody");
   for (const role of data.roles) {
-    const agent = h("select", {onchange: (e) => save(ctx, "/api/pipeline/role", {role: role.key, agent: e.target.value, model: ""})},
+    const agent = h("select", {"data-focus": role.key + ":agent", onchange: (e) => save(ctx, "/api/pipeline/role", {role: role.key, agent: e.target.value, model: ""})},
       h("option", {value: "", selected: !role.agent}, "по умолчанию"),
       data.agents.map((a) => h("option", {value: a.id, selected: role.agent === a.id}, a.label)));
     const models = (agentInfo[role.agent || "claude"] || {models: []}).models || [];
-    const model = h("select", {onchange: (e) => save(ctx, "/api/pipeline/role", {role: role.key, agent: role.agent, model: e.target.value})},
+    const model = h("select", {"data-focus": role.key + ":model", onchange: (e) => save(ctx, "/api/pipeline/role", {role: role.key, agent: role.agent, model: e.target.value})},
       h("option", {value: "", selected: !role.model}, role.agent === "opencode" || !role.recommended ? "по умолчанию" : "рекомендация: " + role.recommended),
       models.filter((m) => m.id).map((m) => h("option", {value: m.id, selected: role.model === m.id}, m.name)));
     tbody.append(h("tr", null,
@@ -125,6 +123,6 @@ function rolesBlock(ctx, data) {
       h("td", null, model)));
   }
   table.append(tbody);
-  sec.append(table);
+  sec.append(h("div", {class: "pl-tablewrap"}, table));
   return sec;
 }

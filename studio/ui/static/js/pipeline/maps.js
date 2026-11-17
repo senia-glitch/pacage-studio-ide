@@ -123,5 +123,5 @@ export function renderMapView(ctx, body) {
     MAP_KINDS.map(([key, name]) => h("button", {class: kind === key ? "on" : "", onclick: () => { ctx.mapKind = key; ctx.go("map"); }}, name)),
   );
   body.append(h("p", {class: "hint"}, "Карты строятся сами из банка знаний: план — из черновиков, факт — из принятого, цвет — статус. Разрывы подсвечены красным."), tabs, holder);
-  renderMap(ctx, holder, kind);
+  ctx.track(renderMap(ctx, holder, kind));
 }

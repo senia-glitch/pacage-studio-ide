@@ -89,7 +89,7 @@ function stageCard(ctx, stage) {
   if (panel) card.append(panel);
   const gate = stage.gates.find((g) => g.key === ctx.gate);
   if (gate) card.append(h("div", {class: "pl-gatepanel", "data-gate": gate.key}, "Загрузка…"));
-  if (gate) loadGate(ctx, gate.key, card.querySelector(".pl-gatepanel"));
+  if (gate) ctx.track(loadGate(ctx, gate.key, card.querySelector(".pl-gatepanel")));
   return card;
 }
 
@@ -329,7 +329,7 @@ function gateBody(ctx, data) {
   if (mapKind) {
     const holder = h("div", {class: "pl-map", hidden: !ctx.showMap});
     out.push(h("div", null, h("button", {class: "ghost", onclick: () => { ctx.showMap = !ctx.showMap; ctx.go("path"); }}, ctx.showMap ? "Скрыть карту этапа" : "Показать карту этапа"), holder));
-    if (ctx.showMap) renderMap(ctx, holder, mapKind);
+    if (ctx.showMap) ctx.track(renderMap(ctx, holder, mapKind));
   }
   out.push(h("div", {class: "pl-layers"}, layer("1 · Проверки кодом", run ? (run.code.length ? "bad" : "ok") : ""), layer("2 · Независимая оценка", run && run.ratings ? (run.failing.length ? "bad" : "ok") : ""), layer("3 · Ваше решение", run && run.state === "passed" ? "ok" : "")));
   if (!run) {

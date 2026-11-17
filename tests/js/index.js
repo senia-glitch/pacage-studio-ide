@@ -8,3 +8,4 @@ import "./rendering.test.mjs";
 import "./savestate.test.mjs";
 import "./search.test.mjs";
 import "./storage.test.mjs";
+import "./keepscroll.test.mjs";

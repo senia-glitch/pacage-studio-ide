@@ -13,7 +13,7 @@ export async function renderBank(ctx, body) {
     h("div", {class: "pl-seg"}, Object.entries(STAGE_NAMES).map(([n, name]) => h("button", {class: String(view.stage) === n ? "on" : "", onclick: () => { view.stage = Number(n); ctx.go("bank"); }}, `${n} · ${name}`))),
     h(
       "select",
-      {onchange: (event) => { view.status = event.target.value; ctx.go("bank"); }},
+      {"data-focus": "bank-status", onchange: (event) => { view.status = event.target.value; ctx.go("bank"); }},
       [["", "все статусы"], ["proposed", "черновики"], ["accepted", "принято"], ["stale", "устарело"], ["rejected", "отклонено"]].map(([value, name]) => h("option", {value, selected: view.status === value}, name)),
     ),
   );
