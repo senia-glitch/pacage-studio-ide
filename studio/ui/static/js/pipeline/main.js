@@ -3,12 +3,14 @@
 import {api} from "../api.js";
 import {clear, h} from "./dom.js";
 import {renderBank} from "./bank.js";
+import {renderMapView} from "./maps.js";
 import {renderPath} from "./path.js";
 import {renderRequests} from "./requests.js";
 import {renderSettings} from "./settings.js";
 
 const VIEWS = [
   ["path", "Путь"],
+  ["map", "Карта системы"],
   ["bank", "Банк знаний"],
   ["requests", "Запросы на изменение"],
   ["settings", "Настройки"],
@@ -136,6 +138,7 @@ function draw() {
   const body = h("div", {class: "pl-body"});
   host.append(bar, jobBar(), h("div", {class: "pl-toast"}), body);
   if (ctx.view === "path") renderPath(ctx, body);
+  else if (ctx.view === "map") renderMapView(ctx, body);
   else if (ctx.view === "bank") renderBank(ctx, body);
   else if (ctx.view === "requests") renderRequests(ctx, body);
   else renderSettings(ctx, body);

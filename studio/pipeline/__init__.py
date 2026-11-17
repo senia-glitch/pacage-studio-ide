@@ -14,7 +14,7 @@ from .kinds import KINDS, SOURCE, STAGE_NAMES
 from .roles import ROLES
 from .settings import MODE_NAMES, MODES, PipelineSettings
 
-from . import entry, flow, stage1, stage2, stage3, stage4, stage5  # isort: skip  # noqa: E402
+from . import entry, flow, maps, stage1, stage2, stage3, stage4, stage5  # isort: skip  # noqa: E402
 
 __all__ = [
     "entry",
@@ -35,6 +35,7 @@ __all__ = [
     "gate",
     "run_code_layer",
     "flow",
+    "maps",
     "stage1",
     "stage2",
     "stage3",

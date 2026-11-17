@@ -22,6 +22,7 @@ from studio.pipeline import (
     ProjectBank,
     entry,
     flow,
+    maps,
     stage1,
     stage2,
     stage3,
@@ -268,6 +269,8 @@ class PipelineService:
             return self.record(query.get("id", [""])[0])
         if route == "/gate":
             return self.gate(query.get("key", [""])[0])
+        if route == "/map":
+            return maps.build(self.pl(), query.get("kind", ["trace"])[0])
         if route == "/er":
             return stage2.er(self.pl())
         if route == "/changes":

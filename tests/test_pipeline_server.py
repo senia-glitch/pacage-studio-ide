@@ -44,7 +44,7 @@ def test_not_started_state_and_errors(tmp_path):
     svc, _ = service(tmp_path)
     state = svc.state()
     assert state["started"] is False and state["stages"] == [] and state["mode"] == "gates"
-    for route in ("/bank", "/record", "/gate", "/er", "/changes"):
+    for route in ("/bank", "/record", "/gate", "/er", "/map", "/changes"):
         with pytest.raises(PipelineError) as err:
             svc.get(P + route, {})
         assert err.value.code == "not_started"
@@ -224,3 +224,14 @@ def test_http_routes_are_human_only_and_errors_are_plain(demo: Path) -> None:
                 break
         assert body["job"]["result"] == "создано записей: 2" and len(body["questions"]) == 2
         assert (demo / ".studio" / "bank").is_dir()
+
+
+def test_map_route_returns_columns_nodes_and_state_counts(tmp_path):
+    svc, _ = service(tmp_path)
+    reach_gate(svc)
+    data = svc.get(f"{P}/map", {"kind": ["trace"]})
+    assert data["title"] == "Карта системы" and data["columns"]
+    assert data["nodes"] and sum(data["counts"].values()) == len(data["nodes"])
+    assert {n["state"] for n in data["nodes"]} <= {"ok", "plan", "stale", "gap", "orphan"}
+    fallback = svc.get(f"{P}/map", {})
+    assert fallback["title"] == data["title"]

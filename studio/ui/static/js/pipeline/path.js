@@ -1,6 +1,7 @@
 /* Экран «Путь»: пять этапов с шагами и воротами, действия человека и решения на воротах. */
 
 import {GATE_STATE_NAMES, STATUS_NAMES, chip, h, statusChip} from "./dom.js";
+import {renderMap} from "./maps.js";
 
 const STEP_STATE = {done: "сделано", available: "можно", blocked: "ждёт", planned: "будет"};
 
@@ -279,6 +280,12 @@ function gateBody(ctx, data) {
         : h("span", {class: "hint"}, "этап ещё не подключён"),
     ),
   );
+  const mapKind = {2: "er", 3: "front", 4: "back", 5: "trace"}[data.gate.stage];
+  if (mapKind) {
+    const holder = h("div", {class: "pl-map", hidden: !ctx.showMap});
+    out.push(h("div", null, h("button", {class: "ghost", onclick: () => { ctx.showMap = !ctx.showMap; ctx.go("path"); }}, ctx.showMap ? "Скрыть карту этапа" : "Показать карту этапа"), holder));
+    if (ctx.showMap) renderMap(ctx, holder, mapKind);
+  }
   out.push(h("div", {class: "pl-layers"}, layer("1 · Проверки кодом", run ? (run.code.length ? "bad" : "ok") : ""), layer("2 · Независимая оценка", run && run.ratings ? (run.failing.length ? "bad" : "ok") : ""), layer("3 · Ваше решение", run && run.state === "passed" ? "ok" : "")));
   if (!run) {
     out.push(criteriaList(data.criteria));
