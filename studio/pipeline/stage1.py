@@ -551,36 +551,7 @@ def run_step(pl: Pipeline, key: str):
 
 
 def autopilot(pl: Pipeline, limit: int = 12) -> list[dict]:
-    """Автопилот этапа 1: идёт по шагам, пока не потребуется человек. Возвращает журнал шагов."""
-    if pl.settings.mode != "autopilot":
-        raise PipelineError("not_autopilot", "Автопилот включается в Настройках → Режим участия")
-    log: list[dict] = []
-    for _ in range(limit):
-        item = next_step(pl)
-        if item is None:
-            break
-        if item["key"] == "area":
-            log.append({"step": "area", "stop": "нужна идея"})
-            break
-        if item["key"] == "questions":
-            if not pl.bank.records("question"):
-                propose_questions(pl)
-            auto_answer(pl)
-            log.append({"step": "questions"})
-            continue
-        result = run_step(pl, item["key"])
-        entry = {"step": item["key"]}
-        if isinstance(result, dict) and result.get("gate"):
-            entry["gate"] = result["state"]
-            if result.get("human"):
-                entry["stop"] = (
-                    "нужно ваше решение" if result["state"] != "returned" else "доработка"
-                )
-                log.append(entry)
-                break
-            if result["state"] == "returned":
-                entry["stop"] = "ворота вернули на доработку"
-                log.append(entry)
-                break
-        log.append(entry)
-    return log
+    """Автопилот (общий ход конвейера, см. ``flow.autopilot``)."""
+    from . import flow
+
+    return flow.autopilot(pl, limit)

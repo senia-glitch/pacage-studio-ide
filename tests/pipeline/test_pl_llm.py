@@ -124,7 +124,9 @@ def test_opencode_model_list_parsing(monkeypatch):
     assert [m["id"] for m in agent.models()] == ["opencode-go/glm"]
     agent2 = OpenCodeAgent()
     monkeypatch.setattr(
-        OpenCodeAgent, "_list", staticmethod(lambda exe, *a: "" if a else "opencode-go/a\nother/b\n")
+        OpenCodeAgent,
+        "_list",
+        staticmethod(lambda exe, *a: "" if a else "opencode-go/a\nother/b\n"),
     )
     assert [m["id"] for m in agent2.models()] == ["opencode-go/a"]
     monkeypatch.setattr(OpenCodeAgent, "found", lambda self: "")

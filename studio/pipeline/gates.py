@@ -100,7 +100,7 @@ GATES: dict[str, GateDef] = {
             2,
             "Приёмка схемы БД",
             ("table",),
-            ("uncovered_table", "orphans_2b", "duplicates_2b", "stale_2"),
+            ("uncovered_table", "orphans_2b", "duplicates_2b", "schema_integrity", "stale_2"),
             (
                 _c("normalization", "Нормализация", "данные не дублируются, связи верные"),
                 _c(
@@ -217,6 +217,7 @@ CHECKS: dict[str, Callable[[ProjectBank, dict], list[Finding]]] = {
     "participants": lambda b, f: cov.unknown_participants(b),
     "uncovered_table": lambda b, f: cov.uncovered(b, "scenario", "table", skip=cov.no_data),
     "orphans_2b": lambda b, f: cov.orphans(b, ("table",)),
+    "schema_integrity": lambda b, f: cov.schema_integrity(b),
     "duplicates_2b": lambda b, f: cov.duplicates(b, ("table",)),
     "stale_2": lambda b, f: cov.stale_in(b, ("term", "variant", "scenario", "table")),
     "uncovered_page": lambda b, f: cov.uncovered(b, "scenario", "page"),

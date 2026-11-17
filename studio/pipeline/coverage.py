@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from studio.pipeline.graph import STALE
 
 from .bank import ProjectBank, _norm
+from .diagrams import schema_problems
 from .kinds import KINDS
 
 
@@ -208,3 +209,16 @@ def fact(facts: dict, key: str, message: str) -> list[Finding]:
     if value is None:
         return [Finding("not_checked", f"Не проверено: {message}")]
     return [Finding("failed", f"Не выполнено: {message}")]
+
+
+def schema_integrity(bank: ProjectBank) -> list[Finding]:
+    """Общая схема: у каждой таблицы есть первичный ключ, внешние ключи ведут в существующее."""
+    tables = [
+        {
+            "name": (t.get("attrs") or {}).get("name") or t["title"],
+            "columns": (t.get("attrs") or {}).get("columns") or [],
+        }
+        for t in bank.records("table")
+    ]
+    ids = tuple(t["id"] for t in bank.records("table"))
+    return [Finding("schema", f"Схема БД: {text}", ids) for text in schema_problems(tables)]

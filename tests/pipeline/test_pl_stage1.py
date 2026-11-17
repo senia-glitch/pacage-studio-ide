@@ -258,7 +258,7 @@ def test_autopilot_walks_the_stage_and_stops_for_the_human(tmp_path):
         (k, _inject(v, "c9") if k.startswith("Для каждой") else v) for k, v in agent.rules
     ]
     log = stage1.autopilot(pl)
-    steps_done = [e["step"] for e in log]
+    steps_done = [e.get("step") for e in log]
     assert steps_done[0] == "questions" and "boundaries" in steps_done
     assert "gate_problems" in steps_done
     # в автопилоте ворота проходят без человека; на требованиях id проблемы другой — пропуск

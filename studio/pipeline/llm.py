@@ -353,6 +353,7 @@ class Llm:
         self.settings = settings
         self.agents = agents or Agents()
         self.lock = threading.Lock()
+        self.feedback = ""  # замечания прошлого круга: добавляются к подсказкам ролей-авторов
 
     def resolve(self, role_key: str) -> tuple[Agent, str]:
         """Агент и модель роли: выбор пользователя, иначе первый найденный и рекомендация."""
@@ -376,6 +377,8 @@ class Llm:
 
     def ask(self, role_key: str, system: str, prompt: str, *, web: bool = False) -> Reply:
         agent, model = self.resolve(role_key)
+        if self.feedback and role_key != "evaluator":
+            prompt += "\n\nЗамечания прошлого круга — учти их:\n" + self.feedback
         started = time.time()
         reply = agent.run(
             system,
