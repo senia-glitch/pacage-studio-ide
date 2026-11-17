@@ -47,7 +47,9 @@ ALL_KEYS = {
 GATE_KEYS_2 = {
     key: {"score": 9, "evidence": "см. c1"}
     for key in ("completeness", "clarity", "noncontradiction", "size", "normalization", "standards",
-                "extensibility", "data_rules")
+                "extensibility", "data_rules", "scenario_fit", "states", "accessibility",
+                "test_quality", "permissions", "errors", "security", "idea_fit", "integrity",
+                "quality", "documentation")
 }  # fmt: skip
 
 
@@ -254,4 +256,133 @@ def stage1_rules_dynamic(requirements):
             },
         ),
         ("Для каждой проблемы сформулируй", requirements),
+    ]
+
+
+# ------------------------------------------------------------------ этапы 3–4
+
+
+class FakeCoder:
+    """Исполнитель без модели: пишет файл «реализации» и, если просят, портит тест."""
+
+    def __init__(self, tamper=None):
+        self.tasks = []
+        self.tamper = tamper
+
+    def run(self, role, task, project):
+        from studio.pipeline.coder import CodeResult
+
+        self.tasks.append((role, task))
+        target = project / "frontend" / "src" / "ui" / "pages" / "Record.vue"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("<template>запись</template>", encoding="utf-8")
+        if self.tamper and (project / self.tamper).exists():
+            (project / self.tamper).write_text("// исполнитель подогнал тест", encoding="utf-8")
+        return CodeResult(summary="сделано")
+
+
+class FakeTests:
+    """Запуск тестов по сценарию: на слой — очередь результатов, последний повторяется."""
+
+    def __init__(self, script):
+        self.script = {k: list(v) for k, v in script.items()}
+        self.runs = []
+
+    def run(self, layer):
+        self.runs.append(layer)
+        queue = self.script.get(layer, [])
+        return queue.pop(0) if len(queue) > 1 else queue[0]
+
+
+def red_then_green(failed_files=()):
+    from studio.pipeline.coder import TestResult
+
+    return [
+        TestResult(True, False, list(failed_files), "красный старт"),
+        TestResult(True, True, [], "всё зелёное"),
+    ]
+
+
+def rules_stage34(extra=()):
+    import re
+
+    def ids(prompt, after, pattern):
+        return re.findall(pattern, prompt.split(after, 1)[1])
+
+    def pages(prompt):
+        first = ids(prompt, "вызов системы):", r"(c\d+): Записаться")[0]
+        second = ids(prompt, "вызов системы):", r"(c\d+): Получить")
+        out = [
+            {
+                "title": "Запись",
+                "route": "/appointment",
+                "scenarios": [first],
+                "description": "форма записи",
+                "calls": [{"title": "создать запись"}],
+            },
+            {"title": "Плохая", "scenarios": ["c999"]},
+        ]
+        if second:
+            out.append({"title": "Напоминания", "scenarios": [second[0]], "calls": []})
+        return {"pages": out}
+
+    def contract(prompt):
+        cid = ids(prompt, "Вызовы без контракта:", r"(c\d+): создать запись")[0]
+        return {
+            "calls": [
+                {
+                    "id": cid,
+                    "method": "post",
+                    "path": "/api/appointments",
+                    "request": {"doctor_id": 1},
+                    "response": {"id": 1},
+                },
+                {"id": "c999", "method": "GET", "path": "/x"},
+                {"id": cid, "method": "FLY", "path": "/y"},
+            ]
+        }
+
+    def backend(prompt):
+        cid = ids(prompt, "для которых нужны эндпоинты:", r"(c\d+): создать запись")[0]
+        return {
+            "endpoints": [
+                {"call": cid, "summary": "создаёт запись", "tables": ["appointment"]},
+                {"call": "c999", "summary": "лишний"},
+            ]
+        }
+
+    def tests(layer):
+        def build(prompt):
+            cids = re.findall(r"^(c\d+): ", prompt.split("нужны тесты:", 1)[1], re.M)
+            base = "frontend/tests/pipeline/" if layer == "frontend" else "tests/pipeline/"
+            ext = ".test.ts" if layer == "frontend" else ".py"
+            out = [
+                {
+                    "criterion": c,
+                    "title": f"тест {c}",
+                    "file": f"{base}t_{c}{ext}",
+                    "code": f"// тест критерия {c}",
+                }
+                for c in cids
+            ]
+            out.append({"criterion": cids[0], "title": "в код", "file": "app/evil.py", "code": "x"})
+            return {"tests": out}
+
+        return build
+
+    return [
+        (
+            "Предложи стиль и каркас интерфейса",
+            {
+                "theme": "dark",
+                "notes": "строго",
+                "navigation": [{"role": "Пациент", "items": ["Запись"]}],
+            },
+        ),
+        ("Спроектируй страницы интерфейса", pages),
+        ("Для каждого вызова опиши контракт API", contract),
+        ("Спланируй бэкенд", backend),
+        ("Напиши тесты (Vitest", tests("frontend")),
+        ("Напиши тесты (pytest", tests("backend")),
+        *extra,
     ]

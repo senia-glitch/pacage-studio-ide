@@ -7,12 +7,12 @@
 
 from __future__ import annotations
 
-from . import prompts, stage1, stage2
+from . import prompts, stage1, stage2, stage3, stage4
 from .engine import Pipeline
 from .errors import PipelineError
 from .gates import GATES, STAGE_GATES, gate
 
-STAGES = {1: stage1, 2: stage2}
+STAGES = {1: stage1, 2: stage2, 3: stage3, 4: stage4}
 
 # Ворота → (роль-автор, шаг, который закрывает пробелы).
 REWORK = {
@@ -20,6 +20,8 @@ REWORK = {
     "requirements": ("analyst", stage1.write_requirements),
     "scenarios": ("scenarist", stage2.write_scenarios),
     "schema": ("db_designer", stage2.merge_schemas),
+    "frontend": ("ui_designer", stage3.plan_interface),
+    "backend": ("backend_designer", stage4.plan_backend),
 }
 
 
@@ -41,11 +43,11 @@ def all_steps(pl: Pipeline) -> dict[int, list[dict]]:
     return out
 
 
-def next_step(pl: Pipeline, skip: set[str] | frozenset[str] = frozenset()) -> dict | None:
+def next_step(pl: Pipeline, skip: set | frozenset = frozenset()) -> dict | None:
     """Первый шаг, доступный сейчас (``stage`` — этап). ``skip`` — шаги, которые уже пробовали."""
     for stage, items in all_steps(pl).items():
         for item in items:
-            if item["state"] == "available" and item["key"] not in skip:
+            if item["state"] == "available" and (stage, item["key"]) not in skip:
                 return {**item, "stage": stage}
     return None
 
@@ -112,7 +114,7 @@ def rework(pl: Pipeline, gate_key: str, run: dict) -> dict:
 # ---------------------------------------------------------------------- автопилот
 
 
-def autopilot(pl: Pipeline, limit: int = 40) -> list[dict]:
+def autopilot(pl: Pipeline, limit: int = 80, stop_after: int | None = None) -> list[dict]:
     """Идёт по шагам, пока не потребуется человек. Журнал — что сделано и почему остановились."""
     if pl.settings.mode != "autopilot":
         raise PipelineError("not_autopilot", "Автопилот включается в Настройки → Режим участия")
@@ -126,6 +128,9 @@ def autopilot(pl: Pipeline, limit: int = 40) -> list[dict]:
             log.append({"stop": "все шаги пройдены"})
             break
         key, stage = item["key"], item["stage"]
+        if stop_after is not None and stage > stop_after:
+            log.append({"stop": f"этап {stop_after} пройден"})
+            break
         if key == "area":
             log.append({"step": key, "stop": "нужна идея"})
             break
@@ -135,13 +140,17 @@ def autopilot(pl: Pipeline, limit: int = 40) -> list[dict]:
             stage1.auto_answer(pl)
             log.append({"step": key})
             continue
+        if key == "style":
+            stage3.build_style(pl, "light")  # в автопилоте — стандартная тема без вопросов
+            log.append({"step": key})
+            continue
         if key == "variants":
             stage2.propose_variants(pl)
             stage2.auto_choose(pl)
             log.append({"step": key})
             continue
         if not key.startswith("gate_"):
-            tried.add(key)
+            tried.add((stage, key))
         try:
             result = run_step(pl, stage, key)
         except PipelineError as error:

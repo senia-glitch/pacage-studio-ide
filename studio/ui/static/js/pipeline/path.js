@@ -97,7 +97,8 @@ function stepsRow(ctx, stage) {
     {class: "pl-steps"},
     items.map((step) => {
       const agent = step.role && !["area"].includes(step.key) && step.key !== "questions";
-      const clickable = step.state === "available" && agent && !running;
+      const runnable = !["area", "questions"].includes(step.key) && !step.key.startsWith("planned_");
+      const clickable = step.state === "available" && runnable && !running;
       return h(
         "div",
         {class: "pl-step " + step.state, title: STEP_STATE[step.state] + (step.hint ? " — " + step.hint : "")},
@@ -150,6 +151,10 @@ function stagePanel(ctx, stage) {
   if (stage.n === 2) {
     const unchosen = ctx.state.unchosen || [];
     return unchosen.length ? h("div", {class: "pl-panel"}, variantsPanel(ctx, unchosen)) : null;
+  }
+  if (stage.n === 3) {
+    const style = stage.steps.find((step) => step.key === "style");
+    return style && style.state === "available" ? h("div", {class: "pl-panel"}, stylePanel(ctx)) : null;
   }
   return null;
 }
@@ -206,6 +211,21 @@ function questionsPanel(ctx) {
       ),
     );
   }
+  return wrap;
+}
+
+function stylePanel(ctx) {
+  const wrap = h("div", {class: "pl-block"}, h("div", {class: "pl-label"}, "3.1 Стиль и каркас — один раз, выберите тему"));
+  const themes = ctx.state.themes || {};
+  wrap.append(
+    h(
+      "div",
+      {class: "opts"},
+      Object.entries(themes).map(([key, name]) => h("button", {onclick: () => ctx.act("/api/pipeline/style", {theme: key})}, name)),
+      h("button", {class: "ghost", title: "Дизайнер предложит тему, меню и каркас", onclick: () => ctx.act("/api/pipeline/run", {stage: 3, step: "style"})}, "Поручить дизайнеру"),
+    ),
+    h("div", {class: "hint"}, "В автопилоте берётся стандартная тема без вопросов. Стиль входит в каждое ТЗ интерфейса."),
+  );
   return wrap;
 }
 

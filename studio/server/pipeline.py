@@ -23,6 +23,7 @@ from studio.pipeline import (
     flow,
     stage1,
     stage2,
+    stage3,
 )
 from studio.pipeline.graph import GraphError
 from studio.pipeline.llm import CLAUDE_BY_TIER, Agents
@@ -109,6 +110,7 @@ class PipelineService:
         base = {
             "started": self.started(),
             "mode_names": MODE_NAMES,
+            "themes": stage3.THEMES,
             "stage_names": {str(k): v for k, v in STAGE_NAMES.items()},
             "job": self.job_view(),
         }
@@ -159,7 +161,9 @@ class PipelineService:
             "unchosen": [
                 {
                     **_brief(r),
-                    "variants": [_brief(v) for v in pl.bank.children(r["id"]) if v["kind"] == "variant"],
+                    "variants": [
+                        _brief(v) for v in pl.bank.children(r["id"]) if v["kind"] == "variant"
+                    ],
                 }
                 for r in stage2.unchosen(pl)
             ],
@@ -316,6 +320,9 @@ class PipelineService:
             return self.state()
         if route == "/answer":
             stage1.answer_question(pl, str(data.get("id") or ""), str(data.get("answer") or ""))
+            return self.state()
+        if route == "/style":
+            stage3.build_style(pl, str(data.get("theme") or "") or None)
             return self.state()
         if route == "/choose":
             stage2.choose_variant(pl, str(data.get("id") or ""))

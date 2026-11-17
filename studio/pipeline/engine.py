@@ -12,6 +12,7 @@ from pathlib import Path
 from . import prompts
 from .bank import ProjectBank
 from .changes import ChangeLog
+from .coder import AgentCoder, ProjectTests
 from .errors import PipelineError
 from .gates import GATES, gate
 from .keeper import GateKeeper
@@ -29,6 +30,8 @@ class Pipeline:
         self.llm = Llm(self.project, self.settings, agents)
         self.keeper = GateKeeper(self.bank, self.settings, self.project)
         self.changes = ChangeLog(self.bank, self.settings, self.project)
+        self.coder = AgentCoder(self.llm)  # исполнитель кода (этапы 3–4)
+        self.tests = ProjectTests(self.project)  # запуск тестов проекта
 
     # ------------------------------------------------------------------ ворота
 

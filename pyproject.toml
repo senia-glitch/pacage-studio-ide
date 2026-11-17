@@ -92,3 +92,8 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 # Конвейер: тексты подсказок ролям — перенос строк менял бы сами подсказки.
 "studio/pipeline/stage1.py" = ["E501"]
 "studio/pipeline/engine.py" = ["E501"]
+"studio/pipeline/stage3.py" = ["E501"]
+"studio/pipeline/stage4.py" = ["E501"]
+"studio/pipeline/tz.py" = ["E501"]
+"studio/pipeline/coder.py" = ["E501"]
+"studio/pipeline/prompts.py" = ["E501"]

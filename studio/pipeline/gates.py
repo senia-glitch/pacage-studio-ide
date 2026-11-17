@@ -86,7 +86,7 @@ GATES: dict[str, GateDef] = {
             "scenarios",
             2,
             "Приёмка сценариев",
-            ("term", "variant", "scenario"),
+            ("term", "variant", "scenario", "criterion"),
             ("uncovered_scenario", "orphans_2a", "duplicates_2a", "variant_choice", "participants"),
             (
                 _c("completeness", "Полнота", "основной ход и ошибки, исключения учтены"),

@@ -60,8 +60,10 @@ def test_start_exposes_five_stages_with_planned_steps(tmp_path):
     state = svc.post(f"{P}/start", {})
     assert state["started"] and [s["n"] for s in state["stages"]] == [1, 2, 3, 4, 5]
     first, second, third = state["stages"][:3]
-    assert first["open"] and not second["open"] and first["wired"] and not third["wired"]
-    assert [s["state"] for s in third["steps"]] == ["planned"] * 6
+    fifth = state["stages"][4]
+    assert first["open"] and not second["open"] and first["wired"] and third["wired"]
+    assert not fifth["wired"] and [s["state"] for s in fifth["steps"]] == ["planned"]
+    assert [s["state"] for s in third["steps"] if s["num"] != "gate"] == ["blocked"] * 6
     assert [g["key"] for g in first["gates"]] == ["problems", "requirements"]
     assert state["next"]["key"] == "area"
 

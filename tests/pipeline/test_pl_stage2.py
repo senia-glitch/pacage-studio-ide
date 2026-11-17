@@ -86,7 +86,8 @@ def test_manual_walk_through_stage2(tmp_path):
     assert run["state"] == "passed"
     assert all(t["status"] == ACCEPTED for t in pl.bank.records("table"))
     assert all(s["state"] == "done" for s in stage2.steps(pl))
-    assert flow.next_step(pl, {"constraints", "competitors", "domain"}) is None
+    optional = {(1, "constraints"), (1, "competitors"), (1, "domain")}
+    assert flow.next_step(pl, optional)["stage"] == 3  # этап 3 открылся, шаги этапа 2 кончились
 
 
 def test_merge_rejects_broken_schema_and_needs_drafts(tmp_path):
@@ -177,9 +178,9 @@ def test_autopilot_runs_both_stages_without_human(tmp_path):
     pl.settings.set_mode("autopilot")
     assert flow.autopilot(pl) == [{"step": "area", "stop": "нужна идея"}]
     stage1.set_area(pl, "Сайт записи к врачу")
-    log = flow.autopilot(pl)
+    log = flow.autopilot(pl, stop_after=2)
     steps = [e.get("step") for e in log]
-    assert steps[-1] is None and log[-1] == {"stop": "все шаги пройдены"}
+    assert steps[-1] is None and log[-1] == {"stop": "этап 2 пройден"}
     for needed in (
         "questions",
         "boundaries",
@@ -217,10 +218,10 @@ def test_autopilot_reworks_after_low_score_then_passes(tmp_path):
     pl, agent = build(tmp_path, evaluator)
     pl.settings.set_mode("autopilot")
     stage1.set_area(pl, "Сайт записи к врачу")
-    log = flow.autopilot(pl)
+    log = flow.autopilot(pl, stop_after=2)
     reworked = [e for e in log if e.get("rework")]
     assert reworked and reworked[0]["step"] == "gate_scenarios"
-    assert calls["n"] == 2 and log[-1] == {"stop": "все шаги пройдены"}
+    assert calls["n"] == 2 and log[-1] == {"stop": "этап 2 пройден"}
     assert any(
         "Замечания ворот к твоей работе" in c["prompt"] and "Ясность" in c["prompt"]
         for c in agent.calls
