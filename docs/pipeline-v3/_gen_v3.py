@@ -432,6 +432,13 @@ page = (
     + "".join(out)
     + "</svg></body></html>"
 )
+svg_doc = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    f'<svg viewBox="0 0 {W} {H}" width="{W}" height="{H}" xmlns="http://www.w3.org/2000/svg" '
+    "font-family=\"Segoe UI, Arial, sans-serif\">"
+    f'<rect width="{W}" height="{H}" fill="#ffffff"/>{defs}' + "".join(out) + "</svg>"
+)
+pathlib.Path(__file__).with_name("v3.svg").write_text(svg_doc, encoding="utf-8")
 target = pathlib.Path(__file__).with_name("v3.html")
 target.write_text(page, encoding="utf-8")
 print("ok", target, "H=", H, "tops=", tops)
