@@ -154,12 +154,12 @@ def test_diagram_people_become_roles_of_the_scenario(make):
     problem = p.act("add_problem", {"scenario": scenario["id"], "title": "Не дозвониться", "body": "часто", "importance": "высокая"})["id"]
     p.act("accept", {"id": problem})
     assert [r["title"] for r in p.roles_of(scenario["id"])] == ["Клиент"]
-    p.tokens["t"] = {"kind": "helper", "run": Run("x", "t"), "allowed": {"как есть"}, "target": scenario["id"], "asked": False, "note": "",
+    p.tokens["t"] = {"kind": "helper", "run": Run("x", "t"), "allowed": {"решение"}, "target": scenario["id"], "asked": False, "note": "",
                      "created": 0, "auto": False}
     diagram = {"participants": ["Клиент", "Сайт", "Администратор"], "steps": [
         {"from": "Клиент", "to": "Сайт", "text": "Заполняет заявку", "pain": {"what": "Не дозвониться"}},
         {"from": "Сайт", "to": "Администратор", "text": "Передаёт заявку"},
         {"from": "Администратор", "to": "Клиент", "text": "Отвечает"}]}
-    result = p.tool_call("t", "graph_apply", {"ops": [{"op": "add_card", "kind": "как есть", "title": "Как есть: Запись", "attrs": {"diagram": diagram}}]})
+    result = p.tool_call("t", "graph_apply", {"ops": [{"op": "add_card", "kind": "решение", "title": "Решение: Запись", "attrs": {"diagram": diagram}}]})
     assert "Добавлено карточек: 1" in result, result
     assert sorted(r["title"] for r in p.roles_of(scenario["id"])) == ["Администратор", "Клиент"]      # компонент не добавлен

@@ -87,6 +87,7 @@ class Project:
         self.base_url = ""
         self.extra_env: dict[str, str] = {}  # добавка к окружению хода (токен моста в студии)
         self._flow = self._load_flow()
+        self._migrate_requirements()
 
     # ------------------------------------------------------------------ состояние
 
@@ -164,12 +165,52 @@ class Project:
                     "Нет компонентов системы (Сайт, Админка…): диаграммы и проверка перед выгрузкой не заработают. "
                     "Примите хотя бы один компонент на шаге «Роли»"
                 )
+            legacy = [c for c in self.store.snapshot()["cards"] if c["kind"] == flow.LEGACY_ASIS]
+            if legacy:
+                out.append(
+                    f"В проекте остались диаграммы «как есть» прежней цепочки ({len(legacy)}): "
+                    "новая цепочка строится от проблем к требованиям и решениям и их не использует"
+                )
             stale = {i["scenario"] for i in check.issues(self) if i["code"] == "diagram"}
             if stale:
                 out.append(
                     f"Диаграммы не соответствуют графу в сценариях: {len(stale)}. Их перестроит проверка перед выгрузкой"
                 )
         return out
+
+    def _migrate_requirements(self) -> None:
+        """Проекты прежней цепочки: варианты решения висели на проблемах. Теперь они вырастают из требований.
+
+        Для такой проблемы создаётся требование «Решить проблему: …» (принято, если принята проблема), и варианты
+        переезжают к нему: ничего не теряется, выбранные решения остаются выбранными.
+        """
+        snap = self.store.snapshot()
+        cards = {c["id"]: c for c in snap["cards"]}
+        by_problem: dict[str, list[dict]] = {}
+        for edge in snap["edges"]:
+            if edge["kind"] != "детализирует":
+                continue
+            child, parent = cards.get(edge["from"]), cards.get(edge["to"])
+            if child and parent and child["kind"] == flow.VARIANT and parent["kind"] == flow.PROBLEM:
+                by_problem.setdefault(parent["id"], []).append(edge)
+        ops: list[dict] = []
+        for number, (problem_id, edges) in enumerate(by_problem.items(), 1):
+            problem = cards[problem_id]
+            ref = f"m{number}"
+            ops.append(
+                {
+                    "op": "add_card",
+                    "ref": ref,
+                    "kind": flow.REQUIREMENT,
+                    "title": _clip(f"Решить проблему: {problem['title']}", 200),
+                    "body": _clip(problem.get("body"), 250),
+                    "status": problem["status"],
+                    "parent": problem_id,
+                }
+            )
+            ops += [{"op": "update_edge", "id": e["id"], "to": f"@{ref}"} for e in edges]
+        if ops:
+            self.store.apply(ops, "package:migration", note="Требования для прежних проблем с решениями")
 
     def state(self) -> dict:
         return {
@@ -257,19 +298,20 @@ class Project:
         ]
 
     def built(self, skip: str = "") -> list[str]:
-        """Что уже построено по другим сценариям: проблемы и выбранные решения; новое согласуется с этим."""
+        """Что уже построено по другим сценариям: требования и выбранные решения; новое согласуется с этим."""
         out = []
         for scenario in self._accepted_all(flow.SCENARIO):
             problems = self._accepted(flow.PROBLEM, scenario["id"])
             if scenario["id"] == skip or not problems:
                 continue
-            chosen = {s["problem"]: s["title"] for s in self._solved(scenario["id"])}
-            out.append(
-                f"«{scenario['title']}»: "
-                + "; ".join(
-                    f"{p['title']} → {chosen.get(p['title'], 'решения нет')}" for p in problems
-                )
+            chosen = {s["requirement"]: s["title"] for s in self._solved(scenario["id"])}
+            requirements = [r for p in problems for r in self._accepted(flow.REQUIREMENT, p["id"])]
+            items = (
+                [f"{r['title']} → {chosen.get(r['title'], 'решения нет')}" for r in requirements]
+                if requirements
+                else [p["title"] for p in problems]
             )
+            out.append(f"«{scenario['title']}»: " + "; ".join(items))
         return out[:12]
 
     def knowledge(self, skip: str = "") -> str:
@@ -353,7 +395,7 @@ class Project:
         card = self.card(str(d.get("id") or ""))
         if card["kind"] == flow.SPHERE:
             raise EngineError("forbidden", "Сферу удалить нельзя: её можно переписать")
-        if card["kind"] not in (flow.ASIS, flow.SOLUTION):
+        if card["kind"] not in (flow.LEGACY_ASIS, flow.SOLUTION):
             self._reject(card["kind"], card["title"].lower())
         self._human(
             [{"op": "delete_card", "id": i} for i in self._subtree(card["id"])],
@@ -594,14 +636,25 @@ class Project:
             )
         }
 
-    def do_add_variant(self, d: dict) -> dict:
+    def do_add_requirement(self, d: dict) -> dict:
+        """Своё требование к системе: оно вырастает из проблемы сценария."""
         problem = self.card(str(d.get("problem") or ""))
         if problem["kind"] != flow.PROBLEM:
-            raise EngineError("bad_kind", "Вариант решения привязывается к проблеме")
-        return {"id": self._add_unique(flow.VARIANT, d.get("title"), d.get("body"), problem["id"])}
+            raise EngineError("bad_kind", "Требование вырастает из проблемы")
+        return {
+            "id": self._add_unique(flow.REQUIREMENT, d.get("title"), d.get("body"), problem["id"])
+        }
+
+    def do_add_variant(self, d: dict) -> dict:
+        requirement = self.card(str(d.get("requirement") or ""))
+        if requirement["kind"] != flow.REQUIREMENT:
+            raise EngineError("bad_kind", "Вариант решения вырастает из требования")
+        return {
+            "id": self._add_unique(flow.VARIANT, d.get("title"), d.get("body"), requirement["id"])
+        }
 
     def do_choose_variant(self, d: dict) -> dict:
-        """Выбрать один вариант решения проблемы: он принят, остальные варианты этой проблемы убираются."""
+        """Выбрать один вариант решения требования: он принят, остальные варианты этого требования убираются."""
         variant = self.card(str(d.get("id") or ""))
         snap = self.store.snapshot()
         parent = next(
@@ -623,8 +676,8 @@ class Project:
         """Шаги диаграммы последовательности, написанные человеком («1. Кто → Кому: что»): строим по ним диаграмму."""
         scenario = self.card(str(d.get("scenario") or ""))
         kind = str(d.get("kind") or "")
-        if kind not in (flow.ASIS, flow.SOLUTION):
-            raise EngineError("bad_kind", "Диаграмма бывает «как есть» или «решение»")
+        if kind != flow.SOLUTION:
+            raise EngineError("bad_kind", "Диаграмма бывает только «решение»")
         diagram = diagrams.parse_text(str(d.get("text") or ""))
         if not diagram["steps"]:
             raise EngineError(
@@ -636,7 +689,7 @@ class Project:
                 [{"op": "update_card", "id": existing[0]["id"], "attrs": {"diagram": diagram}}]
             )
         else:
-            prefix = "Как есть" if kind == flow.ASIS else "Решение"
+            prefix = "Решение"
             self._human(
                 [
                     {
@@ -768,7 +821,7 @@ class Project:
                 "kind": kind,
                 "sphere": sphere,
             }
-        if kind == "variants":
+        if kind == "requirements":
             # ids — проблемы (одна или несколько); без ids — все принятые проблемы принятых сценариев
             if ids:
                 problems = [self.card(i) for i in ids]
@@ -785,14 +838,38 @@ class Project:
             if not problems:
                 raise EngineError("no_problems", "Сначала примите проблемы сценария")
             return {
-                "title": "Помощник предлагает варианты автоматизации…",
+                "title": "Помощник формулирует требования к системе…",
                 "kind": kind,
                 "problems": problems,
                 "total": len(problems),
             }
-        if kind in ("problems", "asis", "solution"):
+        if kind == "variants":
+            # ids — требования (одно или несколько); без ids — все принятые требования
+            if ids:
+                requirements = [self.card(i) for i in ids]
+                requirements = [
+                    r
+                    for r in requirements
+                    if r["kind"] == flow.REQUIREMENT and r["status"] == ACCEPTED
+                ]
+            else:
+                requirements = [
+                    r
+                    for s in self.cards(flow.SCENARIO)
+                    if s["status"] == ACCEPTED
+                    for r in self._requirements_of(s["id"])
+                ]
+            if not requirements:
+                raise EngineError("no_requirements", "Сначала примите требования к системе")
+            return {
+                "title": "Помощник предлагает варианты автоматизации…",
+                "kind": kind,
+                "requirements": requirements,
+                "total": len(requirements),
+            }
+        if kind in ("problems", "solution"):
             if kind != "problems":
-                self._need_components()  # диаграммы строятся из единого списка имён: нужны компоненты
+                self._need_components()  # диаграмма строится из единого списка имён: нужны компоненты
             scenarios = (
                 [self.card(i) for i in ids]
                 if ids
@@ -801,21 +878,14 @@ class Project:
             scenarios = [s for s in scenarios if s["kind"] == flow.SCENARIO]
             if not scenarios:
                 raise EngineError("no_scenarios", "Нет принятых сценариев")
-            if kind == "asis":
-                scenarios = [s for s in scenarios if self._accepted(flow.PROBLEM, s["id"])]
-                if not scenarios:
-                    raise EngineError("no_problems", "Сначала примите проблемы сценария")
             if kind == "solution":
                 scenarios = [s for s in scenarios if self._solved(s["id"])]
                 if not scenarios:
                     raise EngineError(
-                        "no_variant", "Сначала выберите вариант решения хотя бы для одной проблемы"
+                        "no_variant",
+                        "Сначала выберите вариант решения хотя бы для одного требования",
                     )
-            names = {
-                "problems": "проблемы",
-                "asis": "диаграмму «как есть»",
-                "solution": "диаграмму «решение»",
-            }
+            names = {"problems": "проблемы", "solution": "диаграмму «решение»"}
             return {
                 "title": f"Помощник предлагает {names[kind]}…",
                 "kind": kind,
@@ -827,19 +897,42 @@ class Project:
     def _accepted(self, kind: str, parent_id: str) -> list[dict]:
         return [c for c in self.cards(kind, parent_id) if c["status"] == ACCEPTED]
 
+    def _requirements_of(self, scenario_id: str) -> list[dict]:
+        """Принятые требования сценария: из принятых проблем."""
+        return [
+            r
+            for p in self._accepted(flow.PROBLEM, scenario_id)
+            for r in self._accepted(flow.REQUIREMENT, p["id"])
+        ]
+
+    def _unsolved_requirements(self, scenario_id: str) -> list[dict]:
+        """Принятые требования сценария, у которых ещё нет выбранного варианта решения."""
+        return [
+            r for r in self._requirements_of(scenario_id) if not self._accepted(flow.VARIANT, r["id"])
+        ]
+
     def _solved(self, scenario_id: str) -> list[dict]:
-        """Принятые проблемы сценария, у которых выбран вариант решения: [{problem, title, body}]."""
+        """Принятые требования сценария с выбранным вариантом решения: [{problem, requirement, title, body}]."""
         out = []
         for problem in self._accepted(flow.PROBLEM, scenario_id):
-            for variant in self._accepted(flow.VARIANT, problem["id"]):
-                out.append(
-                    {
-                        "problem": problem["title"],
-                        "title": variant["title"],
-                        "body": variant["body"],
-                    }
-                )
+            for requirement in self._accepted(flow.REQUIREMENT, problem["id"]):
+                for variant in self._accepted(flow.VARIANT, requirement["id"]):
+                    out.append(
+                        {
+                            "problem": problem["title"],
+                            "requirement": requirement["title"],
+                            "title": variant["title"],
+                            "body": variant["body"],
+                        }
+                    )
         return out
+
+    def _parent_of(self, card_id: str, snap: dict | None = None) -> str:
+        snap = snap or self.store.snapshot()
+        return next(
+            (e["to"] for e in snap["edges"] if e["from"] == card_id and e["kind"] == "детализирует"),
+            "",
+        )
 
     def _work(self, run: Run, plan: dict) -> None:
         try:
@@ -854,6 +947,8 @@ class Project:
                 self._job_analysis(run, plan)
             elif kind in ("roles", "scenarios"):
                 self._job_global(run, kind)
+            elif kind == "requirements":
+                self._job_requirements(run, plan)
             elif kind == "variants":
                 self._job_variants(run, plan)
             else:
@@ -1090,7 +1185,7 @@ class Project:
 
     def _job_scenarios(self, run: Run, plan: dict) -> None:
         kind = plan["kind"]
-        if kind in ("asis", "solution"):
+        if kind == "solution":
             self._need_components()
         run.total, run.done = len(plan["scenarios"]), 0
         for scenario in plan["scenarios"]:
@@ -1100,16 +1195,6 @@ class Project:
                 skip=scenario["id"]
             )  # новое согласуется с уже построенными сценариями
             info = self.scenario_info(self.card(scenario["id"]))
-            problems = [
-                c["title"] + (f": {c['body']}" if c["body"] else "")
-                for c in self._accepted(flow.PROBLEM, scenario["id"])
-            ]
-            asis = self.cards(flow.ASIS, scenario["id"])
-            asis_text = (
-                diagrams.to_text(asis[0]["attrs"]["diagram"])
-                if asis and (asis[0].get("attrs") or {}).get("diagram")
-                else ""
-            )
             if kind == "problems":
                 note = flow.problems(
                     ctx,
@@ -1118,55 +1203,60 @@ class Project:
                     self.rejected(flow.PROBLEM),
                 )
                 allowed = {flow.PROBLEM}
-            elif kind == "asis":
-                note, allowed = flow.asis(ctx, info, problems, self._names_groups()), {flow.ASIS}
             else:
-                solved = self._solved(scenario["id"])
-                unsolved = [
-                    c["title"]
-                    for c in self._accepted(flow.PROBLEM, scenario["id"])
-                    if c["title"] not in {s["problem"] for s in solved}
-                ]
                 note, allowed = (
-                    flow.solution(ctx, info, solved, unsolved, asis_text, self._names_groups()),
+                    flow.solution(
+                        ctx,
+                        info,
+                        self._solved(scenario["id"]),
+                        [r["title"] for r in self._unsolved_requirements(scenario["id"])],
+                        self._names_groups(),
+                    ),
                     {flow.SOLUTION},
                 )
             self._converse(run, note, allowed, scenario["id"])
             run.done += 1
             self._touch()
 
-    def _job_variants(self, run: Run, plan: dict) -> None:
-        """Варианты решения — по одной проблеме за ход."""
+    def _job_requirements(self, run: Run, plan: dict) -> None:
+        """Требования к системе — по одной проблеме за ход: они вырастают из проблемы."""
         run.total, run.done = len(plan["problems"]), 0
         snap = self.store.snapshot()
         for problem in plan["problems"]:
             if run.stop:
                 return
-            parent = next(
-                (
-                    e["to"]
-                    for e in snap["edges"]
-                    if e["from"] == problem["id"] and e["kind"] == "детализирует"
-                ),
-                "",
+            scenario_id = self._parent_of(problem["id"], snap)
+            ctx = self.knowledge(skip=scenario_id)
+            note = flow.requirements(
+                ctx,
+                self.scenario_info(self.card(scenario_id)),
+                {"title": problem["title"], "body": problem["body"]},
+                [c["title"] for c in self.cards(flow.REQUIREMENT, problem["id"])],
+                self.rejected(flow.REQUIREMENT),
             )
-            ctx = self.knowledge(skip=parent)
-            info = self.scenario_info(self.card(parent))
-            asis = self.cards(flow.ASIS, parent)
-            asis_text = (
-                diagrams.to_text(asis[0]["attrs"]["diagram"])
-                if asis and (asis[0].get("attrs") or {}).get("diagram")
-                else ""
-            )
+            self._converse(run, note, {flow.REQUIREMENT}, problem["id"])
+            run.done += 1
+            self._touch()
+
+    def _job_variants(self, run: Run, plan: dict) -> None:
+        """Варианты решения — по одному требованию за ход: они вырастают из требования."""
+        run.total, run.done = len(plan["requirements"]), 0
+        snap = self.store.snapshot()
+        for requirement in plan["requirements"]:
+            if run.stop:
+                return
+            problem = self.card(self._parent_of(requirement["id"], snap))
+            scenario_id = self._parent_of(problem["id"], snap)
+            ctx = self.knowledge(skip=scenario_id)
             note = flow.variants(
                 ctx,
-                info,
+                self.scenario_info(self.card(scenario_id)),
+                {"title": requirement["title"], "body": requirement["body"]},
                 {"title": problem["title"], "body": problem["body"]},
-                asis_text,
-                [c["title"] for c in self.cards(flow.VARIANT, problem["id"])],
+                [c["title"] for c in self.cards(flow.VARIANT, requirement["id"])],
                 self.rejected(flow.VARIANT),
             )
-            self._converse(run, note, {flow.VARIANT}, problem["id"])
+            self._converse(run, note, {flow.VARIANT}, requirement["id"])
             run.done += 1
             self._touch()
 
@@ -1385,9 +1475,8 @@ class Project:
             if not title:
                 raise EngineError("bad_title", f"Операция {number}: нужен title")
             parent = ctx["target"] or sphere["id"]
-            replaces = kind in (
-                flow.ASIS,
-                flow.SOLUTION,
+            replaces = (
+                kind == flow.SOLUTION
             )  # диаграмма сценария одна: новая заменяет старую, а не считается дублем
             if not replaces and (
                 title.lower() in self.rejected(kind)
@@ -1438,7 +1527,7 @@ class Project:
                 actors = {a.lower() for c in usecase["cases"] for a in c["actors"]}
                 links = [{"to": roles[a]["id"], "kind": flow.PARTICIPATES} for a in actors]
                 attrs = {"usecase": usecase}
-            elif kind in (flow.ASIS, flow.SOLUTION):
+            elif kind == flow.SOLUTION:
                 try:
                     diagram = diagrams.normalize(
                         {
@@ -1716,7 +1805,9 @@ class Project:
         elif do == "choose_variant":
             self.do_choose_variant({"id": card_id})
         elif do == "suggest_variants":
-            self._job_variants(run, {"problems": [self.card(card_id)]})
+            self._job_variants(run, {"requirements": [self.card(card_id)]})
+        elif do == "suggest_requirements":
+            self._job_requirements(run, {"problems": [self.card(card_id)]})
         elif do == "edit":
             card = self.card(card_id)
             op = {"op": "update_card", "id": card_id}
@@ -1731,24 +1822,17 @@ class Project:
         run.total, run.done = total, done
 
     def _rebuild(self, run: Run, scenario: dict) -> None:
-        """Диаграммы сценария заново по принятым проблемам и выбранным решениям; если строить не из чего — убрать."""
+        """Диаграмма «решение» сценария заново по выбранным решениям; если строить не из чего — убрать."""
         sid = scenario["id"]
-        for kind, ready in (
-            (flow.ASIS, bool(self._accepted(flow.PROBLEM, sid))),
-            (flow.SOLUTION, bool(self._solved(sid))),
-        ):
-            if ready:
-                self._job_scenarios(
-                    run,
-                    {"kind": "asis" if kind == flow.ASIS else "solution", "scenarios": [scenario]},
-                )
-            else:
-                old = self.cards(kind, sid)
-                if old:
-                    self._human(
-                        [{"op": "delete_card", "id": c["id"]} for c in old],
-                        "Диаграмма убрана: строить не из чего",
-                    )
+        if self._solved(sid):
+            self._job_scenarios(run, {"kind": "solution", "scenarios": [scenario]})
+            return
+        old = self.cards(flow.SOLUTION, sid)
+        if old:
+            self._human(
+                [{"op": "delete_card", "id": c["id"]} for c in old],
+                "Диаграмма убрана: строить не из чего",
+            )
 
     # ------------------------------------------------------------------ автопилот
 
@@ -1935,8 +2019,8 @@ class Project:
                 ("роли", flow.ROLE),
                 ("сценарии", flow.SCENARIO),
                 ("проблемы", flow.PROBLEM),
+                ("требования", flow.REQUIREMENT),
                 ("варианты", flow.VARIANT),
-                ("«как есть»", flow.ASIS),
                 ("«решение»", flow.SOLUTION),
             )
         ]
@@ -2053,7 +2137,7 @@ class Project:
         self._set_confirmed(True)
 
     def _each_scenario(self, run: Run) -> int:
-        """Режим «по сценариям»: каждый сценарий целиком (проблемы → «как есть» → решения → «решение»), и только потом следующий.
+        """Режим «по сценариям»: каждый сценарий целиком (проблемы → требования → варианты → «решение»), и только потом следующий.
         Сначала доводятся уже имеющиеся по одному, затем по одному добавляются новые, пока агент не скажет «основное покрыто»."""
         self._stage(run, "сценарии")
         cards = self.cards(flow.SCENARIO)
@@ -2202,34 +2286,39 @@ class Project:
         if not self._accepted(flow.PROBLEM, sid):
             run.notes.append(f"Сценарий «{scenario['title']}»: проблем не принято, пропущен")
             return
-        if run.improve or not self.cards(
-            flow.ASIS, sid
-        ):  # в режиме улучшения диаграмма перестраивается по обновлённым проблемам
-            self._stage(run, f"«как есть», сценарий {label}")
-            self._job_scenarios(run, {"kind": "asis", "scenarios": [scenario]})
+        self._stage(run, f"требования к системе, сценарий {label}")
+        for problem in self._accepted(flow.PROBLEM, sid):
+            self._step_cards(
+                run,
+                f"требования к проблеме «{problem['title']}»",
+                flow.REQUIREMENT,
+                problem["id"],
+                "Принимай требования «Система должна…», которые по-настоящему устраняют проблему, проверяемы, не называют способ "
+                "реализации и лежат в границах системы.",
+                lambda problem=problem: self._job_requirements(run, {"problems": [problem]}),
+            )
             if run.stop:
                 return
+        if not self._requirements_of(sid):
+            run.notes.append(f"Сценарий «{scenario['title']}»: требований не принято, пропущен")
+            return
         self._stage(run, f"варианты решения, сценарий {label}")
-        unsolved = [
-            p
-            for p in self._accepted(flow.PROBLEM, sid)
-            if not self._accepted(flow.VARIANT, p["id"])
-        ]
-        fresh = [p for p in unsolved if not self.cards(flow.VARIANT, p["id"])]
+        unsolved = self._unsolved_requirements(sid)
+        fresh = [r for r in unsolved if not self.cards(flow.VARIANT, r["id"])]
         if fresh:
-            self._job_variants(run, {"problems": fresh})
+            self._job_variants(run, {"requirements": fresh})
             if run.stop:
                 return
-        for problem in unsolved:
+        for requirement in unsolved:
             pending = [
-                c for c in self.cards(flow.VARIANT, problem["id"]) if c["status"] == PROPOSED
+                c for c in self.cards(flow.VARIANT, requirement["id"]) if c["status"] == PROPOSED
             ]
             items = [{"id": c["id"], "title": c["title"], "body": c["body"]} for c in pending]
             accept, _ = self._pilot_decide(
                 run,
-                f"решение проблемы «{problem['title']}»",
+                f"решение требования «{requirement['title']}»",
                 items,
-                "Выбери не более ОДНОГО варианта, который лучше всего решает проблему в границах системы; "
+                "Выбери не более ОДНОГО варианта, который лучше всего выполняет требование в границах системы; "
                 "если ни один не подходит — оставь accept пустым.",
             )
             if run.stop:
@@ -2240,25 +2329,17 @@ class Project:
             else:
                 for c in pending:
                     self.do_remove({"id": c["id"]})
-        dropped = [
-            p
-            for p in self._accepted(flow.PROBLEM, sid)
-            if not self._accepted(flow.VARIANT, p["id"])
-        ]
-        for problem in dropped:  # без подходящего решения проблема не остаётся висеть в графе
-            self.do_remove({"id": problem["id"]})
+        for requirement in self._unsolved_requirements(sid):
+            self.do_remove({"id": requirement["id"]})  # без подходящего решения требование не висит в графе
             run.notes.append(
-                f"Проблема «{problem['title']}» убрана: подходящего решения в границах нет"
+                f"Требование «{requirement['title']}» убрано: подходящего решения в границах нет"
             )
-        if dropped:  # «как есть» должна совпадать с оставшимися проблемами
-            if self._accepted(flow.PROBLEM, sid):
-                self._job_scenarios(run, {"kind": "asis", "scenarios": [scenario]})
-            else:
-                self._human(
-                    [{"op": "delete_card", "id": c["id"]} for c in self.cards(flow.ASIS, sid)]
+        for problem in self._accepted(flow.PROBLEM, sid):
+            if not self.cards(flow.REQUIREMENT, problem["id"]):
+                self.do_remove({"id": problem["id"]})  # проблема без требований не остаётся в графе
+                run.notes.append(
+                    f"Проблема «{problem['title']}» убрана: требований к ней в границах нет"
                 )
-            if run.stop:
-                return
         if self._solved(sid) and (run.improve or not self.cards(flow.SOLUTION, sid)):
             self._stage(run, f"диаграмма «решение», сценарий {label}")
             self._job_scenarios(run, {"kind": "solution", "scenarios": [scenario]})

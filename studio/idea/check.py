@@ -1,6 +1,7 @@
 """Проверка согласованности графа перед выгрузкой.
 
-Код сам находит точные разногласия (``issues``): пустое, без решения, несвязанное, устаревшие диаграммы.
+Код сам находит точные разногласия (``issues``): пустое, проблема без требования, требование без решения, несвязанное,
+устаревшая диаграмма.
 Независимая модель-проверяющий один раз читает граф (``graph_text``), находит смысловые разногласия и отвечает по пунктам кода.
 Варианты правок и формулировки вопросов строит код по фиксированным шаблонам (``build_items``): модель только указывает, какие карточки
 и что рекомендует. Документ строится по графу, поэтому правится граф, а не документ.
@@ -15,7 +16,7 @@ from studio.idea.graph import ACCEPTED
 
 from . import diagrams, flow
 
-FIXES = ("remove", "choose_variant", "suggest_variants", "edit", "rebuild")
+FIXES = ("remove", "choose_variant", "suggest_variants", "suggest_requirements", "edit", "rebuild")
 IMPORTANCE = ("низкая", "средняя", "высокая", "критическая")
 SEMANTIC = ("boundary", "duplicate", "contradiction")  # что находит модель; остальное находит код
 NEEDS_ANSWER = ("empty", "no_decision")  # по этим пунктам модель говорит, как исправить
@@ -31,10 +32,10 @@ def short(text: str, n: int = 60) -> str:
 
 
 def basis(project, scenario_id: str, kind: str) -> str:
-    """Отпечаток того, по чему построена диаграмма: принятые проблемы и (для решения) выбранные варианты."""
+    """Отпечаток того, по чему построена диаграмма «решение»: принятые проблемы, требования и выбранные варианты."""
     problems = [[p["title"], p["body"]] for p in project._accepted(flow.PROBLEM, scenario_id)]
     solved = (
-        [[s["problem"], s["title"], s["body"]] for s in project._solved(scenario_id)]
+        [[s["problem"], s["requirement"], s["title"], s["body"]] for s in project._solved(scenario_id)]
         if kind == flow.SOLUTION
         else []
     )
@@ -43,19 +44,10 @@ def basis(project, scenario_id: str, kind: str) -> str:
     ).hexdigest()[:12]
 
 
-def _pains(card: dict) -> set[str]:
-    steps = ((card.get("attrs") or {}).get("diagram") or {}).get("steps") or []
-    return {
-        str(s["pain"].get("what", "")).strip().lower()
-        for s in steps
-        if isinstance(s.get("pain"), dict) and s["pain"].get("what")
-    }
-
-
 def issues(project) -> list[dict]:
     """Разногласия, видные без чтения смысла. Каждое: id (i1…), code, text, card (главная карточка), scenario.
 
-    Коды: empty, no_decision, no_roles, unused_role (правит человек или автомат по пункту) и diagram (чинится перестроением в конце).
+    Коды: empty, no_requirement, no_decision, no_roles, unused_role (правит человек или автомат по пункту) и diagram (чинится перестроением в конце).
     Весь расчёт идёт по одному снимку графа.
     """
     with project.frozen():
@@ -101,85 +93,90 @@ def _issues(project) -> list[dict]:
                     problem["id"],
                     sid,
                 )
-            chosen = project._accepted(flow.VARIANT, problem["id"])
-            if not chosen:
-                proposed = project.cards(flow.VARIANT, problem["id"])
+            requirements = project._accepted(flow.REQUIREMENT, problem["id"])
+            if not requirements:
+                proposed = project.cards(flow.REQUIREMENT, problem["id"])
                 note = (
-                    ("; есть предложенные варианты: " + ", ".join(ref(c) for c in proposed))
+                    ("; есть предложенные требования: " + ", ".join(ref(c) for c in proposed))
                     if proposed
-                    else "; вариантов решения нет"
+                    else "; требований нет"
                 )
                 add(
-                    "no_decision",
-                    f"Проблема {ref(problem)} (сценарий «{scenario['title']}»): принята, а решение не выбрано{note}",
+                    "no_requirement",
+                    f"Проблема {ref(problem)} (сценарий «{scenario['title']}»): принята, а требований к ней нет{note}",
                     problem["id"],
                     sid,
                 )
-            for variant in chosen:
-                if not variant.get("body"):
+            for requirement in requirements:
+                if not requirement.get("body"):
                     add(
                         "empty",
-                        f"Решение {ref(variant)} проблемы «{problem['title']}»: нет описания",
-                        variant["id"],
+                        f"Требование {ref(requirement)} (проблема «{problem['title']}»): нет описания",
+                        requirement["id"],
                         sid,
                     )
-        asis = project.cards(flow.ASIS, sid)
-        names = project._role_names()
-        for label, cards_ in (("как есть", asis), ("как будет", project.cards(flow.SOLUTION, sid))):
-            for card in cards_[:1]:
-                parts = ((card.get("attrs") or {}).get("diagram") or {}).get("participants") or []
-                unknown = [x for x in parts if x not in names]
-                if unknown:
+                chosen = project._accepted(flow.VARIANT, requirement["id"])
+                if not chosen:
+                    proposed = project.cards(flow.VARIANT, requirement["id"])
+                    note = (
+                        ("; есть предложенные варианты: " + ", ".join(ref(c) for c in proposed))
+                        if proposed
+                        else "; вариантов решения нет"
+                    )
                     add(
-                        "diagram",
-                        f"Сценарий {ref(scenario)}: в диаграмме «{label}» участники вне единого списка имён "
-                        f"({', '.join(unknown)}) — нужно перестроить",
-                        sid,
+                        "no_decision",
+                        f"Требование {ref(requirement)} (проблема «{problem['title']}»): принято, а решение не выбрано{note}",
+                        requirement["id"],
                         sid,
                     )
-        if problems and not asis:
-            add(
-                "diagram",
-                f"Сценарий {ref(scenario)}: есть принятые проблемы, но нет диаграммы «как есть»",
-                sid,
-                sid,
-            )
-        if asis and _pains(asis[0]) != {p["title"].strip().lower() for p in problems}:
-            add(
-                "diagram",
-                f"Сценарий {ref(scenario)}: диаграмма «как есть» не соответствует принятым проблемам — нужно перестроить",
-                sid,
-                sid,
-            )
+                for variant in chosen:
+                    if not variant.get("body"):
+                        add(
+                            "empty",
+                            f"Решение {ref(variant)} требования «{requirement['title']}»: нет описания",
+                            variant["id"],
+                            sid,
+                        )
+        names = project._role_names()
         solution = project.cards(flow.SOLUTION, sid)
+        for card in solution[:1]:
+            parts = ((card.get("attrs") or {}).get("diagram") or {}).get("participants") or []
+            unknown = [x for x in parts if x not in names]
+            if unknown:
+                add(
+                    "diagram",
+                    f"Сценарий {ref(scenario)}: в диаграмме «решение» участники вне единого списка имён "
+                    f"({', '.join(unknown)}) — нужно перестроить",
+                    sid,
+                    sid,
+                )
         if project._solved(sid) and not solution:
             add(
                 "diagram",
-                f"Сценарий {ref(scenario)}: есть выбранные решения, но нет диаграммы «как будет»",
+                f"Сценарий {ref(scenario)}: есть выбранные решения, но нет диаграммы «решение»",
                 sid,
                 sid,
             )
         if not project._solved(sid) and solution:
             add(
                 "diagram",
-                f"Сценарий {ref(scenario)}: диаграмма «как будет» есть, а выбранных решений нет — она устарела",
+                f"Сценарий {ref(scenario)}: диаграмма «решение» есть, а выбранных решений нет — она устарела",
                 sid,
                 sid,
             )
-        for kind, cards_ in ((flow.ASIS, asis), (flow.SOLUTION, solution)):
-            for card in cards_[:1]:
-                saved = (card.get("attrs") or {}).get("basis")
-                if saved and saved != basis(project, sid, kind):
-                    add(
-                        "diagram",
-                        f"Сценарий {ref(scenario)}: диаграмма «{'как есть' if kind == flow.ASIS else 'как будет'}» построена "
-                        "по старым проблемам или решениям — нужно перестроить",
-                        sid,
-                        sid,
-                    )
+        for card in solution[:1]:
+            saved = (card.get("attrs") or {}).get("basis")
+            if saved and saved != basis(project, sid, flow.SOLUTION):
+                add(
+                    "diagram",
+                    f"Сценарий {ref(scenario)}: диаграмма «решение» построена по старым проблемам, "
+                    "требованиям или решениям — нужно перестроить",
+                    sid,
+                    sid,
+                )
     in_diagrams: set[str] = set()
     for scenario in project._accepted_all(flow.SCENARIO):
-        for kind in (flow.ASIS, flow.SOLUTION):
+        for kind in (flow.SOLUTION,):
             for card in project.cards(kind, scenario["id"])[:1]:
                 in_diagrams |= set(
                     ((card.get("attrs") or {}).get("diagram") or {}).get("participants") or []
@@ -241,28 +238,32 @@ def _graph_text(project) -> str:
             for c in cases
         ]
         for problem in project._accepted(flow.PROBLEM, sid):
-            chosen = project._accepted(flow.VARIANT, problem["id"])
             out.append(
                 f"  проблема {ref(problem)}, важность {(problem.get('attrs') or {}).get('importance') or 'не указана'}: "
                 f"{problem.get('body') or 'нет описания'}"
             )
-            out += [f"    РЕШЕНИЕ {ref(v)}: {v.get('body') or 'нет описания'}" for v in chosen] or [
-                "    решение не выбрано"
-            ]
-            out += [
-                f"    предложенный вариант {ref(v)}: {v.get('body')}"
-                for v in project.cards(flow.VARIANT, problem["id"])
-                if v["status"] != ACCEPTED
-            ]
-        for kind, label in ((flow.ASIS, "КАК ЕСТЬ"), (flow.SOLUTION, "КАК БУДЕТ")):
-            for card in project.cards(kind, sid)[:1]:
-                diagram = (card.get("attrs") or {}).get("diagram")
-                out.append(f"  {label}: {card.get('body') or ''}")
-                out += (
-                    ["    " + line for line in diagrams.to_text(diagram).splitlines()]
-                    if diagram
-                    else ["    шагов нет"]
-                )
+            requirements = project._accepted(flow.REQUIREMENT, problem["id"])
+            if not requirements:
+                out.append("    требований нет")
+            for requirement in requirements:
+                chosen = project._accepted(flow.VARIANT, requirement["id"])
+                out.append(f"    ТРЕБОВАНИЕ {ref(requirement)}: {requirement.get('body') or 'нет описания'}")
+                out += [
+                    f"      РЕШЕНИЕ {ref(v)}: {v.get('body') or 'нет описания'}" for v in chosen
+                ] or ["      решение не выбрано"]
+                out += [
+                    f"      предложенный вариант {ref(v)}: {v.get('body')}"
+                    for v in project.cards(flow.VARIANT, requirement["id"])
+                    if v["status"] != ACCEPTED
+                ]
+        for card in project.cards(flow.SOLUTION, sid)[:1]:
+            diagram = (card.get("attrs") or {}).get("diagram")
+            out.append(f"  КАК БУДЕТ: {card.get('body') or ''}")
+            out += (
+                ["    " + line for line in diagrams.to_text(diagram).splitlines()]
+                if diagram
+                else ["    шагов нет"]
+            )
     return "\n".join(out)
 
 
@@ -278,10 +279,11 @@ def validate_fix(project, fix) -> dict:
     if kind == flow.ROLE and do in ("remove", "edit") and project.roles_confirmed:
         raise ValueError(f"список ролей подтверждён человеком: {ref(card)} не меняется")
     allowed = {
-        "remove": (flow.ROLE, flow.SCENARIO, flow.PROBLEM, flow.VARIANT),
+        "remove": (flow.ROLE, flow.SCENARIO, flow.PROBLEM, flow.REQUIREMENT, flow.VARIANT),
         "choose_variant": (flow.VARIANT,),
-        "suggest_variants": (flow.PROBLEM,),
-        "edit": (flow.ROLE, flow.SCENARIO, flow.PROBLEM, flow.VARIANT),
+        "suggest_variants": (flow.REQUIREMENT,),
+        "suggest_requirements": (flow.PROBLEM,),
+        "edit": (flow.ROLE, flow.SCENARIO, flow.PROBLEM, flow.REQUIREMENT, flow.VARIANT),
         "rebuild": (flow.SCENARIO,),
     }[do]
     if kind not in allowed:
@@ -340,10 +342,11 @@ def parse_report(
             )
             continue
         if any(
-            c["kind"] not in (flow.SCENARIO, flow.PROBLEM, flow.VARIANT, flow.ROLE) for c in cards
+            c["kind"] not in (flow.SCENARIO, flow.PROBLEM, flow.REQUIREMENT, flow.VARIANT, flow.ROLE)
+            for c in cards
         ):
             errors.append(
-                f"items[{number}]: можно указывать только роли, сценарии, проблемы и варианты"
+                f"items[{number}]: можно указывать только роли, сценарии, проблемы, требования и варианты"
             )
             continue
         clean = {"kind": item["kind"], "cards": ids}
@@ -500,12 +503,28 @@ def build_items(project, report: dict, bounds: list[str], found: list[dict]) -> 
                     )
                 )
                 rec = 1 if answer["pick"] != "remove" else 0
-            options.append(_option(project, "Убрать проблему", {"do": "remove", "id": card["id"]}))
+            options.append(_option(project, "Убрать требование", {"do": "remove", "id": card["id"]}))
             out.append(
                 {
                     "question": short(f"Нет решения: «{card['title']}»", 120),
                     "options": options,
                     "recommended": rec or len(options),
+                    "cards": [card["id"]],
+                }
+            )
+        elif issue["code"] == "no_requirement":
+            out.append(
+                {
+                    "question": short(f"Нет требований: «{card['title']}»", 120),
+                    "options": [
+                        _option(
+                            project,
+                            "Сформулировать требования",
+                            {"do": "suggest_requirements", "id": card["id"]},
+                        ),
+                        _option(project, "Убрать проблему", {"do": "remove", "id": card["id"]}),
+                    ],
+                    "recommended": 2,
                     "cards": [card["id"]],
                 }
             )

@@ -5,7 +5,7 @@ import re
 import pytest
 from idea_helpers import make, wait  # noqa: F401
 from test_idea_check import build_state
-from test_idea_flow import ASIS, TOBE, kinds
+from test_idea_flow import TOBE, kinds
 
 from studio.idea import check
 from studio.idea.errors import EngineError
@@ -15,9 +15,7 @@ from studio.idea.project import Run
 def builder(note, call):
     """Помощник строит диаграммы при перестроении; в проверке он ничего не спрашивает."""
     assert "Автоматический режим" in note
-    if "диаграмму «как есть»" in note:
-        call("graph_apply", ops=[{"op": "add_card", "kind": "как есть", "title": "Как есть: Запись", "attrs": {"diagram": ASIS}}])
-    elif "диаграмму «решение»" in note:
+    if "диаграмму «решение»" in note:
         call("graph_apply", ops=[{"op": "add_card", "kind": "решение", "title": "Решение: Запись", "attrs": {"diagram": TOBE}}])
     call("finish", summary="готово")
 
@@ -68,10 +66,10 @@ def test_manual_check_asks_code_built_questions_and_calls_model_once_per_pass(ma
         asked.append(q["question"])
         p.answer(q["id"], {"type": "choice", "indexes": [1]})
     assert run.status == "done", run.error
-    assert asked == ["Нет решения: «Не дозвониться»", "Пусто: «Лишний»"]               # вопросы строит код; роль без сценария уже убрана
+    assert asked == ["Нет решения: «Система должна принимать запись онлайн»", "Пусто: «Лишний»"]   # вопросы строит код; роль без сценария уже убрана
     assert len(checks(p)) == 2                                                          # проход с правками + один контрольный, не по вызову на вопрос
     assert [c["title"] for c in kinds(p, "роль")] == ["Клиент", "Администратор", "Система"]
-    assert kinds(p, "вариант")[0]["status"] == "accepted" and len(kinds(p, "как есть")) == 1 and len(kinds(p, "решение")) == 1
+    assert kinds(p, "вариант")[0]["status"] == "accepted" and len(kinds(p, "решение")) == 1
     assert check.findings(p) == [] and run.total == 0                                   # никакого фиксированного «из N»
     assert "Исправлено правок: 2" in run.summary
     text = (tmp_path / "p" / "Документация.md").read_text(encoding="utf-8")
@@ -80,9 +78,10 @@ def test_manual_check_asks_code_built_questions_and_calls_model_once_per_pass(ma
 
 def test_auto_check_never_asks_and_removes_out_of_bounds(make, tmp_path):
     p = make(make_agent(out_of_bounds=("Оплата картой",)))
-    scenario, _ = build_state(p)
+    scenario, _, _ = build_state(p)
     pay = p.act("add_problem", {"scenario": scenario["id"], "title": "Оплата картой", "body": "платёж", "importance": "средняя"})["id"]
-    p.act("add_variant", {"problem": pay, "title": "Эквайринг", "body": "оплата на сайте"})          # выбран сразу
+    pay_req = p.act("add_requirement", {"problem": pay, "title": "Система должна принимать оплату", "body": "платёж на сайте"})["id"]
+    p.act("add_variant", {"requirement": pay_req, "title": "Эквайринг", "body": "оплата на сайте"})   # выбран сразу
     p.start("export_auto")
     run = wait(p, ("asking", "done", "error"))
     assert run.status == "done", run.error                                                          # ни одного вопроса
@@ -103,7 +102,7 @@ def test_plain_export_is_instant_and_needs_no_model(make, tmp_path):
 
 def test_checker_is_independent_and_report_is_validated(make):
     p = make(lambda *a: None)
-    scenario, problem = build_state(p)
+    scenario, problem, _ = build_state(p)
     p.settings.data["checker"] = dict(p.settings.data["autopilot"])
     run = Run("export", "t")
     p._checker_slot(run)
@@ -142,12 +141,12 @@ def test_check_stops_instead_of_looping_when_checker_never_reports(make):
 def test_rebuild_really_replaces_the_old_diagram(make):
     """Ошибка из жизни: перестроение пропускалось как «такая карточка уже есть», и диаграмма оставалась устаревшей."""
     p = make(make_agent())
-    scenario, problem = build_state(p)
+    scenario, problem, _ = build_state(p)
     p.act("choose_variant", {"id": kinds(p, "вариант")[0]["id"]})
     p.act("remove", {"id": next(c for c in kinds(p, "роль") if c["title"] == "Лишний")["id"]})
     p.start("export_auto")
     assert wait(p, ("done", "error")).status == "done"
-    old = kinds(p, "как есть")[0]
+    old = kinds(p, "решение")[0]
     extra = p.act("add_problem", {"scenario": scenario["id"], "title": "Забывают прийти", "body": "бывает", "importance": "средняя"})["id"]
     p.act("remove", {"id": extra})                                       # проблему добавили и убрали: набор прежний, диаграмма актуальна
     assert not [i for i in check.issues(p) if i["code"] == "diagram"]
@@ -156,9 +155,9 @@ def test_rebuild_really_replaces_the_old_diagram(make):
     assert [i for i in check.issues(p) if i["code"] == "diagram"]
     p.start("export_auto")
     assert wait(p, ("done", "error")).status == "done"
-    new = kinds(p, "как есть")
+    new = kinds(p, "решение")
     assert len(new) == 1 and new[0]["id"] != old["id"]                    # заменена, а не пропущена и не продублирована
-    assert len(kinds(p, "решение")) == 1 and not [i for i in check.issues(p) if i["code"] == "diagram"]
+    assert not [i for i in check.issues(p) if i["code"] == "diagram"]
 
 
 # ---------------------------------------------------------------------- единое пространство имён
@@ -170,12 +169,12 @@ def helper_ctx(p, kind, target):
 
 def test_participants_are_only_roles_and_components(make):
     p = make(lambda *a: None)
-    scenario, problem = build_state(p)
+    scenario, problem, _ = build_state(p)
     sid = scenario["id"]
 
     def apply(kind, steps, **extra):
         helper_ctx(p, kind, sid)
-        return p.tool_call("t", "graph_apply", {"ops": [{"op": "add_card", "kind": kind, "title": "Как есть: Запись",
+        return p.tool_call("t", "graph_apply", {"ops": [{"op": "add_card", "kind": kind, "title": "Решение: Запись",
                                                          "attrs": {"diagram": {"steps": steps}}, **extra}]})
 
     def refused(kind, steps):
@@ -183,18 +182,17 @@ def test_participants_are_only_roles_and_components(make):
             apply(kind, steps)
         return error.value.message
 
-    pain = {"what": "Не дозвониться"}
-    wrong = [{"from": "Клиент", "to": "Сайт", "text": "Открывает", "pain": pain}, {"from": "Сайт", "to": "Клиент", "text": "Отвечает"}]
-    message = refused("как есть", wrong)
+    wrong = [{"from": "Клиент", "to": "Сайт", "text": "Открывает"}, {"from": "Сайт", "to": "Клиент", "text": "Отвечает"}]
+    message = refused("решение", wrong)
     assert "участники вне единого списка имён: Сайт" in message and "Клиент, Администратор, Система" in message
-    loose = [{"from": "клиент", "to": " система ", "text": "Открывает", "pain": pain}, {"from": "СИСТЕМА", "to": "Клиент", "text": "Отвечает"}]
-    assert "Добавлено карточек: 1" in apply("как есть", loose)                                   # регистр и пробелы — к имени из списка
-    assert kinds(p, "как есть")[0]["attrs"]["diagram"]["participants"] == ["Клиент", "Система"]
+    loose = [{"from": "клиент", "to": " система ", "text": "Открывает"}, {"from": "СИСТЕМА", "to": "Клиент", "text": "Отвечает"}]
+    assert "Добавлено карточек: 1" in apply("решение", loose)                                    # регистр и пробелы — к имени из списка
+    assert kinds(p, "решение")[0]["attrs"]["diagram"]["participants"] == ["Клиент", "Система"]
 
 
 def test_components_are_not_actors_and_roles_need_a_type(make):
     p = make(lambda *a: None)
-    scenario, problem = build_state(p)
+    scenario, problem, _ = build_state(p)
     helper_ctx(p, "сценарий", "")
     uc = {"system": "x", "cases": [{"name": "Действие", "actors": ["Клиент", "Система"]}]}
     with pytest.raises(EngineError) as error:
@@ -213,12 +211,12 @@ def test_diagrams_need_components_and_legacy_names_are_flagged(make):
     p.act("add_scenario", {"title": "Публикация", "body": "пишет статью", "roles": ["Владелец сайта"]})
     p.act("add_problem", {"scenario": kinds(p, "сценарий")[0]["id"], "title": "П", "body": "б", "importance": "высокая"})
     with pytest.raises(EngineError) as error:
-        p.start("asis")                                                                       # без компонентов диаграммы строить нельзя
+        p.start("solution")                                                                   # без компонентов диаграммы строить нельзя
     assert error.value.code == "no_components"
     sid = kinds(p, "сценарий")[0]["id"]
     old = {"participants": ["Владелец", "Админка"], "steps": [{"from": "Владелец", "to": "Админка", "text": "Пишет", "pain": {"what": "П"}},
                                                            {"from": "Админка", "to": "Владелец", "text": "Отвечает"}]}
-    p._human([{"op": "add_card", "kind": "как есть", "title": "Как есть: Публикация", "parent": sid, "attrs": {"diagram": old}}])
+    p._human([{"op": "add_card", "kind": "решение", "title": "Решение: Публикация", "parent": sid, "attrs": {"diagram": old}}])
     found = "\n".join(check.findings(p))
     assert "участники вне единого списка имён (Владелец, Админка)" in found                     # старая диаграмма с «чужими» именами
     p.start("export")

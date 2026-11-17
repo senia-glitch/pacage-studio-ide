@@ -39,7 +39,7 @@ def test_scenarios_one_by_one(make):
     assert counter["next"] == 3 and "по сценариям" in run.summary and "сценариев 2" in run.summary
     scenarios = kinds(p, "сценарий")
     assert [c["title"] for c in scenarios] == ["Первый", "Отмена записи"] and all(c["status"] == "accepted" for c in scenarios)
-    assert len(kinds(p, "как есть")) == 2 and len(kinds(p, "решение")) == 2                   # оба доведены до «решения»
+    assert len(kinds(p, "требование")) == 2 and len(kinds(p, "решение")) == 2                  # оба доведены до «решения»
     found = "\n".join(check.findings(p))
     assert "решение не выбрано" not in found and "диаграмм" not in found                       # решения и диаграммы согласованы сразу
 
@@ -50,5 +50,5 @@ def test_scenarios_one_by_one(make):
     assert len(asks) == 3 and len(problems) == 2
     assert asks[0] < problems[0] < first_solution < asks[1] < problems[1] < asks[2]          # второй сценарий начался после «решения» первого
     assert "Уже построено в проекте" not in notes[problems[0]]
-    assert "Не дозвониться → Запись на сайте" in notes[problems[1]]                          # второй сценарий знает, что решено в первом
-    assert "Не дозвониться → Запись на сайте" in notes[asks[2]]                              # и агент следующего решает по построенному
+    assert "Система должна принимать запись онлайн → Запись на сайте" in notes[problems[1]]   # второй сценарий знает, что решено в первом
+    assert "Система должна принимать запись онлайн → Запись на сайте" in notes[asks[2]]       # и агент следующего решает по построенному

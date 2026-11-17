@@ -9,12 +9,9 @@ from idea_helpers import make, wait  # noqa: F401
 from studio.idea import flow
 from studio.idea.errors import EngineError
 
-ASIS = {"participants": ["Клиент", "Администратор"], "steps": [
-    {"from": "Клиент", "to": "Администратор", "text": "Звонит и просит запись", "pain": {"what": "Не дозвониться"}},
-    {"from": "Администратор", "to": "Клиент", "text": "Называет время"}]}
 TOBE = {"participants": ["Клиент", "Система"], "steps": [
-    {"from": "Клиент", "to": "Система", "text": "Выбирает время на сайте", "mark": "new", "by": "Запись на сайте"},
-    {"from": "Система", "to": "Клиент", "text": "Подтверждает запись", "mark": "auto", "by": "Запись на сайте"}]}
+    {"from": "Клиент", "to": "Система", "text": "Выбирает время на сайте", "by": "Запись на сайте"},
+    {"from": "Система", "to": "Клиент", "text": "Подтверждает запись", "by": "Запись на сайте"}]}
 
 
 def pilot(note, call):
@@ -34,7 +31,7 @@ def pilot(note, call):
              remove=[i for i, have, title in rows if have and title.startswith("Салон Б")], reason="тест")
         return
     ids = re.findall(r"- id=(\S+?):", note)
-    first_only = "(проблемы)" in note or "(решение проблемы" in note
+    first_only = "(проблемы)" in note or "(требования к проблеме" in note or "(решение требования" in note
     call("decide", accept=ids[:1] if first_only else ids, reason="тест")
 
 
@@ -71,14 +68,15 @@ def script(model, note, call, request):
     elif "ЗАДАЧА: предложить проблемы" in note:
         call("graph_apply", ops=[{"op": "add_card", "kind": "проблема", "title": "Не дозвониться", "body": "часто", "attrs": {"importance": "Высокая"}},
                                  {"op": "add_card", "kind": "проблема", "title": "Забывают прийти"}])
-    elif "диаграмму «как есть»" in note:
-        assert "Не дозвониться" in note and "Забывают прийти" not in note          # только принятые проблемы
-        call("graph_apply", ops=[{"op": "add_card", "kind": "как есть", "title": "Как есть: Запись на приём", "attrs": {"diagram": ASIS}}])
+    elif "ЗАДАЧА: сформулировать требования" in note:
+        assert "Не дозвониться" in note and "Забывают прийти" not in note          # требования растут из одной проблемы
+        call("graph_apply", ops=[{"op": "add_card", "kind": "требование", "title": "Система должна принимать запись онлайн", "body": "клиент записывается без звонка"},
+                                 {"op": "add_card", "kind": "требование", "title": "Система должна напоминать о записи"}])
     elif "варианты автоматизации" in note:
         call("graph_apply", ops=[{"op": "add_card", "kind": "вариант", "title": "Запись на сайте", "body": "форма"},
                                  {"op": "add_card", "kind": "вариант", "title": "Бот"}])
     elif "диаграмму «решение»" in note:
-        assert "Запись на сайте" in note and "Звонит и просит запись" in note
+        assert "Запись на сайте" in note and "Система должна принимать запись онлайн" in note
         call("graph_apply", ops=[{"op": "add_card", "kind": "решение", "title": "Решение: Запись на приём", "attrs": {"diagram": TOBE}}])
     call("finish", summary="готово")
 
@@ -144,19 +142,24 @@ def test_whole_chain(make):
     assert sorted(r["title"] for r in p.roles_of(scenario["id"])) == ["Администратор", "Клиент"]
     p.act("accept", {"id": scenario["id"]})
 
-    # как есть: сначала проблемы, потом диаграмма
+    # требования к системе: сначала проблемы, из них вырастают требования
     with pytest.raises(EngineError):
-        p.start("asis")
+        p.start("requirements")                                                   # проблем ещё нет
     p.start("problems")
     wait(p)
     problems = kinds(p, "проблема")
     assert problems[0]["attrs"]["importance"] == "высокая"
     p.act("accept", {"id": problems[0]["id"]})
     p.act("remove", {"id": problems[1]["id"]})
-    p.start("asis")
+    p.start("requirements")
     assert wait(p).status == "done"
-    asis = kinds(p, "как есть")[0]
-    assert asis["status"] == "accepted" and asis["attrs"]["diagram"]["steps"][0]["pain"]["what"] == "Не дозвониться"
+    problem = next(c for c in kinds(p, "проблема") if c["title"] == "Не дозвониться")
+    requirements = kinds(p, "требование")
+    assert [r["title"] for r in requirements] == ["Система должна принимать запись онлайн", "Система должна напоминать о записи"]
+    assert {r["id"] for r in p.cards("требование", problem["id"])} == {r["id"] for r in requirements}   # требования — у проблемы
+    assert p.cards("требование", scenario["id"]) == [] and all(r["status"] == "proposed" for r in requirements)
+    p.act("accept", {"id": requirements[0]["id"]})
+    p.act("remove", {"id": requirements[1]["id"]})
 
     # решение: варианты → выбор одного → диаграмма
     with pytest.raises(EngineError):
@@ -164,17 +167,19 @@ def test_whole_chain(make):
     p.start("variants")
     wait(p)
     variants = kinds(p, "вариант")
-    problem = next(c for c in kinds(p, "проблема") if c["title"] == "Не дозвониться")
-    assert {v["id"] for v in p.cards("вариант", problem["id"])} == {v["id"] for v in variants}      # варианты — у проблемы, не у сценария
-    assert p.cards("вариант", scenario["id"]) == []
+    requirement = kinds(p, "требование")[0]
+    assert {v["id"] for v in p.cards("вариант", requirement["id"])} == {v["id"] for v in variants}   # варианты — у требования, не у проблемы
+    assert p.cards("вариант", problem["id"]) == [] and p.cards("вариант", scenario["id"]) == []
     p.act("choose_variant", {"id": variants[0]["id"]})
     assert [v["title"] for v in kinds(p, "вариант")] == ["Запись на сайте"]
-    p.act("add_variant", {"problem": problem["id"], "title": "Свой"})
-    assert len(p.cards("вариант", problem["id"])) == 2
-    p.act("remove", {"id": p.cards("вариант", problem["id"])[1]["id"]})
+    p.act("add_variant", {"requirement": requirement["id"], "title": "Свой"})
+    assert len(p.cards("вариант", requirement["id"])) == 2
+    p.act("remove", {"id": p.cards("вариант", requirement["id"])[1]["id"]})
+    with pytest.raises(EngineError):
+        p.act("add_variant", {"requirement": problem["id"], "title": "Не к проблеме"})   # вариант растёт только из требования
     p.start("solution")
     assert wait(p).status == "done"
-    assert kinds(p, "решение")[0]["attrs"]["diagram"]["steps"][0]["mark"] == "new"
+    assert kinds(p, "решение")[0]["attrs"]["diagram"]["steps"][0]["by"] == "Запись на сайте"
     p.start("solution")                                                             # перестроение заменяет, а не дублирует
     wait(p)
     assert len(kinds(p, "решение")) == 1
@@ -182,8 +187,10 @@ def test_whole_chain(make):
     text = Path(path).read_text(encoding="utf-8")
     assert path.endswith("Документация.md")
     assert "Онлайн-запись" not in text                                              # находки анализа в документ не попадают
+    assert "как есть" not in text.lower()                                           # диаграммы «как есть» в цепочке больше нет
     for part in ("## 1. Сфера", "парикмахерская", "Нужна интеграция с 1С", "## 2. Конкуренты", "## 3. Роли", "### ", "Не дозвониться",
-                 "Запись на сайте", "**Как есть", "Как будет (решение)", "| № | От кого | Кому |"):
+                 "**Проблемы:**", "**Требования к системе и решения:**", "Система должна принимать запись онлайн",
+                 "Запись на сайте", "Как будет (решение)", "| № | От кого | Кому |"):
         assert part in text, part
     assert text == Path(p.act("export_md", {})["path"]).read_text(encoding="utf-8")    # повторная выгрузка даёт тот же файл
 
@@ -200,18 +207,20 @@ def test_human_edits_and_cascades(make):
     p.act("add_scenario", {"title": "Стрижка", "roles": ["Клиент", "мастер"]})
     scenario = kinds(p, "сценарий")[0]
     assert scenario["status"] == "accepted" and scenario["attrs"]["usecase"]["cases"][0]["actors"] == ["Клиент", "Мастер"]
-    p.act("save_steps", {"scenario": scenario["id"], "kind": "как есть", "text": "1. Клиент → Мастер: Приходит\n2. Мастер → Клиент: Стрижёт [боль: долго | всегда | час | высокая]"})
-    diagram = kinds(p, "как есть")[0]["attrs"]["diagram"]
+    p.act("save_steps", {"scenario": scenario["id"], "kind": "решение", "text": "1. Клиент → Мастер: Приходит\n2. Мастер → Клиент: Стрижёт [боль: долго | всегда | час | высокая]"})
+    diagram = kinds(p, "решение")[0]["attrs"]["diagram"]
     assert diagram["steps"][1]["pain"]["what"] == "долго"
-    p.act("save_steps", {"scenario": scenario["id"], "kind": "как есть", "text": "1. Клиент → Мастер: Приходит\n2. Мастер → Клиент: Стрижёт"})
-    assert len(kinds(p, "как есть")) == 1 and "pain" not in kinds(p, "как есть")[0]["attrs"]["diagram"]["steps"][1]
+    p.act("save_steps", {"scenario": scenario["id"], "kind": "решение", "text": "1. Клиент → Мастер: Приходит\n2. Мастер → Клиент: Стрижёт"})
+    assert len(kinds(p, "решение")) == 1 and "pain" not in kinds(p, "решение")[0]["attrs"]["diagram"]["steps"][1]
     with pytest.raises(EngineError):
-        p.act("save_steps", {"scenario": scenario["id"], "kind": "как есть", "text": "ерунда"})
+        p.act("save_steps", {"scenario": scenario["id"], "kind": "решение", "text": "ерунда"})
+    with pytest.raises(EngineError):
+        p.act("save_steps", {"scenario": scenario["id"], "kind": "как есть", "text": "1. Клиент → Мастер: Приходит\n2. Мастер → Клиент: Стрижёт"})
     master = next(r for r in kinds(p, "роль") if r["title"] == "Мастер")
     p.act("remove", {"id": master["id"]})                                          # актёр уходит из диаграммы сценария
     assert kinds(p, "сценарий")[0]["attrs"]["usecase"]["cases"][0]["actors"] == ["Клиент"]
     p.act("remove", {"id": scenario["id"]})                                        # и диаграммы под сценарием
-    assert not kinds(p, "как есть") and not kinds(p, "сценарий")
+    assert not kinds(p, "решение") and not kinds(p, "сценарий")
     assert p.rejected("сценарий") == ["стрижка"]
     p.act("bank_add", {"type": "competitor", "name": "Салон", "url": "https://www.salon.ru/"})
     p.act("bank_add", {"type": "fact", "text": "Есть запись онлайн"})
@@ -254,10 +263,15 @@ def test_autopilot(make):
     assert scenario["status"] == "accepted"
     assert [c["title"] for c in kinds(p, "проблема")] == ["Не дозвониться"]            # вторая отклонена
     assert "забывают прийти" in p.rejected("проблема")
-    assert kinds(p, "как есть") and kinds(p, "решение")
+    assert kinds(p, "решение")
     problem = kinds(p, "проблема")[0]
-    assert [v["title"] for v in p.cards("вариант", problem["id"])] == ["Запись на сайте"]
-    assert p.cards("вариант", problem["id"])[0]["status"] == "accepted"
+    assert [r["title"] for r in p.cards("требование", problem["id"])] == ["Система должна принимать запись онлайн"]   # вторая отклонена
+    assert "система должна напоминать о записи" in p.rejected("требование")
+    requirement = p.cards("требование", problem["id"])[0]
+    assert requirement["status"] == "accepted"
+    assert [v["title"] for v in p.cards("вариант", requirement["id"])] == ["Запись на сайте"]
+    assert p.cards("вариант", requirement["id"])[0]["status"] == "accepted"
+    assert not kinds(p, "как есть")
     assert not any(r.model == "helper" and "Ответ человека" in r.note for r in p.adapter.requests)   # помощник не спрашивал
     # повторный запуск ничего не ломает и не спрашивает снова
     before = len(kinds(p, "решение"))

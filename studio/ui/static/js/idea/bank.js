@@ -1,5 +1,5 @@
 import {domRoot} from "./dom.js";
-/* Вкладка «Банк»: общий список знаний проекта — конкуренты, факты из анализа с источниками и ваши требования. */
+/* Вкладка «Банк»: общий список знаний проекта — конкуренты, факты из анализа с источниками и ваши пожелания и границы. */
 
 import {$, S, act, api, emit, esc, records} from "./core.js";
 
@@ -27,8 +27,8 @@ export function renderBank(force = false) {
   const reqRows = reqs.map((r) => `<tr><td><input data-edit="${r.id}" value="${esc(r.data.text || "")}"></td>
     <td class="acts"><button class="danger" data-b="bank_remove" data-id="${r.id}">Удалить</button></td></tr>`).join("");
   const html = `<div class="page">
-    ${section("Требования", "Что важно для будущей автоматизации. Агенты учитывают это на всех шагах. Можно дописать в любой момент.",
-      `<table class="bank">${reqRows || '<tr><td class="hint">Требований пока нет.</td></tr>'}</table>`,
+    ${section("Пожелания и границы", "Что важно для будущей автоматизации и что входит в систему. Агенты учитывают это на всех шагах. Можно дописать в любой момент.",
+      `<table class="bank">${reqRows || '<tr><td class="hint">Пожеланий пока нет.</td></tr>'}</table>`,
       '<form class="add" data-bform="requirement"><input name="text" placeholder="Например: нужна интеграция с 1С" autocomplete="off"><button>Добавить</button></form>')}
     ${section("Конкуренты", "Сайты бизнесов этой сферы. Удалили конкурента — вместе с ним уходят его факты.",
       `<table class="bank"><tr><th>Бизнес</th><th>Чем занимается</th><th></th><th></th></tr>${compRows || '<tr><td colspan="4" class="hint">Конкурентов пока нет.</td></tr>'}</table>`, "")}

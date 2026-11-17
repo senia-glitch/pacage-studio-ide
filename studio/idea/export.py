@@ -12,7 +12,6 @@ from studio.idea.graph import ACCEPTED
 from . import flow
 
 FILE_NAME = "Документация.md"
-MARKS = {"new": "новый шаг", "changed": "изменён", "auto": "автоматически", "removed": "убран"}
 
 
 def _cell(text) -> str:
@@ -27,23 +26,15 @@ def _table(head: list[str], rows: list[list]) -> list[str]:
     return lines + [""]
 
 
-def _steps(diagram: dict, solution: bool) -> list[str]:
-    rows = []
-    for number, step in enumerate((diagram or {}).get("steps") or [], 1):
-        extra = ""
-        if solution:
-            extra = MARKS.get(str(step.get("mark") or ""), "")
-        elif isinstance(step.get("pain"), dict):
-            extra = "Проблема: " + str(step["pain"].get("what") or "")
-        rows.append([number, step.get("from"), step.get("to"), step.get("text"), extra])
-    head = ["№", "От кого", "Кому", "Что", "Отметка" if solution else "Проблема"]
-    if solution:  # какое выбранное решение вводит изменённый шаг
-        head.append("Решение")
-        for row, step in zip(rows, (diagram or {}).get("steps") or [], strict=False):
-            row.append(step.get("by"))
-    if not rows:
+def _steps(diagram: dict) -> list[str]:
+    steps = (diagram or {}).get("steps") or []
+    if not steps:
         return ["_Шаги не описаны._", ""]
-    return _table(head, rows)
+    rows = [
+        [number, step.get("from"), step.get("to"), step.get("text"), step.get("by")]
+        for number, step in enumerate(steps, 1)
+    ]
+    return _table(["№", "От кого", "Кому", "Что", "Решение"], rows)
 
 
 def build(project) -> str:
@@ -63,7 +54,7 @@ def build(project) -> str:
         [f"- {b}" for b in bounds] or ["- не уточнялись"]
     )
     out += (
-        ["", "**Требования пользователя:**", ""]
+        ["", "**Пожелания пользователя:**", ""]
         + ([f"- {w}" for w in wishes] or ["- не заданы"])
         + [""]
     )
@@ -112,38 +103,38 @@ def build(project) -> str:
                 [[c.get("name"), ", ".join(c.get("actors") or [])] for c in usecase["cases"]],
             )
         problems = project._accepted(flow.PROBLEM, sid)
-        out += ["**Проблемы и решения:**", ""]
+        out += ["**Проблемы:**", ""]
+        out += _table(
+            ["Проблема", "Важность", "Описание"],
+            [
+                [p["title"], (p.get("attrs") or {}).get("importance"), p.get("body")]
+                for p in problems
+            ],
+        ) or ["_Принятых проблем нет._", ""]
         rows = []
         for problem in problems:
-            chosen = project._accepted(flow.VARIANT, problem["id"])
-            solution = (
-                "; ".join(
-                    f"{v['title']}: {v['body']}" if v.get("body") else v["title"] for v in chosen
+            requirements = project._accepted(flow.REQUIREMENT, problem["id"])
+            for requirement in requirements:
+                chosen = project._accepted(flow.VARIANT, requirement["id"])
+                solution = (
+                    "; ".join(
+                        f"{v['title']}: {v['body']}" if v.get("body") else v["title"]
+                        for v in chosen
+                    )
+                    or "решение не выбрано"
                 )
-                or "решение не выбрано"
-            )
-            rows.append(
-                [
-                    problem["title"],
-                    (problem.get("attrs") or {}).get("importance"),
-                    problem.get("body"),
-                    solution,
-                ]
-            )
-        out += _table(["Проблема", "Важность", "Описание", "Решение"], rows) or [
-            "_Принятых проблем нет._",
-            "",
-        ]
-        for kind, label, is_solution in (
-            (flow.ASIS, "Как есть", False),
-            (flow.SOLUTION, "Как будет (решение)", True),
-        ):
-            for card in project.cards(kind, sid)[:1]:
-                note = "" if card["status"] == ACCEPTED else " (не утверждено)"
-                out += [f"**{label}{note}:**", ""]
-                if card.get("body"):
-                    out += [card["body"], ""]
-                out += _steps((card.get("attrs") or {}).get("diagram"), is_solution)
+                rows.append(
+                    [requirement["title"], problem["title"], requirement.get("body"), solution]
+                )
+        if rows:
+            out += ["**Требования к системе и решения:**", ""]
+            out += _table(["Требование", "Из проблемы", "Описание", "Решение"], rows)
+        for card in project.cards(flow.SOLUTION, sid)[:1]:
+            note = "" if card["status"] == ACCEPTED else " (не утверждено)"
+            out += [f"**Как будет (решение){note}:**", ""]
+            if card.get("body"):
+                out += [card["body"], ""]
+            out += _steps((card.get("attrs") or {}).get("diagram"))
 
     out += _pending(project, scenarios)
     return "\n".join(out).rstrip() + "\n"
@@ -166,13 +157,24 @@ def _pending(project, scenarios: list[dict]) -> list[str]:
             if problem["status"] != ACCEPTED:
                 rows.append(["проблема", problem["title"], scenario["title"], problem.get("body")])
         for problem in project._accepted(flow.PROBLEM, scenario["id"]):
-            for variant in project.cards(flow.VARIANT, problem["id"]):
+            for requirement in project.cards(flow.REQUIREMENT, problem["id"]):
+                if requirement["status"] != ACCEPTED:
+                    rows.append(
+                        [
+                            "требование",
+                            requirement["title"],
+                            f"{scenario['title']} / {problem['title']}",
+                            requirement.get("body"),
+                        ]
+                    )
+        for requirement in project._requirements_of(scenario["id"]):
+            for variant in project.cards(flow.VARIANT, requirement["id"]):
                 if variant["status"] != ACCEPTED:
                     rows.append(
                         [
                             "вариант решения",
                             variant["title"],
-                            f"{scenario['title']} / {problem['title']}",
+                            f"{scenario['title']} / {requirement['title']}",
                             variant.get("body"),
                         ]
                     )

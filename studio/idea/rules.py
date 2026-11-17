@@ -7,15 +7,14 @@ from __future__ import annotations
 
 from . import flow
 
-MAX_TEXT = 250  # описание проблемы и варианта решения: 1-2 предложения
+MAX_TEXT = 250  # описание проблемы, требования и варианта решения: 1-2 предложения
 MAX_STEPS = 12  # шагов в диаграмме
 QUESTION_MAX = 120  # вопрос агента человеку
 OPTION_MAX = 60  # вариант ответа
-MARKED = ("new", "changed", "auto", "removed")
 
 
 def text_errors(kind: str, body: str) -> list[str]:
-    if kind in (flow.PROBLEM, flow.VARIANT) and len(body) > MAX_TEXT:
+    if kind in (flow.PROBLEM, flow.REQUIREMENT, flow.VARIANT) and len(body) > MAX_TEXT:
         return [
             f"описание длиннее {MAX_TEXT} символов (сейчас {len(body)}): перепиши в 1-2 коротких предложения"
         ]
@@ -65,7 +64,7 @@ def participant_errors(diagram: dict, names: list[str]) -> list[str]:
 
 
 def diagram_errors(kind: str, diagram: dict, project, scenario_id: str) -> list[str]:
-    """Диаграмма «как есть» или «решение» должна точно соответствовать принятым проблемам и выбранным решениям."""
+    """Диаграмма «решение» должна точно соответствовать выбранным решениям требований."""
     steps = diagram["steps"]
     out = participant_errors(diagram, project._role_names())
     if len(steps) > MAX_STEPS:
@@ -75,47 +74,22 @@ def diagram_errors(kind: str, diagram: dict, project, scenario_id: str) -> list[
             out.append(
                 f"шаг {number}: «{step['from']}» отправляет сообщение сам себе — замени на шаг между двумя разными участниками или убери"
             )
-    if kind == flow.ASIS:
-        titles = {
-            p["title"].strip().lower(): p["title"]
-            for p in project._accepted(flow.PROBLEM, scenario_id)
-        }
-        marked = {}
-        for number, step in enumerate(steps, 1):
-            what = str((step.get("pain") or {}).get("what") or "").strip().lower()
-            if what:
-                marked.setdefault(what, number)
-        for key, title in titles.items():
-            if key not in marked:
-                out.append(
-                    f"принятая проблема «{title}» не отмечена ни на одном шаге: у подходящего шага добавь pain.what ровно «{title}»"
-                )
-        for key, number in marked.items():
-            if key not in titles:
-                out.append(
-                    f"шаг {number}: pain.what «{key}» — не принятая проблема; бери только точные названия: "
-                    + "; ".join(titles.values())
-                )
-    else:
-        chosen = {s["title"].strip().lower(): s["title"] for s in project._solved(scenario_id)}
-        used = set()
-        for number, step in enumerate(steps, 1):
-            mark, by = step.get("mark", ""), str(step.get("by") or "").strip().lower()
-            if mark in MARKED:
-                if by not in chosen:
-                    out.append(
-                        f"шаг {number} (mark={mark}): в поле by нужно точное название выбранного решения: "
-                        + "; ".join(chosen.values())
-                    )
-                else:
-                    used.add(by)
-            elif by:
-                out.append(
-                    f"шаг {number}: у шага без изменений (mark пустой) не должно быть поля by"
-                )
-        for key, title in chosen.items():
-            if key not in used:
-                out.append(
-                    f"выбранное решение «{title}» не отражено ни в одном шаге: добавь или измени шаг с by=«{title}» и подходящим mark"
-                )
+    chosen = {s["title"].strip().lower(): s["title"] for s in project._solved(scenario_id)}
+    used = set()
+    for number, step in enumerate(steps, 1):
+        by = str(step.get("by") or "").strip().lower()
+        if not by:
+            continue
+        if by in chosen:
+            used.add(by)
+        else:
+            out.append(
+                f"шаг {number}: в поле by нужно точное название выбранного решения: "
+                + "; ".join(chosen.values())
+            )
+    for key, title in chosen.items():
+        if key not in used:
+            out.append(
+                f"выбранное решение «{title}» не отражено ни в одном шаге: добавь шаг с by=«{title}»"
+            )
     return out

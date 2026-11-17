@@ -5,8 +5,8 @@ import {createCanvas} from "./canvas.js";
 import {$, S, act, api, esc, toast} from "./core.js";
 import {sequenceSvg, usecaseSvg} from "./diagrams.js";
 
-const COLORS = {"сфера": "#e8833a", "роль": "#5aa0ff", "сценарий": "#bb9af7", "проблема": "#ff6b6b", "вариант": "#e8c33a",
-  "как есть": "#e0785a", "решение": "#7fc97f"};
+const COLORS = {"сфера": "#e8833a", "роль": "#5aa0ff", "сценарий": "#bb9af7", "проблема": "#ff6b6b", "требование": "#4fd1c5", "вариант": "#e8c33a",
+  "как есть": "#8b95a3", "решение": "#7fc97f"};
 const DETAIL = "детализирует";
 let canvas = null, layoutLoaded = false, saveTimer = 0;
 

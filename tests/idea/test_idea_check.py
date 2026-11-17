@@ -2,13 +2,13 @@
 
 
 from idea_helpers import make  # noqa: F401
-from test_idea_flow import ASIS, TOBE, kinds
+from test_idea_flow import TOBE, kinds
 
 from studio.idea import check
 
 
 def build_state(p):
-    """Клиент и Лишний (без описания и без сценария); сценарий с проблемой, у которой решение не выбрано."""
+    """Клиент и Лишний (без описания и без сценария); сценарий с проблемой, из неё требование, у которого решение не выбрано."""
     p.act("set_sphere", {"title": "парикмахерская"})
     p.act("bank_add", {"type": "requirement", "text": "Граница системы: Нужен ли платёжный модуль? → Нет"})
     p.act("add_role", {"title": "Клиент", "body": "записывается"})
@@ -22,9 +22,10 @@ def build_state(p):
     scenario = kinds(p, "сценарий")[0]
     problem = p.act("add_problem", {"scenario": scenario["id"], "title": "Не дозвониться", "body": "часто", "importance": "высокая"})["id"]
     p.act("accept", {"id": problem})
-    variant = p.act("add_variant", {"problem": problem, "title": "Запись на сайте", "body": "форма"})["id"]
+    requirement = p.act("add_requirement", {"problem": problem, "title": "Система должна принимать запись онлайн", "body": "без звонка"})["id"]
+    variant = p.act("add_variant", {"requirement": requirement, "title": "Запись на сайте", "body": "форма"})["id"]
     p._human([{"op": "update_card", "id": variant, "status": "proposed"}])        # предложено, но не выбрано
-    return scenario, problem
+    return scenario, problem, requirement
 
 
 def test_findings_are_exact(make):
@@ -32,8 +33,22 @@ def test_findings_are_exact(make):
     build_state(p)
     text = "\n".join(check.findings(p))
     assert "Лишний" in text and "нет описания" in text and "не участвует ни в одном принятом сценарии" in text
-    assert "принята, а решение не выбрано; есть предложенные варианты: «Запись на сайте»" in text
-    assert "нет диаграммы «как есть»" in text
+    assert "принято, а решение не выбрано; есть предложенные варианты: «Запись на сайте»" in text
+    assert "как есть" not in text                                                  # диаграммы «как есть» в цепочке больше нет
+
+
+def test_problem_without_requirement_is_found(make):
+    """Из проблемы должны вырасти требования: принятая проблема без них — разногласие."""
+    p = make(lambda *a: None)
+    scenario, problem, requirement = build_state(p)
+    p.act("remove", {"id": requirement})
+    text = "\n".join(check.findings(p))
+    assert "принята, а требований к ней нет; требований нет" in text
+    fix = next(i for i in check.issues(p) if i["code"] == "no_requirement")
+    assert fix["card"] == problem
+    items = check.build_items(p, {"items": [], "answers": {}}, [], [fix])
+    assert items[0]["question"] == "Нет требований: «Не дозвониться»" and items[0]["recommended"] == 2
+    assert [o["fixes"][0]["do"] for o in items[0]["options"]] == ["suggest_requirements", "remove"]
 
 
 # ---------------------------------------------------------------------- жёсткие правила при создании
@@ -49,12 +64,13 @@ def test_creation_rules_reject_with_exact_text(make):
     from studio.idea.errors import EngineError
 
     p = make(lambda *a: None)
-    scenario, problem = build_state(p)
+    scenario, problem, requirement = build_state(p)
     p.act("choose_variant", {"id": kinds(p, "вариант")[0]["id"]})
     sid = scenario["id"]
+    targets = {"требование": problem, "вариант": requirement}
 
     def apply(kind, **card):
-        helper_ctx(p, kind, sid if kind != "вариант" else problem)
+        helper_ctx(p, kind, targets.get(kind, sid))
         return p.tool_call("t", "graph_apply", {"ops": [{"op": "add_card", "kind": kind, **card}]})
 
     def refused(kind, **card):
@@ -64,16 +80,14 @@ def test_creation_rules_reject_with_exact_text(make):
 
     long = "очень " * 60
     assert "длиннее 250" in refused("проблема", title="Долгая", body=long, attrs={"importance": "высокая"})
+    assert "длиннее 250" in refused("требование", title="Система должна многое", body=long)
     assert "длиннее 250" in refused("вариант", title="Ещё один", body=long)
-    steps = [{"from": "Клиент", "to": "Администратор", "text": "Звонит"}, {"from": "Администратор", "to": "Клиент", "text": "Отвечает"}]
-    assert "не отмечена ни на одном шаге" in refused("как есть", title="Как есть: Запись", attrs={"diagram": {"steps": steps}})
-    own = [{"from": "Клиент", "to": "Клиент", "text": "Думает", "pain": {"what": "Не дозвониться"}}, steps[1]]
-    assert "сам себе" in refused("как есть", title="Как есть: Запись", attrs={"diagram": {"steps": own}})
-    wrong = [{**steps[0], "pain": {"what": "Выдуманная"}}, steps[1]]
-    assert "не принятая проблема" in refused("как есть", title="Как есть: Запись", attrs={"diagram": {"steps": wrong}})
-    assert "Добавлено карточек: 1" in apply("как есть", title="Как есть: Запись", attrs={"diagram": ASIS})
-    no_by = [{**TOBE["steps"][0], "by": ""}, TOBE["steps"][1]]
-    assert "поле by" in refused("решение", title="Решение: Запись", attrs={"diagram": {"steps": no_by}})
+    steps = [{"from": "Клиент", "to": "Система", "text": "Звонит"}, {"from": "Система", "to": "Клиент", "text": "Отвечает"}]
+    assert "не отражено ни в одном шаге" in refused("решение", title="Решение: Запись", attrs={"diagram": {"steps": steps}})
+    own = [{"from": "Клиент", "to": "Клиент", "text": "Думает", "by": "Запись на сайте"}, steps[1]]
+    assert "сам себе" in refused("решение", title="Решение: Запись", attrs={"diagram": {"steps": own}})
+    no_by = [{**TOBE["steps"][0], "by": ""}, {**TOBE["steps"][1], "by": ""}]
+    assert "не отражено ни в одном шаге" in refused("решение", title="Решение: Запись", attrs={"diagram": {"steps": no_by}})
     other = [{**TOBE["steps"][0], "by": "Чужое решение"}, TOBE["steps"][1]]
     assert "поле by" in refused("решение", title="Решение: Запись", attrs={"diagram": {"steps": other}})
     assert "Добавлено карточек: 1" in apply("решение", title="Решение: Запись", attrs={"diagram": TOBE})

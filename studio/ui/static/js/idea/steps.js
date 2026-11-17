@@ -23,9 +23,15 @@ function done(i) {
     case 2: { const a = records("competitor").filter((r) => r.data.state === "accepted"); return a.length > 0 && a.every((r) => r.data.analyzed); }
     case 3: return accepted(cards("роль")).length > 0;
     case 4: return scenarios.length > 0;
-    case 5: return scenarios.length > 0 && scenarios.every((s) => childrenOf(s.id, "как есть").length);
+    case 5: return scenarios.length > 0 && scenarios.every((s) => requirementsOf(s).length);
     default: return scenarios.length > 0 && scenarios.every((s) => childrenOf(s.id, "решение").length);
   }
+}
+
+/* Принятые требования сценария вместе с проблемой, из которой они выросли: [{problem, requirement}]. */
+function requirementsOf(scenario) {
+  return accepted(childrenOf(scenario.id, "проблема")).flatMap((problem) =>
+    accepted(childrenOf(problem.id, "требование")).map((requirement) => ({problem, requirement})));
 }
 
 // ---------------------------------------------------------------------- общие куски
@@ -49,7 +55,7 @@ function addForm(action, placeholder, extra = "", hidden = "") {
   return `<form class="add" data-form="${action}" ${hidden}><input name="title" placeholder="${esc(placeholder)}" autocomplete="off"${dis()}>${extra}<button${dis()}>Добавить</button></form>`;
 }
 
-const RUN_STEP = {autopilot: 0, competitors: 1, analysis: 2, roles: 3, scenarios: 4, problems: 5, asis: 5, variants: 6, solution: 6};
+const RUN_STEP = {autopilot: 0, competitors: 1, analysis: 2, roles: 3, scenarios: 4, problems: 5, requirements: 5, variants: 6, solution: 6};
 
 function runBlock() {
   const r = run();
@@ -194,68 +200,78 @@ function diagramEditor(scenario, kind, cardKind) {
   const text = U.text[key] ?? stepsText(card?.attrs?.diagram);
   return `${card ? sequenceSvg(card.attrs.diagram) : ""}
     <details class="steps-box"${card ? "" : " open"}><summary>Шаги диаграммы${card ? "" : " (пока нет — напишите свои или сгенерируйте)"}</summary>
-      <textarea rows="${Math.max(4, text.split("\n").length + 1)}" data-text="${key}" placeholder="1. Клиент → Администратор: Звонит и просит запись [боль: не дозвониться]&#10;2. Администратор → Клиент: Называет время"${dis()}>${esc(text)}</textarea>
-      <div class="hint">Строка: «Кто → Кому: что происходит». После текста можно добавить [боль: что не так]${kind === "solution" ? "; знак в начале строки: + новый, ~ изменён, * автоматизирован, − убран" : ""}.</div>
+      <textarea rows="${Math.max(4, text.split("\n").length + 1)}" data-text="${key}" placeholder="1. Клиент → Система: Выбирает время на сайте [решение: Запись на сайте]&#10;2. Система → Клиент: Подтверждает запись [решение: Запись на сайте]"${dis()}>${esc(text)}</textarea>
+      <div class="hint">Строка: «Кто → Кому: что происходит». Если шаг вводит выбранное решение, допишите в конце [решение: точное название].</div>
       <div class="row-actions"><button data-save-steps="${kind}" data-scenario="${scenario.id}"${dis()}>Построить диаграмму по шагам</button></div></details>`;
 }
 
-function stepAsis() {
+/* Шаг 6: проблемы сценария, и из каждой принятой проблемы вырастают требования к системе. */
+function stepRequirements() {
   const scenarios = accepted(cards("сценарий"));
   if (!scenarios.length) return '<div class="empty">Нет принятых сценариев. Вернитесь на шаг «Сценарии».</div>';
   const blocks = scenarios.map((s) => {
     const problems = pendingFirst(childrenOf(s.id, "проблема"));
-    const okProblems = accepted(problems).length;
+    const items = problems.map((p) => {
+      const open = p.status === "accepted";
+      const reqs = pendingFirst(childrenOf(p.id, "требование"));
+      const chips = (p.attrs?.importance ? tag(p.attrs.importance, "warn") : "") + (p.status === "proposed" ? tag("предложена", "warn") : "");
+      const grown = open
+        ? `<div class="sub-block"><div class="lbl">Требования к системе из этой проблемы</div>
+          ${reqs.map((r) => row(esc(r.title), esc(r.body || ""), cardActions(r), r.status === "proposed" ? tag("предложено", "warn") : "")).join("")
+            || '<div class="hint">Требований пока нет.</div>'}
+          <form class="add" data-form="add_requirement" data-problem="${p.id}"><input name="title" placeholder="Своё требование: «Система должна…»" autocomplete="off"${dis()}><button${dis()}>Добавить</button></form>
+          <div class="top">${start("requirements", reqs.length ? "Предложить ещё требования" : "Сформулировать требования", `data-ids="${p.id}"`, reqs.length ? "" : "primary")}</div></div>`
+        : '<div class="hint">Примите проблему: из неё вырастут требования.</div>';
+      return `<div class="sub-block">${row(esc(p.title), esc(p.body || ""), cardActions(p), chips)}${grown}</div>`;
+    });
     return `<div class="block"><div class="bhead"><b>${esc(s.title)}</b></div>
       <div class="lbl">Проблемы сценария</div>
-      ${problems.map((p) => row(esc(p.title), esc(p.body || ""), cardActions(p), (p.attrs?.importance ? tag(p.attrs.importance, "warn") : "") + (p.status === "proposed" ? tag("предложена", "warn") : ""))).join("")
-        || '<div class="hint">Проблем пока нет.</div>'}
+      ${items.join("") || '<div class="hint">Проблем пока нет.</div>'}
       <form class="add" data-form="add_problem" data-scenario="${s.id}"><input name="title" placeholder="Своя проблема" autocomplete="off"${dis()}><button${dis()}>Добавить</button></form>
-      <div class="top">${start("problems", "Предложить проблемы", `data-ids="${s.id}"`)}</div>
-      <div class="lbl">Диаграмма «как есть»</div>
-      ${okProblems ? `<div class="top">${start("asis", childrenOf(s.id, "как есть").length ? "Построить заново" : "Построить диаграмму", `data-ids="${s.id}"`, "primary")}</div>`
-        : '<div class="hint">Примите проблемы — по ним помощник построит диаграмму. Или напишите шаги сами.</div>'}
-      ${diagramEditor(s, "asis", "как есть")}</div>`;
+      <div class="top">${start("problems", "Предложить проблемы", `data-ids="${s.id}"`)}</div></div>`;
   });
-  return `<p class="sub">Сначала проблемы сценария, затем UML-диаграмма последовательности: как процесс проходит сейчас, с отмеченными проблемами.</p>
-    <div class="top">${start("problems", "Предложить проблемы для всех", "", "primary")}</div>${blocks.join("")}`;
+  return `<p class="sub">Сначала проблемы сценария, а из принятых проблем вырастают требования к системе: что она должна делать, чтобы проблемы не стало.
+    Способы выполнить требования выбираются на следующем шаге.</p>
+    <div class="top">${start("problems", "Предложить проблемы для всех", "", "primary")}${start("requirements", "Сформулировать требования для всех проблем")}</div>${blocks.join("")}`;
 }
 
+/* Шаг 7: для каждого принятого требования выбирается вариант решения; по выбранным строится диаграмма «как будет». */
 function stepSolution() {
   const scenarios = accepted(cards("сценарий"));
   if (!scenarios.length) return '<div class="empty">Нет принятых сценариев. Вернитесь на шаг «Сценарии».</div>';
   const blocks = scenarios.map((s) => {
-    const problems = accepted(childrenOf(s.id, "проблема")).sort((a, b) => (accepted(childrenOf(a.id, "вариант")).length > 0) - (accepted(childrenOf(b.id, "вариант")).length > 0));
-    const solvedCount = problems.filter((p) => accepted(childrenOf(p.id, "вариант")).length).length;
-    const items = problems.map((p) => {
-      const variants = pendingFirst(childrenOf(p.id, "вариант"));
-      return `<div class="sub-block"><div class="lbl">Проблема: ${esc(p.title)}${p.attrs?.importance ? ` ${tag(p.attrs.importance, "warn")}` : ""}</div>
+    const pairs = requirementsOf(s).sort((a, b) => (accepted(childrenOf(a.requirement.id, "вариант")).length > 0) - (accepted(childrenOf(b.requirement.id, "вариант")).length > 0));
+    const solvedCount = pairs.filter((x) => accepted(childrenOf(x.requirement.id, "вариант")).length).length;
+    const items = pairs.map(({problem, requirement}) => {
+      const variants = pendingFirst(childrenOf(requirement.id, "вариант"));
+      return `<div class="sub-block"><div class="lbl">Требование: ${esc(requirement.title)} <span class="hint">из проблемы «${esc(problem.title)}»</span></div>
         ${variants.map((v) => row(esc(v.title), esc(v.body || ""),
           v.status === "accepted" ? btn("Удалить", `data-act="remove" data-id="${v.id}"`, "ghost") : btn("Выбрать", `data-act="choose_variant" data-id="${v.id}"`) + btn("Отклонить", `data-act="remove" data-id="${v.id}"`),
           v.status === "accepted" ? tag("выбран", "ok") : "")).join("") || '<div class="hint">Вариантов пока нет.</div>'}
-        <form class="add" data-form="add_variant" data-problem="${p.id}"><input name="title" placeholder="Свой вариант решения" autocomplete="off"${dis()}><button${dis()}>Добавить</button></form>
-        <div class="top">${start("variants", "Предложить варианты", `data-ids="${p.id}"`)}</div></div>`;
+        <form class="add" data-form="add_variant" data-requirement="${requirement.id}"><input name="title" placeholder="Свой вариант решения" autocomplete="off"${dis()}><button${dis()}>Добавить</button></form>
+        <div class="top">${start("variants", "Предложить варианты", `data-ids="${requirement.id}"`)}</div></div>`;
     }).join("");
     return `<div class="block"><div class="bhead"><b>${esc(s.title)}</b></div>
-      ${items || '<div class="hint">Нет принятых проблем. Вернитесь на шаг «Как есть».</div>'}
+      ${items || '<div class="hint">Нет принятых требований. Вернитесь на шаг «Требования к системе».</div>'}
       <div class="lbl">Диаграмма «решение» (как будет)</div>
       ${solvedCount ? `<div class="top">${start("solution", childrenOf(s.id, "решение").length ? "Построить заново" : "Построить диаграмму", `data-ids="${s.id}"`, "primary")}</div>`
-        : '<div class="hint">Выберите вариант решения хотя бы для одной проблемы — по выбранным решениям помощник построит диаграмму. Проблемы без решения остаются в ней как есть. Или напишите шаги сами.</div>'}
+        : '<div class="hint">Выберите вариант решения хотя бы для одного требования — по выбранным решениям помощник построит диаграмму. Или напишите шаги сами.</div>'}
       ${diagramEditor(s, "solution", "решение")}</div>`;
   });
   const summary = scenarios.map((s) => {
-    const problems = accepted(childrenOf(s.id, "проблема"));
-    if (!problems.length) return "";
-    return `<div class="block sum"><b>${esc(s.title)}</b>${problems.map((p) => {
-      const v = accepted(childrenOf(p.id, "вариант"))[0];
-      return `<div>• ${esc(p.title)}${p.attrs?.importance ? ` <span class="hint">(${esc(p.attrs.importance)})</span>` : ""}${v ? ` → <b>${esc(v.title)}</b>` : ' <span class="hint">— решения нет</span>'}</div>`;
+    const pairs = requirementsOf(s);
+    if (!pairs.length) return "";
+    return `<div class="block sum"><b>${esc(s.title)}</b>${pairs.map(({problem, requirement}) => {
+      const v = accepted(childrenOf(requirement.id, "вариант"))[0];
+      return `<div>• ${esc(problem.title)} → ${esc(requirement.title)}${v ? ` → <b>${esc(v.title)}</b>` : ' <span class="hint">— решения нет</span>'}</div>`;
     }).join("")}</div>`;
   }).join("");
-  return `<p class="sub">Для каждой принятой проблемы выберите вариант её решения. По выбранным решениям строится UML-диаграмма последовательности «как будет».</p>
-    <div class="top">${start("variants", "Предложить варианты для всех проблем", "", "primary")}</div>${blocks.join("")}
-    ${summary ? `<div class="lbl">Итог: что стоит автоматизировать</div>${summary}` : ""}`;
+  return `<p class="sub">Для каждого принятого требования выберите вариант его решения. По выбранным решениям строится UML-диаграмма последовательности «как будет».</p>
+    <div class="top">${start("variants", "Предложить варианты для всех требований", "", "primary")}</div>${blocks.join("")}
+    ${summary ? `<div class="lbl">Итог: проблема → требование → решение</div>${summary}` : ""}`;
 }
 
-const STEP_VIEWS = [stepSphere, stepCompetitors, stepAnalysis, stepRoles, stepScenarios, stepAsis, stepSolution];
+const STEP_VIEWS = [stepSphere, stepCompetitors, stepAnalysis, stepRoles, stepScenarios, stepRequirements, stepSolution];
 
 // ---------------------------------------------------------------------- отрисовка и действия
 
@@ -300,6 +316,7 @@ export function initSteps() {
     const d = formData(form), action = form.dataset.form;
     if (form.dataset.scenario) d.scenario = form.dataset.scenario;
     if (form.dataset.problem) d.problem = form.dataset.problem;
+    if (form.dataset.requirement) d.requirement = form.dataset.requirement;
     if (form.dataset.id) d.id = form.dataset.id;
     act(async () => {
       await api("/api/act", {action, ...d});
@@ -325,7 +342,7 @@ export function initSteps() {
     }
     if (d.saveSteps) {
       const key = `${d.saveSteps}:${d.scenario}`, area = root.querySelector(`[data-text="${key}"]`);
-      const kind = d.saveSteps === "asis" ? "как есть" : "решение";
+      const kind = "решение";
       return void act(async () => { await api("/api/act", {action: "save_steps", scenario: d.scenario, kind, text: area ? area.value : ""}); delete U.text[key]; refresh(); });
     }
     if (d.pick) {
