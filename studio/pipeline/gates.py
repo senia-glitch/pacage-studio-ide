@@ -87,7 +87,14 @@ GATES: dict[str, GateDef] = {
             2,
             "Приёмка сценариев",
             ("term", "variant", "scenario", "criterion"),
-            ("uncovered_scenario", "orphans_2a", "duplicates_2a", "variant_choice", "participants"),
+            (
+                "uncovered_scenario",
+                "orphans_2a",
+                "duplicates_2a",
+                "variant_choice",
+                "participants",
+                "upstream_1",
+            ),
             (
                 _c("completeness", "Полнота", "основной ход и ошибки, исключения учтены"),
                 _c("clarity", "Ясность", "сценарий понятен и однозначен"),
@@ -100,7 +107,7 @@ GATES: dict[str, GateDef] = {
             2,
             "Приёмка схемы БД",
             ("table",),
-            ("uncovered_table", "orphans_2b", "duplicates_2b", "schema_integrity", "stale_2"),
+            ("uncovered_table", "orphans_2b", "duplicates_2b", "schema_integrity", "upstream_2"),
             (
                 _c("normalization", "Нормализация", "данные не дублируются, связи верные"),
                 _c(
@@ -119,7 +126,7 @@ GATES: dict[str, GateDef] = {
             3,
             "Приёмка интерфейса",
             ("style", "page", "call", "test"),
-            ("uncovered_page", "uncovered_test", "orphans_3", "stale_3", "facts"),
+            ("uncovered_page", "uncovered_test", "orphans_3", "upstream_3", "facts"),
             (
                 _c(
                     "scenario_fit",
@@ -145,7 +152,7 @@ GATES: dict[str, GateDef] = {
             4,
             "Приёмка бэкенда",
             ("endpoint", "model", "test"),
-            ("uncovered_endpoint", "uncovered_test_backend", "orphans_4", "stale_4", "facts"),
+            ("uncovered_endpoint", "uncovered_test_backend", "orphans_4", "upstream_4", "facts"),
             (
                 _c(
                     "permissions",
@@ -203,6 +210,19 @@ _ALL_KINDS = (
     "model",
 )
 
+_S1 = (
+    "area",
+    "question",
+    "boundary",
+    "constraint",
+    "competitor",
+    "domain",
+    "problem",
+    "requirement",
+)
+_S2 = ("term", "variant", "scenario", "table", "criterion")
+_S3 = ("style", "page", "call")
+
 CHECKS: dict[str, Callable[[ProjectBank, dict], list[Finding]]] = {
     "orphans_1": lambda b, f: cov.orphans(b, ("problem",)),
     "duplicates_1": lambda b, f: cov.duplicates(b, ("problem", "boundary", "constraint")),
@@ -219,7 +239,6 @@ CHECKS: dict[str, Callable[[ProjectBank, dict], list[Finding]]] = {
     "orphans_2b": lambda b, f: cov.orphans(b, ("table",)),
     "schema_integrity": lambda b, f: cov.schema_integrity(b),
     "duplicates_2b": lambda b, f: cov.duplicates(b, ("table",)),
-    "stale_2": lambda b, f: cov.stale_in(b, ("term", "variant", "scenario", "table")),
     "uncovered_page": lambda b, f: cov.uncovered(b, "scenario", "page"),
     "uncovered_test": lambda b, f: cov.uncovered(
         b, "criterion", "test", skip=lambda c: cov.visual(c) or cov.layer_of(c) != "frontend"
@@ -228,11 +247,15 @@ CHECKS: dict[str, Callable[[ProjectBank, dict], list[Finding]]] = {
         b, "criterion", "test", skip=lambda c: cov.visual(c) or cov.layer_of(c) != "backend"
     ),
     "orphans_3": lambda b, f: cov.orphans(b, ("page", "call", "test")),
-    "stale_3": lambda b, f: cov.stale_in(b, ("style", "page", "call", "test")),
     "uncovered_endpoint": lambda b, f: cov.uncovered(b, "call", "endpoint"),
     "orphans_4": lambda b, f: cov.orphans(b, ("endpoint", "model")),
-    "stale_4": lambda b, f: cov.stale_in(b, ("endpoint", "model")),
     "broken_chains": lambda b, f: cov.broken_chains(b),
+    # «Устарело» выше по цепочке блокирует ворота: сначала перепроверяют то, на чём всё держится.
+    # Устаревшее своё ворота перепроверяют сами и после прохождения делают принятым.
+    "upstream_1": lambda b, f: cov.stale_in(b, _S1),
+    "upstream_2": lambda b, f: cov.stale_in(b, _S1 + ("term", "variant", "scenario", "criterion")),
+    "upstream_3": lambda b, f: cov.stale_in(b, _S1 + _S2),
+    "upstream_4": lambda b, f: cov.stale_in(b, _S1 + _S2 + _S3),
     "stale_all": lambda b, f: cov.stale_in(b, _ALL_KINDS),
     "orphans_all": lambda b, f: cov.orphans(b, _ALL_KINDS),
 }

@@ -53,7 +53,7 @@ _KINDS = (
     # ---- этап 3 «Frontend на моках»
     Kind("style", "Стиль и каркас", 3, constitution=True),
     Kind("page", "Страница", 3, ("scenario",), required=True),
-    Kind("call", "Вызов API", 3, ("page",), required=True),
+    Kind("call", "Вызов API", 3, ("page", "scenario"), required=True),
     Kind("test", "Тест", 3, ("criterion",), required=True),
     # ---- этап 4 «Backend»
     Kind("endpoint", "Эндпоинт", 4, ("call",), required=True),

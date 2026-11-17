@@ -252,7 +252,9 @@ def _write_tests(pl: Pipeline, layer: str, criteria: list[dict], context: str) -
     created = []
     listing = "\n".join(f"{c['id']}: {c['body'] or c['title']}" for c in criteria)
     kind = "Vitest (TypeScript)" if layer == "frontend" else "pytest (Python)"
-    base = "frontend/tests/pipeline/" if layer == "frontend" else "tests/pipeline/"
+    base = {"frontend": "frontend/tests/pipeline/", "e2e": "tests/pipeline/e2e/"}.get(
+        layer, "tests/pipeline/"
+    )
     ext = ".test.ts" if layer == "frontend" else ".py"
     prompt = (
         f"ТЗ:\n{context}\n\nКритерии, для которых нужны тесты:\n{listing}\n\n"
@@ -340,9 +342,11 @@ def red_start(pl: Pipeline) -> dict:
 # ---------------------------------------------------------------------- 3.6 Реализация
 
 
-def implement_for(pl: Pipeline, stage: int, layer: str) -> dict:
+def implement_for(
+    pl: Pipeline, stage: int, layer: str, scenarios: list[dict] | None = None
+) -> dict:
     """Исполнитель пишет код по ТЗ сценария; тесты не трогает; до двух кругов исправлений."""
-    scenarios = _scenarios(pl)
+    scenarios = scenarios or _scenarios(pl)
     if not scenarios:
         raise PipelineError("no_scenarios", "Нет принятых сценариев")
     tests = [t for t in pl.bank.records("test") if (t.get("attrs") or {}).get("layer") == layer]

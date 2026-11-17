@@ -354,7 +354,7 @@ def rules_stage34(extra=()):
     def tests(layer):
         def build(prompt):
             cids = re.findall(r"^(c\d+): ", prompt.split("нужны тесты:", 1)[1], re.M)
-            base = "frontend/tests/pipeline/" if layer == "frontend" else "tests/pipeline/"
+            base = re.search(r"Файлы — в ([\w/]+/)", prompt).group(1)
             ext = ".test.ts" if layer == "frontend" else ".py"
             out = [
                 {
@@ -385,4 +385,42 @@ def rules_stage34(extra=()):
         ("Напиши тесты (Vitest", tests("frontend")),
         ("Напиши тесты (pytest", tests("backend")),
         *extra,
+    ]
+
+
+class FakeLauncher:
+    def __init__(self):
+        self.started = 0
+
+    def start(self, project):
+        self.started += 1
+        return {"running": True, "note": "фейковый запуск"}
+
+
+def rules_stage5():
+    import re
+
+    def reconstruct(prompt):
+        endpoint = re.search(r"(c\d+) \[endpoint\]", prompt)
+        table = re.search(r"(c\d+) \[table\]", prompt)
+        return {
+            "features": [
+                {
+                    "problem": "Нужно видеть состояние сервиса",
+                    "requirement": "Система должна отвечать на проверку",
+                    "scenario": "Проверить здоровье сервиса",
+                    "endpoints": [endpoint.group(1)] if endpoint else [],
+                    "tables": [table.group(1)] if table else [],
+                    "pages": [],
+                },
+                {"problem": "", "requirement": "x", "scenario": "пусто"},
+            ]
+        }
+
+    return [
+        (
+            "Придумай небольшие правдоподобные демо-данные",
+            {"rows": {"patient": [{"id": 1, "name": "Анна"}], "ghost": [{"id": 1}]}},
+        ),
+        ("Восстанови замысел", reconstruct),
     ]

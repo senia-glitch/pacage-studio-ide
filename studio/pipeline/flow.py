@@ -7,12 +7,12 @@
 
 from __future__ import annotations
 
-from . import prompts, stage1, stage2, stage3, stage4
+from . import prompts, stage1, stage2, stage3, stage4, stage5
 from .engine import Pipeline
 from .errors import PipelineError
 from .gates import GATES, STAGE_GATES, gate
 
-STAGES = {1: stage1, 2: stage2, 3: stage3, 4: stage4}
+STAGES = {1: stage1, 2: stage2, 3: stage3, 4: stage4, 5: stage5}
 
 # Ворота → (роль-автор, шаг, который закрывает пробелы).
 REWORK = {

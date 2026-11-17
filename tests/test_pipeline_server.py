@@ -62,7 +62,7 @@ def test_start_exposes_five_stages_with_planned_steps(tmp_path):
     first, second, third = state["stages"][:3]
     fifth = state["stages"][4]
     assert first["open"] and not second["open"] and first["wired"] and third["wired"]
-    assert not fifth["wired"] and [s["state"] for s in fifth["steps"]] == ["planned"]
+    assert fifth["wired"] and [s["state"] for s in fifth["steps"]] == ["blocked"] * 4
     assert [s["state"] for s in third["steps"] if s["num"] != "gate"] == ["blocked"] * 6
     assert [g["key"] for g in first["gates"]] == ["problems", "requirements"]
     assert state["next"]["key"] == "area"

@@ -140,15 +140,9 @@ class ProjectTests:
         self.project = Path(project)
 
     def command(self, layer: str) -> list[str] | None:
-        if layer == "backend":
-            return [
-                shutil.which("python") or "python",
-                "-m",
-                "pytest",
-                "tests/pipeline",
-                "-q",
-                "-x",
-            ]
+        if layer in ("backend", "e2e"):
+            target = "tests/pipeline/e2e" if layer == "e2e" else "tests/pipeline"
+            return [shutil.which("python") or "python", "-m", "pytest", target, "-q", "-x"]
         pkg = self.project / "frontend" / "package.json"
         npx = shutil.which("npx")
         if pkg.is_file() and npx:
@@ -157,7 +151,7 @@ class ProjectTests:
 
     def run(self, layer: str) -> TestResult:
         argv = self.command(layer)
-        folder = self.project / ("frontend" if layer != "backend" else "")
+        folder = self.project / ("frontend" if layer == "frontend" else "")
         if argv is None:
             return TestResult(False, False, [], "Нет способа запустить тесты этого слоя")
         env = {**os.environ, "PYTHONUTF8": "1"}
@@ -178,8 +172,11 @@ class ProjectTests:
 def safe_test_path(project: Path, name: str, layer: str) -> Path:
     """Файл теста пишется только в свой каталог: агент не должен трогать код через «тест»."""
     name = str(name or "").replace("\\", "/").lstrip("/")
-    base = "tests/pipeline" if layer == "backend" else "frontend/tests/pipeline"
-    allowed = (".py",) if layer == "backend" else (".test.ts", ".spec.ts", ".test.js", ".spec.js")
+    base = {"backend": "tests/pipeline", "e2e": "tests/pipeline/e2e"}.get(
+        layer, "frontend/tests/pipeline"
+    )
+    python_layer = layer in ("backend", "e2e")
+    allowed = (".py",) if python_layer else (".test.ts", ".spec.ts", ".test.js", ".spec.js")
     if not name.startswith(base + "/") or ".." in name.split("/") or not name.endswith(allowed):
         raise PipelineError("bad_test_path", f"Тест можно писать только в {base}/ (файл {name!r})")
     return project / name

@@ -32,6 +32,9 @@ class Pipeline:
         self.changes = ChangeLog(self.bank, self.settings, self.project)
         self.coder = AgentCoder(self.llm)  # исполнитель кода (этапы 3–4)
         self.tests = ProjectTests(self.project)  # запуск тестов проекта
+        from .stage5 import Launcher
+
+        self.launcher = Launcher()  # запуск приложения (этап 5)
 
     # ------------------------------------------------------------------ ворота
 

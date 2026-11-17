@@ -98,7 +98,13 @@ class ChangeLog:
         if patches:
             targets = list(patches)
             for target in targets:
-                self.bank.get(target)  # неизвестная запись — сразу ошибка
+                attrs = self.bank.get(target).get("attrs") or {}
+                if attrs.get("from_code") and not attrs.get("described"):
+                    raise PipelineError(
+                        "undescribed",
+                        "Запись «из кода» без описания менять нельзя: сначала внедрите её "
+                        "(опишите: сценарий, требование) или отклоните",
+                    )
             impact = self.impact(targets)
             request.update(
                 type="edit",

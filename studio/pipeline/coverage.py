@@ -36,6 +36,8 @@ def orphans(bank: ProjectBank, kinds: tuple[str, ...]) -> list[Finding]:
         if not KINDS[kind].required:
             continue
         for card in bank.records(kind):
+            if (card.get("attrs") or {}).get("from_code"):
+                continue  # «из кода» без описания не висящее: менять её нельзя, пока не описана
             if not bank.parents(card["id"]):
                 out.append(
                     Finding(

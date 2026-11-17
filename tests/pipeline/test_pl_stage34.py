@@ -202,8 +202,8 @@ def test_autopilot_walks_all_four_stages(tmp_path):
     pl, agent = build(tmp_path, red=())
     pl.settings.set_mode("autopilot")
     stage1.set_area(pl, "Сайт записи к врачу")
-    log = flow.autopilot(pl)
-    assert log[-1] == {"stop": "все шаги пройдены"}, log[-3:]
+    log = flow.autopilot(pl, stop_after=4)
+    assert log[-1] == {"stop": "этап 4 пройден"}, log[-3:]
     for key in ("gate_frontend", "gate_backend", "style", "implement", "mocks"):
         assert any(e.get("step") == key for e in log), key
     assert all(

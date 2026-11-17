@@ -57,7 +57,7 @@ function drawList(ctx, list, requests, byId) {
     const item = h(
       "div",
       {class: "pl-req " + req.status},
-      h("div", {class: "head"}, h("b", null, req.text), chip({open: "ждёт решения", accepted: "принят", rejected: "отклонён"}[req.status] || req.status), chip(req.size === "small" ? "мелкая правка" : "большая"), chip(`владелец: этап ${req.owner_stage}`)),
+      h("div", {class: "head"}, h("b", null, req.text), chip({open: "ждёт решения", accepted: "принят", rejected: "отклонён"}[req.status] || req.status), chip(req.size === "small" ? "мелкая правка" : "большая"), req.route ? chip(req.route === "quick" ? "быстрый путь" : "полный путь с этапа " + req.start_stage) : null, chip(`владелец: этап ${req.owner_stage}`)),
       req.type === "edit" ? h("div", {class: "hint"}, "Меняется: ", targets.join("; ")) : h("div", {class: "hint"}, "Новая запись: ", req.new.title),
       impact.length ? h("div", {class: "hint"}, `Затронет (${impact.length}): `, impact.slice(0, 8).join("; "), impact.length > 8 ? "…" : "") : h("div", {class: "hint"}, "Другие записи не затрагивает."),
       (req.conflicts || []).length ? h("div", {class: "pl-warn"}, "Повторяет существующую запись: переформулируйте или отклоните.") : null,
@@ -70,6 +70,9 @@ function drawList(ctx, list, requests, byId) {
           ctx.state.mode === "autopilot" ? h("span", {class: "hint"}, "В автопилоте это решает координатор — но вы можете решить и сами.") : null,
         ),
       );
+    }
+    if (req.status === "accepted" && (req.stale || []).length) {
+      item.append(h("div", {class: "pl-actions"}, h("button", {class: "pl-primary", title: "Затронутое пройдёт свои ворота; код обновит исполнитель", onclick: () => ctx.act("/api/pipeline/change/apply", {id: req.id})}, "Перепроверить затронутое")));
     }
     list.append(item);
   }

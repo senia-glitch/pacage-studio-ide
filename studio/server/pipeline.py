@@ -20,6 +20,7 @@ from studio.pipeline import (
     Pipeline,
     PipelineError,
     ProjectBank,
+    entry,
     flow,
     stage1,
     stage2,
@@ -111,6 +112,7 @@ class PipelineService:
             "started": self.started(),
             "mode_names": MODE_NAMES,
             "themes": stage3.THEMES,
+            "entry": entry.detect(self.root),
             "stage_names": {str(k): v for k, v in STAGE_NAMES.items()},
             "job": self.job_view(),
         }
@@ -314,6 +316,9 @@ class PipelineService:
         if route == "/start":
             self.pl(create=True)
             return self.state()
+        if route == "/develop/scan":
+            pl = self.pl(create=True)
+            return {"scanned": entry.scan_into_bank(pl), "state": self.state()}
         pl = self.pl(create=route == "/settings")
         if route == "/area":
             stage1.set_area(pl, str(data.get("text") or ""))
@@ -332,6 +337,15 @@ class PipelineService:
             return {"job": self._start(f"шаг {key}", lambda: flow.run_step(pl, stage, key))}
         if route == "/autopilot":
             return {"job": self._start("автопилот", lambda: flow.autopilot(pl))}
+        if route == "/develop/reconstruct":
+            return {"job": self._start("восстановление замысла", lambda: entry.reconstruct(pl))}
+        if route == "/change/apply":
+            request_id = str(data.get("id") or "")
+            return {
+                "job": self._start(
+                    "перепроверка затронутого", lambda: entry.apply_accepted(pl, request_id)
+                )
+            }
         if route == "/gate/decide":
             run = pl.decide_gate(
                 str(data.get("run") or ""),
@@ -422,11 +436,12 @@ class PipelineService:
     def _change(self, pl: Pipeline, data: dict) -> dict:
         patches = data.get("patches")
         new = data.get("new")
-        request = pl.changes.open(
-            str(data.get("text") or ""), "human",
+        request = entry.submit(
+            pl,
+            str(data.get("text") or ""),
             patches=patches if isinstance(patches, dict) else None,
             new=new if isinstance(new, dict) else None,
-        )  # fmt: skip
+        )
         return {"request": request, "state": self.state()}
 
 

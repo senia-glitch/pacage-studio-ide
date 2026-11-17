@@ -207,6 +207,33 @@ class ProjectBank:
         )
         return self.get(result["ids"][0])
 
+    def add_from_code(
+        self, kind: str, title: str, *, body: str = "", attrs: dict | None = None
+    ) -> dict:
+        """Запись «из кода» (режим «Развитие»): факт, который уже есть в проекте.
+
+        Родителя у неё пока нет: пока запись не описана (не внедрена в цепочку), менять её нельзя,
+        а проверки ворот её «висящей» не считают. Описали — отметка ``described`` ставится сама.
+        """
+        kind_of(kind)
+        data = dict(attrs or {})
+        data.update(from_code=True, described=False)
+        data.setdefault("version", 1)
+        result = self.store.apply(
+            [
+                {
+                    "op": "add_card",
+                    "kind": kind,
+                    "title": title,
+                    "body": body,
+                    "status": ACCEPTED,
+                    "attrs": data,
+                }
+            ],
+            "scanner",
+        )
+        return self.get(result["ids"][0])
+
     def link(self, child_id: str, parent_id: str, author: str = "agent") -> None:
         """Привязать запись к ещё одному родителю («внедрить» висящее)."""
         child, parent = self.get(child_id), self.get(parent_id)
@@ -221,6 +248,8 @@ class ProjectBank:
         self.store.apply(
             [{"op": "add_edge", "from": child_id, "to": parent_id, "kind": SOURCE}], author
         )
+        if (child.get("attrs") or {}).get("from_code") and not child["attrs"].get("described"):
+            self.mark(child_id, author, described=True)
 
     # ------------------------------------------------------------------ статусы и версии
 

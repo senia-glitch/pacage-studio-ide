@@ -13,7 +13,10 @@ export function renderPath(ctx, body) {
         {class: "pl-hero"},
         h("h2", null, "Начните с идеи"),
         h("p", null, "Конвейер ведёт проект от идеи до работающего ПО: пять этапов, ворота качества между ними и один банк знаний."),
-        h("button", {class: "pl-primary", onclick: () => ctx.act("/api/pipeline/start")}, "Начать"),
+        h("button", {class: "pl-primary", onclick: () => ctx.act("/api/pipeline/start")}, "Начать с идеи"),
+        state.entry === "develop"
+          ? h("div", {class: "pl-panel"}, h("p", null, "В этой папке уже есть код. Режим «Развитие»: студия прочитает код, положит найденное в банк с меткой «из кода», а агент восстановит замысел."), h("button", {class: "pl-primary", onclick: async () => { await ctx.act("/api/pipeline/develop/scan"); await ctx.act("/api/pipeline/develop/reconstruct"); }}, "Подключить существующий проект"))
+          : null,
       ),
     );
     return;
