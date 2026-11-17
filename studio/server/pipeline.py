@@ -26,6 +26,7 @@ from studio.pipeline import (
     stage1,
     stage2,
     stage3,
+    waves,
 )
 from studio.pipeline.graph import GraphError
 from studio.pipeline.llm import CLAUDE_BY_TIER, Agents
@@ -160,6 +161,7 @@ class PipelineService:
             "next": nxt,
             "requests": len(pl.changes.open_requests()),
             "warnings": pl.settings.evaluator_warnings(),
+            "waves": waves.info(pl),
             "questions": [_brief(q) for q in stage1.unanswered(pl)],
             "unchosen": [
                 {
@@ -361,9 +363,15 @@ class PipelineService:
 
             def rework_and_rerun():
                 flow.rework(pl, run["gate"], run)
-                return pl.run_gate(run["gate"])
+                return pl.run_gate(run["gate"], flow.gate_facts(pl, run["gate"]))
 
             return {"job": self._start("доработка и повторные ворота", rework_and_rerun)}
+        if route == "/waves/enable":
+            waves.enable(pl)
+            return self.state()
+        if route == "/waves/disable":
+            waves.disable(pl)
+            return self.state()
         if route == "/settings":
             return self._settings_post(pl, data)
         if route == "/criterion":

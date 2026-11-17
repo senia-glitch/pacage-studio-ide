@@ -13,6 +13,7 @@ from pathlib import Path
 
 from studio.pipeline.graph import ACCEPTED
 
+from . import waves
 from .engine import Pipeline
 from .errors import PipelineError
 
@@ -139,7 +140,11 @@ def build(pl: Pipeline, stage: int, scenarios: list[dict] | None = None) -> list
     """Собрать ТЗ по принятым сценариям этапа и запомнить версии записей."""
     if stage not in (3, 4):
         raise PipelineError("bad_stage", "ТЗ собираются для этапов 3 и 4")
-    items = scenarios if scenarios is not None else pl.bank.records("scenario", status=ACCEPTED)
+    items = (
+        scenarios
+        if scenarios is not None
+        else waves.records(pl, "scenario", status=ACCEPTED)
+    )
     out_dir = pl.project / DIR / f"stage{stage}"
     out_dir.mkdir(parents=True, exist_ok=True)
     index = _index(pl)
@@ -157,6 +162,17 @@ def build(pl: Pipeline, stage: int, scenarios: list[dict] | None = None) -> list
         json.dumps(index, ensure_ascii=False, indent=1), encoding="utf-8"
     )
     return made
+
+
+def built(pl: Pipeline, stage: int) -> bool:
+    """ТЗ собрано для каждого принятого сценария (в волнах — текущей волны) и не устарело."""
+    scenarios = waves.records(pl, "scenario", status=ACCEPTED)
+    folder = pl.project / DIR / f"stage{stage}"
+    return (
+        bool(scenarios)
+        and all((folder / f"{s['id']}.md").is_file() for s in scenarios)
+        and not stale(pl, stage)
+    )
 
 
 def _index(pl: Pipeline) -> dict:

@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from . import prompts, stage1, stage2, stage3, stage4, stage5
+from . import prompts, stage1, stage2, stage3, stage4, stage5, waves
 from .engine import Pipeline
 from .errors import PipelineError
 from .gates import GATES, STAGE_GATES, gate
@@ -69,8 +69,21 @@ def feedback_text(run: dict) -> str:
     return "\n".join(lines) or "- доработайте по замечаниям человека"
 
 
+def gate_facts(pl: Pipeline, gate_key: str) -> dict | None:
+    """Внешние факты ворот (тесты, моки, запуск): их собирает этап, а не оценщик."""
+    sources = {"frontend": stage3.facts, "backend": stage4.facts, "final": stage5.facts}
+    source = sources.get(gate_key)
+    return source(pl) if source else None
+
+
 def rework(pl: Pipeline, gate_key: str, run: dict) -> dict:
     """Доработка: роль-автор правит черновики по замечаниям, затем закрываются пробелы покрытия."""
+    if gate_key not in REWORK:
+        raise PipelineError(
+            "no_rework",
+            "У итоговой приёмки нет доработки: внесите правку запросом на изменение "
+            "и пройдите итоговую приёмку заново",
+        )
     spec = gate(gate_key)
     role, fill = REWORK[gate_key]
     feedback = feedback_text(run)
@@ -122,7 +135,11 @@ def autopilot(pl: Pipeline, limit: int = 80, stop_after: int | None = None) -> l
     tried: set[str] = (
         set()
     )  # шаг без результата (например, конкурентов не нашли) не гоняем по кругу
+    wave = waves.current(pl)
     for _ in range(limit):
+        if waves.current(pl) != wave:  # началась новая волна: её шаги — снова с первого
+            wave = waves.current(pl)
+            tried = {t for t in tried if t[0] < 3}  # этапы 1–2 заново не гоняем
         item = next_step(pl, tried)
         if item is None:
             log.append({"stop": "все шаги пройдены"})

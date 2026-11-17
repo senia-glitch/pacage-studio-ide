@@ -44,12 +44,15 @@ class GateKeeper:
         except (OSError, ValueError):
             raw = {}
         self.runs: list[dict] = raw.get("runs", []) if isinstance(raw, dict) else []
+        floors = raw.get("floors", {}) if isinstance(raw, dict) else {}
+        self.floors: dict[str, int] = floors if isinstance(floors, dict) else {}
 
     # ------------------------------------------------------------------ файл
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(self.path, json.dumps({"runs": self.runs}, ensure_ascii=False, indent=1))
+        data = {"runs": self.runs, "floors": self.floors}
+        atomic_write(self.path, json.dumps(data, ensure_ascii=False, indent=1))
 
     def run(self, run_id: str) -> dict:
         for item in self.runs:
@@ -58,10 +61,17 @@ class GateKeeper:
         raise PipelineError("unknown_run", f"Прогона ворот {run_id} нет")
 
     def last(self, gate_key: str) -> dict | None:
-        for item in reversed(self.runs):
-            if item["gate"] == gate_key:
-                return item
+        """Последний прогон ворот; прогоны до сброса (новая волна) не считаются."""
+        for index in range(len(self.runs) - 1, int(self.floors.get(gate_key, 0)) - 1, -1):
+            if self.runs[index]["gate"] == gate_key:
+                return self.runs[index]
         return None
+
+    def reset(self, gate_keys) -> None:
+        """Начать ворота заново (новая волна): прежние прогоны остаются, но не считаются."""
+        for key in gate_keys:
+            self.floors[key] = len(self.runs)
+        self._save()
 
     # ------------------------------------------------------------------ слои
 

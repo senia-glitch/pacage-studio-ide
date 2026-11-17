@@ -14,7 +14,7 @@ from pathlib import Path
 
 from studio.pipeline.graph import ACCEPTED
 
-from . import prompts, tz
+from . import prompts, tz, waves
 from .coder import file_hashes, safe_test_path
 from .engine import Pipeline
 from .errors import PipelineError
@@ -75,7 +75,7 @@ def tests_green(pl: Pipeline, layer: str):
 def build_style(pl: Pipeline, theme: str | None = None) -> dict:
     """3.1 Стиль и каркас: один раз. Тему можно задать готовой (без агента) или попросить дизайнера."""
     _need_entry(pl)
-    if pl.bank.records("style"):
+    if waves.records(pl, "style"):
         raise PipelineError("style_exists", "Стиль уже задан: меняйте его запросом на изменение")
     attrs = {"theme": theme if theme in THEMES else "light", "navigation": [], "notes": ""}
     if theme in THEMES:
@@ -104,7 +104,7 @@ def build_style(pl: Pipeline, theme: str | None = None) -> dict:
 
 
 def _scenarios(pl: Pipeline) -> list[dict]:
-    return pl.bank.records("scenario", status=ACCEPTED)
+    return waves.records(pl, "scenario", status=ACCEPTED)
 
 
 def plan_interface(pl: Pipeline) -> dict:
@@ -169,7 +169,7 @@ def plan_interface(pl: Pipeline) -> dict:
 def write_contract(pl: Pipeline) -> list[dict]:
     """3.3 Моки и контракт: форма запроса, ответа и мок каждого вызова (версия контракта 1)."""
     _need_entry(pl)
-    todo = [c for c in pl.bank.records("call") if not (c.get("attrs") or {}).get("method")]
+    todo = [c for c in waves.records(pl, "call") if not (c.get("attrs") or {}).get("method")]
     if not todo:
         return []
     listing = "\n".join(f"{c['id']}: {c['title']}" for c in todo)
@@ -209,7 +209,7 @@ def write_contract(pl: Pipeline) -> list[dict]:
 
 def build_tz(pl: Pipeline) -> list[dict]:
     _need_entry(pl)
-    if not pl.bank.records("page"):
+    if not waves.records(pl, "page"):
         raise PipelineError("no_pages", "Сначала спланируйте интерфейс (шаг 3.2)")
     return tz.build(pl, 3)
 
@@ -235,7 +235,7 @@ def _criteria(pl: Pipeline, scenario: dict, layer: str) -> list[dict]:
 
 
 def _covered(pl: Pipeline) -> set[str]:
-    return {p["id"] for t in pl.bank.records("test") for p in pl.bank.parents(t["id"])}
+    return {p["id"] for t in waves.records(pl, "test") for p in pl.bank.parents(t["id"])}
 
 
 def write_tests_for(pl: Pipeline, stage: int, layer: str, scenarios: list[dict]) -> list[dict]:
@@ -303,14 +303,14 @@ def _write_tests(pl: Pipeline, layer: str, criteria: list[dict], context: str) -
 
 def write_tests(pl: Pipeline) -> list[dict]:
     _need_entry(pl)
-    if not tz.stale(pl, 3) and not (pl.project / tz.DIR / "stage3").is_dir():
+    if not tz.built(pl, 3):
         raise PipelineError("no_tz", "Сначала соберите ТЗ (шаг 3.4)")
     return write_tests_for(pl, 3, "frontend", _scenarios(pl))
 
 
 def red_start_for(pl: Pipeline, layer: str) -> dict:
     """Красный старт: до реализации тесты обязаны падать, иначе они пустые."""
-    tests = [t for t in pl.bank.records("test") if (t.get("attrs") or {}).get("layer") == layer]
+    tests = [t for t in waves.records(pl, "test") if (t.get("attrs") or {}).get("layer") == layer]
     if not tests:
         raise PipelineError("no_tests", "Сначала напишите тесты")
     run = pl.tests.run(layer)
@@ -349,7 +349,7 @@ def implement_for(
     scenarios = scenarios or _scenarios(pl)
     if not scenarios:
         raise PipelineError("no_scenarios", "Нет принятых сценариев")
-    tests = [t for t in pl.bank.records("test") if (t.get("attrs") or {}).get("layer") == layer]
+    tests = [t for t in waves.records(pl, "test") if (t.get("attrs") or {}).get("layer") == layer]
     files = [t["attrs"]["file"] for t in tests if t.get("attrs", {}).get("file")]
     before = file_hashes(pl.project, files)
     log, summary = [], ""
@@ -407,19 +407,19 @@ def implement(pl: Pipeline) -> dict:
 
 
 def facts(pl: Pipeline) -> dict:
-    return {"tests_green": tests_green(pl, "frontend")}
+    return {"tests_green": tests_green(pl, "frontend"), **waves.facts(pl)}
 
 
 def steps(pl: Pipeline) -> list[dict]:
     entry = entry_ok(pl)
-    has = lambda kind: bool(pl.bank.records(kind))  # noqa: E731
+    has = lambda kind: bool(waves.records(pl, kind))  # noqa: E731
     gate = pl.keeper.last("frontend")
     ok = bool(gate and gate["state"] == "passed")
-    tests = pl.bank.records("test")
+    tests = waves.records(pl, "test")
     front = [t for t in tests if (t.get("attrs") or {}).get("layer") == "frontend"]
     red = bool(front) and all(t["attrs"].get("red") is not None for t in front)
-    contract = bool(pl.bank.records("call")) and all(
-        (c.get("attrs") or {}).get("method") for c in pl.bank.records("call")
+    contract = bool(waves.records(pl, "call")) and all(
+        (c.get("attrs") or {}).get("method") for c in waves.records(pl, "call")
     )
     green = tests_green(pl, "frontend") is True
     return [
@@ -435,12 +435,22 @@ def steps(pl: Pipeline) -> list[dict]:
         _step(
             "3.2", "plan", "План интерфейса", has("page"), entry and has("style"), "ui_designer", ""
         ),
-        _step("3.3", "contract", "Моки и контракт", contract, has("page"), "ui_designer", ""),
+        _step(
+            "3.3",
+            "contract",
+            "Моки и контракт",
+            contract,
+            has("page"),
+            "ui_designer",
+            "в этой волне нет вызовов API: добавьте их в план интерфейса или выключите волны"
+            if has("page") and not contract and waves.scope(pl) is not None
+            else "",
+        ),
         _step(
             "3.4",
             "tz",
             "ТЗ из банка",
-            (pl.project / tz.DIR / "stage3").is_dir() and not tz.stale(pl, 3),
+            tz.built(pl, 3),
             contract,
             None,
             "собирает код",
@@ -450,7 +460,7 @@ def steps(pl: Pipeline) -> list[dict]:
             "tests",
             "Тесты из критериев",
             bool(front) and red,
-            (pl.project / tz.DIR / "stage3").is_dir(),
+            tz.built(pl, 3),
             "test_author",
             "",
         ),

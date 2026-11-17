@@ -158,9 +158,54 @@ function stagePanel(ctx, stage) {
   }
   if (stage.n === 3) {
     const style = stage.steps.find((step) => step.key === "style");
-    return style && style.state === "available" ? h("div", {class: "pl-panel"}, stylePanel(ctx)) : null;
+    const parts = [wavesPanel(ctx), style && style.state === "available" ? stylePanel(ctx) : null].filter(Boolean);
+    return parts.length ? h("div", {class: "pl-panel"}, parts) : null;
   }
   return null;
+}
+
+// ------------------------------------------------------------------ волны (по желанию)
+
+function wavesPanel(ctx) {
+  const waves = ctx.state.waves;
+  if (!waves) return null;
+  const running = ctx.state.job && ctx.state.job.running;
+  if (waves.on) {
+    const title = waves.finished ? "Волны: все пройдены" : `Волны: идёт ${waves.current} из ${waves.total}`;
+    return h(
+      "div",
+      {class: "pl-block"},
+      h("div", {class: "pl-label"}, title),
+      h(
+        "div",
+        {class: "pl-waves"},
+        waves.packages.map((pack) =>
+          h("span", {class: "pl-wave " + pack.state, title: pack.scenarios.map((s) => s.title).join("; ")}, `Волна ${pack.index} · сценариев ${pack.scenarios.length}`),
+        ),
+      ),
+      h("div", {class: "hint"}, "Этапы 3–4 идут по очереди для каждой волны со своими воротами; после бэкенда волны — следующая, после последней — этап 5. Сценарии с общими таблицами идут вместе."),
+      h(
+        "div",
+        {class: "pl-actions"},
+        waves.finished ? null : h("button", {disabled: running, onclick: () => ctx.act("/api/pipeline/waves/enable")}, "Пересобрать пакеты"),
+        h("button", {class: "ghost", disabled: running, onclick: () => ctx.act("/api/pipeline/waves/disable")}, "Выключить волны"),
+      ),
+    );
+  }
+  const offer = waves.suggestion;
+  if (!offer) return null;
+  return h(
+    "div",
+    {class: "pl-block"},
+    h("div", {class: "pl-label"}, "Волны"),
+    h("p", null, `Сценариев ${offer.scenarios} — больше порога ${offer.threshold}. Разбить этапы 3–4 на ${offer.packages} волны? Каждая волна — рабочий срез: свои страницы, тесты и ворота.`),
+    h(
+      "div",
+      {class: "pl-actions"},
+      h("button", {class: "pl-primary", disabled: running, onclick: () => ctx.act("/api/pipeline/waves/enable")}, "Включить волны"),
+      h("button", {class: "ghost", disabled: running, onclick: () => ctx.act("/api/pipeline/waves/disable")}, "Не нужно, всё сразу"),
+    ),
+  );
 }
 
 function areaPanel(ctx) {

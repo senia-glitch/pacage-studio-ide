@@ -235,3 +235,26 @@ def test_map_route_returns_columns_nodes_and_state_counts(tmp_path):
     assert {n["state"] for n in data["nodes"]} <= {"ok", "plan", "stale", "gap", "orphan"}
     fallback = svc.get(f"{P}/map", {})
     assert fallback["title"] == data["title"]
+
+
+def test_waves_are_offered_and_switched_through_routes(tmp_path):
+    svc, _ = service(tmp_path)
+    svc.post(f"{P}/start", {})
+    assert svc.state()["waves"]["on"] is False and svc.state()["waves"]["suggestion"] is None
+    with pytest.raises(PipelineError) as err:
+        svc.post(f"{P}/waves/enable", {})  # принятых сценариев ещё нет
+    assert err.value.code == "no_scenarios"
+    pl = svc.pl()
+    area = pl.bank.add("area", "Запись")
+    boundary = pl.bank.add("boundary", "Только запись", parents=[area["id"]])
+    problem = pl.bank.add("problem", "Не дозвониться", parents=[boundary["id"]])
+    req = pl.bank.add("requirement", "Система должна записывать", parents=[problem["id"]])
+    items = [pl.bank.add("scenario", f"S{i}", parents=[req["id"]]) for i in range(1, 4)]
+    pl.bank.set_status([s["id"] for s in items], "accepted", "human")
+    pl.settings.set_number("wave_threshold", 2)
+    offer = svc.state()["waves"]["suggestion"]
+    assert offer == {"scenarios": 3, "packages": 2, "threshold": 2}
+    on = svc.post(f"{P}/waves/enable", {})["waves"]
+    assert on["on"] and on["current"] == 1 and on["total"] == 2 and on["suggestion"] is None
+    off = svc.post(f"{P}/waves/disable", {})["waves"]
+    assert off["on"] is False and off["packages"] == []

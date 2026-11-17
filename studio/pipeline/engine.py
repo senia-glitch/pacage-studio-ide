@@ -53,7 +53,15 @@ class Pipeline:
             if auto is not None:
                 run = auto
         run["human"] = run["state"] not in ("passed",) and self.keeper.needs_human(run)
+        self._more_waves(run)
         return run
+
+    def _more_waves(self, run: dict) -> None:
+        """Бэкенд волны принят: если есть следующая волна, ворота этапов 3–4 начинаются заново."""
+        if run["gate"] == "backend" and run["state"] == "passed":
+            from . import waves
+
+            waves.advance(self)
 
     def evaluate(self, run: dict) -> dict:
         """Слой 2: независимый оценщик ставит оценку по каждому критерию (JSON с доказательствами)."""
@@ -80,7 +88,9 @@ class Pipeline:
 
     def decide_gate(self, run_id: str, decision: str, note: str = "") -> dict:
         """Решение человека на воротах (принять, вернуть, принять ниже порога)."""
-        return self.keeper.decide(run_id, decision, "human", note)
+        run = self.keeper.decide(run_id, decision, "human", note)
+        self._more_waves(run)
+        return run
 
     # ------------------------------------------------------------------ сводка
 

@@ -223,6 +223,12 @@ _S1 = (
 _S2 = ("term", "variant", "scenario", "table", "criterion")
 _S3 = ("style", "page", "call")
 
+def _wave(facts: dict, card: dict) -> bool:
+    """Идут волны: проверки смотрят только на записи текущей волны (в ``facts["scope"]``)."""
+    scope = facts.get("scope") if facts else None
+    return scope is None or card["id"] in scope
+
+
 CHECKS: dict[str, Callable[[ProjectBank, dict], list[Finding]]] = {
     "orphans_1": lambda b, f: cov.orphans(b, ("problem",)),
     "duplicates_1": lambda b, f: cov.duplicates(b, ("problem", "boundary", "constraint")),
@@ -239,15 +245,25 @@ CHECKS: dict[str, Callable[[ProjectBank, dict], list[Finding]]] = {
     "orphans_2b": lambda b, f: cov.orphans(b, ("table",)),
     "schema_integrity": lambda b, f: cov.schema_integrity(b),
     "duplicates_2b": lambda b, f: cov.duplicates(b, ("table",)),
-    "uncovered_page": lambda b, f: cov.uncovered(b, "scenario", "page"),
+    "uncovered_page": lambda b, f: cov.uncovered(
+        b, "scenario", "page", skip=lambda c: not _wave(f, c)
+    ),
     "uncovered_test": lambda b, f: cov.uncovered(
-        b, "criterion", "test", skip=lambda c: cov.visual(c) or cov.layer_of(c) != "frontend"
+        b,
+        "criterion",
+        "test",
+        skip=lambda c: cov.visual(c) or cov.layer_of(c) != "frontend" or not _wave(f, c),
     ),
     "uncovered_test_backend": lambda b, f: cov.uncovered(
-        b, "criterion", "test", skip=lambda c: cov.visual(c) or cov.layer_of(c) != "backend"
+        b,
+        "criterion",
+        "test",
+        skip=lambda c: cov.visual(c) or cov.layer_of(c) != "backend" or not _wave(f, c),
     ),
     "orphans_3": lambda b, f: cov.orphans(b, ("page", "call", "test")),
-    "uncovered_endpoint": lambda b, f: cov.uncovered(b, "call", "endpoint"),
+    "uncovered_endpoint": lambda b, f: cov.uncovered(
+        b, "call", "endpoint", skip=lambda c: not _wave(f, c)
+    ),
     "orphans_4": lambda b, f: cov.orphans(b, ("endpoint", "model")),
     "broken_chains": lambda b, f: cov.broken_chains(b),
     # «Устарело» выше по цепочке блокирует ворота: сначала перепроверяют то, на чём всё держится.

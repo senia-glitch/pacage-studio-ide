@@ -11,7 +11,7 @@ from pathlib import Path
 
 from studio.pipeline.graph import ACCEPTED
 
-from . import prompts, stage3, tz
+from . import prompts, stage3, tz, waves
 from .engine import Pipeline
 from .errors import PipelineError
 from .stage1 import _ids, _items, _s, _step
@@ -43,7 +43,7 @@ def plan_backend(pl: Pipeline) -> dict:
     _need_entry(pl)
     todo = [
         c
-        for c in pl.bank.records("call", status=ACCEPTED)
+        for c in waves.records(pl, "call", status=ACCEPTED)
         if not any(e["kind"] == "endpoint" for e in pl.bank.children(c["id"]))
     ]
     if not todo:
@@ -142,7 +142,7 @@ def render_models(tables: list[dict]) -> str:
 def build_models(pl: Pipeline) -> list[dict]:
     """4.2 Модели из схемы БД: файл пишет код; записи «модель» привязаны к таблицам."""
     _need_entry(pl)
-    tables = pl.bank.records("table", status=ACCEPTED)
+    tables = waves.records(pl, "table", status=ACCEPTED)
     if not tables:
         raise PipelineError("no_tables", "В банке нет принятых таблиц")
     path = pl.project / MODELS_FILE
@@ -170,20 +170,20 @@ def build_models(pl: Pipeline) -> list[dict]:
 
 def build_tz(pl: Pipeline) -> list[dict]:
     _need_entry(pl)
-    if not pl.bank.records("endpoint"):
+    if not waves.records(pl, "endpoint"):
         raise PipelineError("no_endpoints", "Сначала спланируйте бэкенд (шаг 4.1)")
     return tz.build(pl, 4)
 
 
 def write_tests(pl: Pipeline) -> list[dict]:
     _need_entry(pl)
-    scenarios = pl.bank.records("scenario", status=ACCEPTED)
+    scenarios = waves.records(pl, "scenario", status=ACCEPTED)
     created = stage3.write_tests_for(pl, 4, "backend", scenarios)
     # критерии ограничений (права, безопасность, объём) не принадлежат сценарию — отдельный блок
     covered = stage3._covered(pl)
     limits = [
         c
-        for c in pl.bank.records("criterion")
+        for c in waves.records(pl, "criterion")
         if (c.get("attrs") or {}).get("layer") == "backend"
         and (c.get("attrs") or {}).get("check") != "visual"
         and c["id"] not in covered
@@ -224,7 +224,7 @@ def mocks_in_use(project: Path) -> list[str]:
 def replace_mocks(pl: Pipeline) -> dict:
     """4.6 Замена моков: фронтенд переходит на реальные вызовы по контракту; тесты — снова зелёные."""
     _need_entry(pl)
-    calls = pl.bank.records("call", status=ACCEPTED)
+    calls = waves.records(pl, "call", status=ACCEPTED)
     contract = "\n".join(
         f"- {c['title']}: {(c.get('attrs') or {}).get('method')} {(c.get('attrs') or {}).get('path')}"
         for c in calls
@@ -247,13 +247,14 @@ def replace_mocks(pl: Pipeline) -> dict:
 
 
 def facts(pl: Pipeline) -> dict:
-    calls = pl.bank.records("call", status=ACCEPTED)
+    calls = waves.records(pl, "call", status=ACCEPTED)
     matches = bool(calls) and all(
         any(e["kind"] == "endpoint" for e in pl.bank.children(c["id"])) for c in calls
     )
     done = stage3.results(pl).get("mocks_replaced")
     return {
         "tests_green": stage3.tests_green(pl, "backend"),
+        **waves.facts(pl),
         "contract_matches": matches,
         "mocks_removed": True
         if (done and not mocks_in_use(pl.project))
@@ -263,13 +264,13 @@ def facts(pl: Pipeline) -> dict:
 
 def steps(pl: Pipeline) -> list[dict]:
     entry = entry_ok(pl)
-    has = lambda kind: bool(pl.bank.records(kind))  # noqa: E731
+    has = lambda kind: bool(waves.records(pl, kind))  # noqa: E731
     gate = pl.keeper.last("backend")
     ok = bool(gate and gate["state"] == "passed")
-    back = [t for t in pl.bank.records("test") if (t.get("attrs") or {}).get("layer") == "backend"]
+    back = [t for t in waves.records(pl, "test") if (t.get("attrs") or {}).get("layer") == "backend"]
     red = bool(back) and all(t["attrs"].get("red") is not None for t in back)
     green = stage3.tests_green(pl, "backend") is True
-    tz_done = (pl.project / tz.DIR / "stage4").is_dir() and not tz.stale(pl, 4)
+    tz_done = tz.built(pl, 4)
     replaced = bool(stage3.results(pl).get("mocks_replaced"))
     return [
         _step("4.1", "plan", "План бэкенда", has("endpoint"), entry, "backend_designer", ""),

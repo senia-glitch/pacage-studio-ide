@@ -142,3 +142,9 @@ input.pl-num{width:64px}
 .pl-maplegend .item{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--dim)}
 .pl-maplegend i{width:14px;height:12px;border:1.5px solid;border-radius:3px;display:inline-block}
 .pl-map{margin-top:8px}
+
+.pl-waves{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0}
+.pl-wave{border:1.5px solid var(--line);border-radius:14px;padding:3px 10px;font-size:12px;color:var(--dim)}
+.pl-wave.current{border-color:var(--acc);color:var(--text)}
+.pl-wave.done{border-color:#4f9a5a;color:#7fc88a}
+.pl-actions{display:flex;gap:8px;margin-top:8px}
