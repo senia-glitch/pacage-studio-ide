@@ -52,11 +52,23 @@ def rules(pl_state=None):
             },
         ),
         (
+            "Опиши БИЗНЕС этой идеи",
+            {
+                "client": "пациент",
+                "need": "записаться к врачу",
+                "category": "онлайн-запись к врачу",
+                "queries": ["запись к врачу онлайн", "", "как записаться к врачу"],
+                "not_competitors": "конструкторы сайтов",
+            },
+        ),
+        (
             "реальных конкурентов",
             {
                 "competitors": [
                     {"name": "ДокторПлюс", "url": "https://example.org", "why": "онлайн-запись"},
                     {"name": "Без адреса", "url": "", "why": "x"},
+                    {"name": "Конструктор Сайтов", "url": "https://tool.example", "why": "x", "kind": "tool"},
+                    {"name": "Платформа", "url": "https://p.example", "why": "x", "kind": "Платформа"},
                 ]
             },
         ),
@@ -193,6 +205,9 @@ def test_stage1_end_to_end_with_human_decisions(tmp_path):
     assert [c["title"] for c in comps] == ["ДокторПлюс"]  # без адреса — не принимается
     assert comps[0]["attrs"]["analysis"]["takeaway"] == "простота"
     assert any(call["web"] for call in agent.calls)
+    search = next(c["prompt"] for c in agent.calls if c["web"])  # поиск идёт по бизнесу, а не по технологии
+    assert "клиент — пациент" in search and "запись к врачу онлайн; как записаться к врачу" in search
+    assert "Конкурентами НЕ считать: конструкторы сайтов" in search and "НЕ инструменты" in search
     facts = stage1.analyze_domain(pl)
     assert [f["title"] for f in facts] == ["Пациент"]
 
@@ -282,3 +297,12 @@ def test_gate_returns_on_low_score_and_evaluator_prompt(tmp_path):
     assert "actuality" in prompt and "порог 8" in prompt and "c5" in prompt
     assert not [p for p in pl.bank.records("problem") if p["status"] == ACCEPTED]
     assert pl.bank.records("problem")[0]["status"] == PROPOSED
+
+
+def test_competitors_work_even_if_the_business_profile_is_empty(tmp_path):
+    pl, agent = build(tmp_path)
+    stage1.set_area(pl, "Личный блог")
+    agent.rules.insert(0, ("Опиши БИЗНЕС этой идеи", {}))
+    stage1.research_competitors(pl)
+    search = next(c["prompt"] for c in agent.calls if c["web"])
+    assert "Бизнес: клиент" not in search and "реальных конкурентов" in search

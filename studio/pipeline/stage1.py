@@ -240,13 +240,68 @@ def propose_constraints(pl: Pipeline) -> list[dict]:
 # ---------------------------------------------------------------------- 1.5 Конкуренты
 
 
+NOT_BUSINESS = (
+    "tool", "platform", "builder", "framework", "service",
+    "инструмент", "платформа", "конструктор",
+)  # fmt: skip
+NL = chr(10)
+
+
+def business_profile(pl: Pipeline, root: dict) -> dict:
+    """Кто клиент, что он получает и в какой нише работает бизнес: по этому ищут конкурентов."""
+    prompt = NL.join(
+        [
+            f"Идея:{NL}{root['body']}{NL}",
+            "Опиши БИЗНЕС этой идеи, а не её техническую реализацию: кто клиент (кто пользуется "
+            "результатом: читатель, гость, покупатель), какую задачу клиента решает продукт, к "
+            "какой категории бизнеса он относится (кто ещё даёт клиенту то же самое), и 3–5 "
+            "поисковых запросов, которыми клиент искал бы такого поставщика. Отдельно назови, что "
+            "конкурентом НЕ является: инструменты, конструкторы, платформы и сервисы, на которых "
+            "это можно построить.",
+            'Ответ: {"client": "...", "need": "...", "category": "...", "queries": ["..."], '
+            '"not_competitors": "..."}',
+        ]
+    )
+    data = pl.llm.ask_json("researcher", prompts.SYSTEM["researcher"], prompt)
+    if not isinstance(data, dict):
+        return {}
+    queries = [_s(q, 120) for q in (data.get("queries") or []) if _s(q, 120)][:5]
+    return {
+        "client": _s(data.get("client"), 300),
+        "need": _s(data.get("need"), 300),
+        "category": _s(data.get("category"), 200),
+        "queries": queries,
+        "not_competitors": _s(data.get("not_competitors"), 300),
+    }
+
+
 def research_competitors(pl: Pipeline, count: int = 5) -> list[dict]:
-    """1.5 Конкуренты: поиск → проверка → анализ. Один раз, дальше — по желанию."""
+    """1.5 Конкуренты: бизнес идеи → поиск → проверка → анализ. Один раз, дальше — по желанию.
+
+    Конкурент — тот, кто даёт клиенту то же самое и занимает ту же нишу. Инструменты, конструкторы
+    и платформы, на которых продукт можно собрать, — это технологии, а не конкуренты.
+    """
     root = area(pl)
-    prompt = (
-        f"Идея:\n{root['body']}\n\nНайди до {count} реальных конкурентов или аналогов (веб-поиск). "
-        "Для каждого: название, адрес сайта, чем занимается.\n"
-        'Ответ: {"competitors": [{"name": "...", "url": "https://...", "why": "..."}]}'
+    profile = business_profile(pl, root)
+    about = ""
+    if profile.get("category") or profile.get("need"):
+        about = (
+            f"Бизнес: клиент — {profile['client']}; задача клиента — {profile['need']}; "
+            f"категория — {profile['category']}.{NL}"
+            f"Поисковые запросы: {'; '.join(profile['queries'])}.{NL}"
+            f"Конкурентами НЕ считать: {profile['not_competitors']}.{NL}{NL}"
+        )
+    prompt = NL.join(
+        [
+            f"Идея:{NL}{root['body']}{NL}",
+            f"{about}Найди до {count} реальных конкурентов или аналогов (веб-поиск): те, кто даёт "
+            "тому же клиенту то же самое и работает в той же нише — готовые сайты, сервисы и люди, "
+            "а НЕ инструменты и конструкторы для их создания. Для каждого: название, адрес сайта, "
+            "чем занимается, тип (business — поставщик того же результата; tool — инструмент, "
+            "конструктор или платформа).",
+            'Ответ: {"competitors": [{"name": "...", "url": "https://...", "why": "...", '
+            '"kind": "business"}]}',
+        ]
     )
     data = pl.llm.ask_json("researcher", prompts.SYSTEM["researcher"], prompt, web=True)
     created = []
@@ -254,6 +309,8 @@ def research_competitors(pl: Pipeline, count: int = 5) -> list[dict]:
         name, url = _s(item.get("name"), 120), _s(item.get("url"), 300)
         if not name or not url.lower().startswith(("http://", "https://")):
             continue  # проверка: без названия и настоящего адреса запись не принимается
+        if _s(item.get("kind"), 40).lower() in NOT_BUSINESS:
+            continue  # инструмент или платформа для создания продукта — не конкурент
         if pl.bank.find("competitor", name):
             continue
         created.append(
