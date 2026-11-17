@@ -15,7 +15,7 @@ import time
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
-from studio.idea.graph import ACCEPTED, HUMAN, PROPOSED, GraphError, Store, normalize_url
+from studio.pipeline.graph import ACCEPTED, HUMAN, PROPOSED, GraphError, Store, normalize_url
 
 from . import check, diagrams, export, flow, rules, tools
 from .agents import TurnRequest, TurnResult

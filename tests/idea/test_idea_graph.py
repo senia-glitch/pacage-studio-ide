@@ -1,6 +1,6 @@
 import pytest
 
-from studio.idea.graph import (
+from studio.pipeline.graph import (
     ACCEPTED,
     DETAIL,
     HUMAN,

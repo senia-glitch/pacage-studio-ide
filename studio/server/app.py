@@ -24,8 +24,8 @@ from studio.frontend import scan_frontend
 from studio.frontend import sync as front_sync
 from studio.frontend import verify as front_verify
 from studio.idea import EngineError as IdeaError
-from studio.idea.graph import GraphError as IdeaGraphError
 from studio.metadata import MetadataError
+from studio.pipeline.graph import GraphError as IdeaGraphError
 from studio.server import access, autopilot, chain, discovery, gitops, system
 from studio.server.idea import PREFIX as IDEA_PREFIX
 from studio.server.security import (

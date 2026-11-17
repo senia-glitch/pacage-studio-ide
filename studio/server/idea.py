@@ -14,7 +14,7 @@ from pathlib import Path
 
 from studio.idea import Adapters, EngineError, Project, Settings
 from studio.idea.flow import STEPS
-from studio.idea.graph import Store
+from studio.pipeline.graph import Store
 
 PREFIX = "/api/idea"
 WORK_DIR = (".studio", "idea")

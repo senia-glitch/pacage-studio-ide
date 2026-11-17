@@ -12,8 +12,15 @@ DETAIL = "детализирует"  # связь «потомок детали�
 
 PROPOSED = "proposed"  # «предложена» — ждёт решения человека
 ACCEPTED = "accepted"  # «принята»
-STATUSES = (PROPOSED, ACCEPTED)
-STATUS_NAMES = {PROPOSED: "предложена", ACCEPTED: "принята"}
+STALE = "stale"  # «устарела»: принятое, на что повлияло изменение; ждёт перепроверки
+REJECTED = "rejected"  # «отклонена»: ушла в архив
+STATUSES = (PROPOSED, ACCEPTED, STALE, REJECTED)
+STATUS_NAMES = {
+    PROPOSED: "предложена",
+    ACCEPTED: "принята",
+    STALE: "устарела",
+    REJECTED: "отклонена",
+}
 
 HUMAN = "human"  # автор-человек; все остальные авторы — пакеты и решатели
 

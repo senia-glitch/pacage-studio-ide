@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from studio.idea.graph import ACCEPTED
+from studio.pipeline.graph import ACCEPTED
 
 from . import diagrams, flow
 

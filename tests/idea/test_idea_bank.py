@@ -1,6 +1,6 @@
 import pytest
 
-from studio.idea.graph import GraphError, Store, normalize_url
+from studio.pipeline.graph import GraphError, Store, normalize_url
 
 HUMAN = "human"
 AGENT = "package:recon"

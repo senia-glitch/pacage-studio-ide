@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from studio.idea.graph import ACCEPTED
+from studio.pipeline.graph import ACCEPTED
 
 from . import flow
 

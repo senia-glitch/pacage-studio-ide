@@ -52,9 +52,11 @@ def _same(a: dict | None, b: dict | None) -> bool:
 class Store:
     """Граф одного проекта в папке ``<папка>/.idea-graph``."""
 
+    dir_name = DIR_NAME
+
     def __init__(self, folder: str | os.PathLike):
         self.folder = Path(folder)
-        self.dir = self.folder / DIR_NAME
+        self.dir = self.folder / self.dir_name
         self.lock = threading.RLock()
         self._state: dict = {}
 
@@ -62,7 +64,7 @@ class Store:
 
     @classmethod
     def exists(cls, folder: str | os.PathLike) -> bool:
-        return (Path(folder) / DIR_NAME / "graph.json").is_file()
+        return (Path(folder) / cls.dir_name / "graph.json").is_file()
 
     @classmethod
     def create(cls, folder: str | os.PathLike, title: str = "") -> Store:
