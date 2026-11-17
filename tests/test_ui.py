@@ -23,15 +23,15 @@ def test_две_рабочие_области_одного_окна():
     assert 'data-map-mode="plan"' in HTML
 
 
-def test_четыре_раздела_в_порядке_цепочки():
-    """Идея → План → Система → Настройки; внутри «Системы» — обзор, бэкенд и фронтенд."""
+def test_разделы_в_порядке_цепочки():
+    """Конвейер → (прежние) Идея → План → Система → Настройки; в «Системе» — обзор, карты."""
     top = re.findall(r'<button class="tabbtn[^"]*" id="tab-[a-z]+-button" data-tab="([a-z]+)"', HTML)
-    assert top == ["idea", "ideas", "system", "settings"]
+    assert top == ["pipeline", "idea", "ideas", "system", "settings"]
     sub = re.findall(r'<button class="subtab[^"]*" id="tab-[a-z]+-button" data-tab="([a-z]+)"', HTML)
     assert sub == ["overview", "map", "frontend"]
-    for title in ("Идея", "План", "Система", "Настройки", "Обзор", "Бэкенд", "Фронтенд"):
+    for title in ("Конвейер", "Идея", "План", "Система", "Настройки", "Обзор", "Бэкенд", "Фронтенд"):
         assert title in HTML
-    for section in ("overview", "idea", "map", "ideas", "frontend", "settings"):
+    for section in ("pipeline", "overview", "idea", "map", "ideas", "frontend", "settings"):
         assert f'id="tab-{section}"' in HTML
     assert 'id="tab-agent"' not in HTML  # отдельной вкладки настроек агента больше нет
 

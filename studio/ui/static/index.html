@@ -10,15 +10,17 @@
 <link rel="stylesheet" href="/static/app.css">
 <link rel="stylesheet" href="/static/workspace.css">
 <link rel="stylesheet" href="/static/roadmap.css">
+<link rel="stylesheet" href="/static/pipeline.css">
 </head>
 <body>
 <header>
   <div class="header-brand">
     <span class="logo" id="logoBtn" title="О проекте"><span class="logo-mark">⬢</span> studio</span>
     <span class="tabs" role="tablist" aria-label="Разделы">
+      <button class="tabbtn on" id="tab-pipeline-button" data-tab="pipeline" role="tab" aria-selected="true" aria-controls="tab-pipeline" title="От идеи до работающего ПО: пять этапов, ворота качества и банк знаний"><span class="tab-index">0</span> Конвейер</button>
       <button class="tabbtn" id="tab-idea-button" data-tab="idea" role="tab" aria-selected="false" aria-controls="tab-idea" title="Из сырой идеи получается проверенная документация"><span class="tab-index">1</span> Идея</button>
       <button class="tabbtn" id="tab-ideas-button" data-tab="ideas" role="tab" aria-selected="false" aria-controls="tab-ideas" title="Что строить дальше: идеи, разбор и выбор задач"><span class="tab-index">2</span> План</button>
-      <button class="tabbtn on" id="tab-system-button" data-tab="system" role="tab" aria-selected="true" aria-controls="tab-overview" title="Вся система: обзор, бэкенд и фронтенд"><span class="tab-index">3</span> Система</button>
+      <button class="tabbtn" id="tab-system-button" data-tab="system" role="tab" aria-selected="false" aria-controls="tab-overview" title="Вся система: обзор, бэкенд и фронтенд"><span class="tab-index">3</span> Система</button>
       <button class="tabbtn" id="tab-settings-button" data-tab="settings" role="tab" aria-selected="false" aria-controls="tab-settings" title="Агенты и модели, проект, промпты, режим работы"><span class="tab-index">4</span> Настройки</button>
     </span>
   </div>
@@ -56,8 +58,11 @@
     <button class="subtab" id="tab-map-button" data-tab="map" role="tab" aria-selected="false" aria-controls="tab-map" title="Детальная карта бэкенда: эндпоинты, сценарии, io, модели">Бэкенд</button>
     <button class="subtab" id="tab-frontend-button" data-tab="frontend" role="tab" aria-selected="false" aria-controls="tab-frontend" title="Детальная карта фронтенда: страницы и блоки">Фронтенд</button>
   </nav>
-  <section class="tab on" id="tab-overview" role="tabpanel" aria-labelledby="tab-overview-button">
+  <section class="tab" id="tab-overview" role="tabpanel" aria-labelledby="tab-overview-button">
     <div id="overviewBody" class="overview"><p class="hint">Загрузка…</p></div>
+  </section>
+  <section class="tab on" id="tab-pipeline" role="tabpanel" aria-labelledby="tab-pipeline-button">
+    <div id="pipelineHost" class="pl-host"></div>
   </section>
   <section class="tab" id="tab-idea" role="tabpanel" aria-labelledby="tab-idea-button">
     <div id="ideaHost"></div>

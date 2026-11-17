@@ -30,6 +30,7 @@ hooks.renderOverview = renderOverview;
 hooks.renderInspector = renderInspector;
 hooks.renderFrontend = renderFrontend;
 // Этап «Идея» подключается при первом открытии вкладки: остальным вкладкам он не мешает.
+hooks.renderPipeline = async () => { const pipeline = await import("./pipeline/main.js"); await pipeline.renderPipeline($("pipelineHost")); };
 hooks.renderIdea = async () => { const idea = await import("./idea/main.js"); await idea.renderIdea($("ideaHost")); };
 hooks.refreshAux = () => {
   void refreshAgentReports();

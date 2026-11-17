@@ -46,7 +46,7 @@ include = ["studio", "studio.*"]
 version = {attr = "studio.__version__"}
 
 [tool.setuptools.package-data]
-"studio.ui" = ["static/*.html", "static/*.css", "static/js/*.js", "static/js/idea/*.js", "static/js/package.json"]
+"studio.ui" = ["static/*.html", "static/*.css", "static/js/*.js", "static/js/idea/*.js", "static/js/pipeline/*.js", "static/js/package.json"]
 "studio.metadata" = ["rules.md"]
 "studio.agent" = ["rules.md", "guide.md"]
 "studio.productchain" = ["assets/opencode/agents/*.md", "assets/opencode/skills/*/SKILL.md"]

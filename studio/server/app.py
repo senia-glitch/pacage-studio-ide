@@ -25,9 +25,11 @@ from studio.frontend import sync as front_sync
 from studio.frontend import verify as front_verify
 from studio.idea import EngineError as IdeaError
 from studio.metadata import MetadataError
+from studio.pipeline import PipelineError
 from studio.pipeline.graph import GraphError as IdeaGraphError
 from studio.server import access, autopilot, chain, discovery, gitops, system
 from studio.server.idea import PREFIX as IDEA_PREFIX
+from studio.server.pipeline import PREFIX as PIPELINE_PREFIX
 from studio.server.security import (
     CSP,
     SECURITY_HEADERS,
@@ -269,6 +271,13 @@ def make_handler(ctx):
                 else:
                     self._error(400, exc.code, exc.message)
 
+        def _pipeline(self, call) -> None:
+            """Конвейер: ошибки правил — понятным ответом 400 (код и текст)."""
+            try:
+                self._json(call())
+            except (PipelineError, IdeaGraphError) as exc:
+                self._error(400, exc.code, exc.message)
+
         def do_GET(self) -> None:
             self._guard(self._get)
 
@@ -421,6 +430,9 @@ def make_handler(ctx):
             if url.path.startswith(IDEA_PREFIX + "/"):
                 query = urllib.parse.parse_qs(url.query)
                 return self._idea(lambda: state.idea.get(url.path, query))
+            if url.path.startswith(PIPELINE_PREFIX + "/"):
+                query = urllib.parse.parse_qs(url.query)
+                return self._pipeline(lambda: state.pipeline.get(url.path, query))
             return self._error(404, "not_found", "Не найдено")
 
         # --------------------------------------------------------------- POST
@@ -448,6 +460,8 @@ def make_handler(ctx):
                     token = self.headers.get("X-Idea-Graph-Token") or ""
                     return self._idea(lambda: state.idea.agent_call(token, url.path, data))
                 return self._idea(lambda: state.idea.post(url.path, data))
+            if url.path.startswith(PIPELINE_PREFIX + "/"):
+                return self._pipeline(lambda: state.pipeline.post(url.path, data))
             if url.path == "/api/agent/report":
                 return self._json(agent_report_submit(state, data, self._mode))
             if url.path == "/api/agent/report/decision":
@@ -921,6 +935,7 @@ def serve(
         discovery.remove(root)
         state.runner.stop()
         state.idea.close()
+        state.pipeline.close()
         state.tester.stop()
         state.devservers.stop_all()
         state.stop_watcher()

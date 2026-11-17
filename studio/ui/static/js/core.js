@@ -14,7 +14,7 @@ import {applyTransform as applyTransformImpl} from "./viewport.js";
 export const S = {
   G: null,
   byId: {},
-  tab: "overview",
+  tab: "pipeline",
   sysTab: "overview",
   settingsSection: "agents",
   selectedNode: null,
@@ -146,6 +146,7 @@ async function setTab(name){
   else if(name==="settings"){hooks.renderSettingsHub&&hooks.renderSettingsHub()}
   else if(name==="frontend"){hooks.renderFrontend&&hooks.renderFrontend()}
   else if(name==="idea"){hooks.renderIdea&&hooks.renderIdea()}
+  else if(name==="pipeline"){hooks.renderPipeline&&hooks.renderPipeline()}
   else hooks.renderIdeas();
   schedulePersist();
   return true;
@@ -213,7 +214,7 @@ function schedulePersist(){
 }
 function restoreUiState(saved){
   if(!saved)return;
-  S.tab=["overview","map","ideas","frontend","idea","settings"].includes(saved.tab)?saved.tab:"overview";
+  S.tab=["pipeline","overview","map","ideas","frontend","idea","settings"].includes(saved.tab)?saved.tab:"pipeline";
   if(["overview","map","frontend"].includes(S.tab))S.sysTab=S.tab;
   if(saved.mapMode==="fact"||saved.mapMode==="plan")S.mapMode=saved.mapMode;
   if(typeof saved.inspectorOpen==="boolean")S.inspectorOpen=saved.inspectorOpen;
