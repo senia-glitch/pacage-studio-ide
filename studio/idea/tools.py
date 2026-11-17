@@ -77,30 +77,55 @@ CHECK_RULES = """
 конкретных двух карточек — разногласия нет. Пиши по-русски; id бери только из графа; обычным текстом ничего не пиши.
 """.strip()
 
-_TURN_INFO = {"name": "turn_info", "description": "Вводные текущего хода. Вызови, если их нет в сообщении.",
-              "inputSchema": {"type": "object", "properties": {}}}
+_TURN_INFO = {
+    "name": "turn_info",
+    "description": "Вводные текущего хода. Вызови, если их нет в сообщении.",
+    "inputSchema": {"type": "object", "properties": {}},
+}
 
 HELPER_TOOLS = [
     _TURN_INFO,
     {
         "name": "graph_apply",
         "description": "Добавить карточки в граф: ops — список {op:'add_card', kind, title, body, attrs}. "
-                       "Пакет применяется целиком или не применяется.",
-        "inputSchema": {"type": "object", "properties": {"ops": {"type": "array", "items": {"type": "object"}}},
-                        "required": ["ops"]},
+        "Пакет применяется целиком или не применяется.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"ops": {"type": "array", "items": {"type": "object"}}},
+            "required": ["ops"],
+        },
     },
     {
         "name": "ask",
         "description": "Задать человеку один вопрос с готовыми вариантами (только в спорной ситуации). "
-                       "Человек может выбрать несколько вариантов, написать своё или отклонить все. После вызова заканчивай ход.",
+        "Человек может выбрать несколько вариантов, написать своё или отклонить все. После вызова заканчивай ход.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "question": {"type": "string", "description": "Один простой вопрос про одно, до 120 символов"},
-                "options": {"type": "array", "minItems": 2, "maxItems": 4, "items": {"type": "object", "properties": {
-                    "title": {"type": "string", "description": "Готовое решение, до 60 символов"}},
-                    "required": ["title"]}},
-                "recommended": {"type": "array", "items": {"type": "integer"}, "description": "Номера рекомендуемых вариантов (с 1)"},
+                "question": {
+                    "type": "string",
+                    "description": "Один простой вопрос про одно, до 120 символов",
+                },
+                "options": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 4,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {
+                                "type": "string",
+                                "description": "Готовое решение, до 60 символов",
+                            }
+                        },
+                        "required": ["title"],
+                    },
+                },
+                "recommended": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Номера рекомендуемых вариантов (с 1)",
+                },
             },
             "required": ["question", "options"],
         },
@@ -108,7 +133,11 @@ HELPER_TOOLS = [
     {
         "name": "finish",
         "description": "Сообщить, что работа закончена.",
-        "inputSchema": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]},
+        "inputSchema": {
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+        },
     },
 ]
 
@@ -120,13 +149,33 @@ RESEARCH_TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "findings": {"type": "array", "items": {"type": "object", "properties": {
-                    "kind": {"type": "string", "description": "Вид находки (как назван в задании)"},
-                    "title": {"type": "string", "description": "Короткое название одной строкой"},
-                    "description": {"type": "string"},
-                    "data": {"type": "object", "description": "Поля находки, если задание их просит"},
-                    "sources": {"type": "array", "items": {"type": "string"}, "description": "Адреса страниц, откуда взято"}},
-                    "required": ["title", "sources"]}},
+                "findings": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "description": "Вид находки (как назван в задании)",
+                            },
+                            "title": {
+                                "type": "string",
+                                "description": "Короткое название одной строкой",
+                            },
+                            "description": {"type": "string"},
+                            "data": {
+                                "type": "object",
+                                "description": "Поля находки, если задание их просит",
+                            },
+                            "sources": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Адреса страниц, откуда взято",
+                            },
+                        },
+                        "required": ["title", "sources"],
+                    },
+                },
                 "summary": {"type": "string"},
             },
             "required": ["findings"],
@@ -135,14 +184,22 @@ RESEARCH_TOOLS = [
 ]
 
 BOUNDS_TOOLS = [
-    HELPER_TOOLS[0], HELPER_TOOLS[2],
+    HELPER_TOOLS[0],
+    HELPER_TOOLS[2],
     {
         "name": "finish",
         "description": "Границы понятны полностью. topics — статус по каждой теме: что решено или почему неприменимо.",
-        "inputSchema": {"type": "object", "properties": {
-            "summary": {"type": "string"},
-            "topics": {"type": "object", "description": "{тема: короткий статус} по всем темам из задачи"}},
-            "required": ["topics"]},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string"},
+                "topics": {
+                    "type": "object",
+                    "description": "{тема: короткий статус} по всем темам из задачи",
+                },
+            },
+            "required": ["topics"],
+        },
     },
 ]
 
@@ -151,19 +208,58 @@ CHECK_TOOLS = [
     {
         "name": "report",
         "description": "Сдать отчёт проверки: items — смысловые разногласия, answers — ответы по пунктам кода. Один вызов.",
-        "inputSchema": {"type": "object", "properties": {
-            "items": {"type": "array", "items": {"type": "object", "properties": {
-                "kind": {"type": "string", "enum": ["boundary", "duplicate", "contradiction"]},
-                "cards": {"type": "array", "items": {"type": "string"}, "description": "boundary — одна карточка, остальные — две"},
-                "boundary": {"type": "integer", "description": "boundary: номер нарушаемой границы"},
-                "remove": {"type": "string", "description": "duplicate/contradiction: id карточки, которую убрать"},
-                "rewrite": {"type": "object", "description": "boundary, необязательно: {title, body до 250 символов}"}},
-                "required": ["kind", "cards"]}},
-            "answers": {"type": "array", "items": {"type": "object", "properties": {
-                "issue": {"type": "string", "description": "id пункта кода (i1…)"},
-                "pick": {"type": "string", "description": "edit | remove | id варианта | suggest"},
-                "body": {"type": "string"}, "importance": {"type": "string"}}, "required": ["issue", "pick"]}}},
-            "required": ["items", "answers"]},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "enum": ["boundary", "duplicate", "contradiction"],
+                            },
+                            "cards": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "boundary — одна карточка, остальные — две",
+                            },
+                            "boundary": {
+                                "type": "integer",
+                                "description": "boundary: номер нарушаемой границы",
+                            },
+                            "remove": {
+                                "type": "string",
+                                "description": "duplicate/contradiction: id карточки, которую убрать",
+                            },
+                            "rewrite": {
+                                "type": "object",
+                                "description": "boundary, необязательно: {title, body до 250 символов}",
+                            },
+                        },
+                        "required": ["kind", "cards"],
+                    },
+                },
+                "answers": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "issue": {"type": "string", "description": "id пункта кода (i1…)"},
+                            "pick": {
+                                "type": "string",
+                                "description": "edit | remove | id варианта | suggest",
+                            },
+                            "body": {"type": "string"},
+                            "importance": {"type": "string"},
+                        },
+                        "required": ["issue", "pick"],
+                    },
+                },
+            },
+            "required": ["items", "answers"],
+        },
     },
 ]
 
@@ -172,9 +268,22 @@ PILOT_TOOLS = [
     {
         "name": "decide",
         "description": "Решение по предложениям: accept — id принимаемых, остальные отклоняются. Вызывается один раз.",
-        "inputSchema": {"type": "object", "properties": {
-            "accept": {"type": "array", "items": {"type": "string"}, "description": "Номера (id) принимаемых предложений"},
-            "remove": {"type": "array", "items": {"type": "string"}, "description": "id принятых карточек, которые удалить (если разрешено)"},
-            "reason": {"type": "string"}}, "required": ["accept"]},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "accept": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Номера (id) принимаемых предложений",
+                },
+                "remove": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "id принятых карточек, которые удалить (если разрешено)",
+                },
+                "reason": {"type": "string"},
+            },
+            "required": ["accept"],
+        },
     },
 ]

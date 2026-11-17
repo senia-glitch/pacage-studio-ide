@@ -11,10 +11,17 @@ PROBLEM, ASIS, VARIANT, SOLUTION = "проблема", "как есть", "ва�
 PARTICIPATES = "участвует"
 HUMAN_TYPE, EXTERNAL_TYPE, COMPONENT_TYPE = "человек", "внешняя система", "компонент"
 ROLE_TYPES = (HUMAN_TYPE, EXTERNAL_TYPE, COMPONENT_TYPE)
-BANK = "knowledge"                       # один банк проекта: записи competitor, fact, requirement
+BANK = "knowledge"  # один банк проекта: записи competitor, fact, requirement
 
-STEPS = [("sphere", "Сфера"), ("competitors", "Конкуренты"), ("analysis", "Анализ"), ("roles", "Роли"),
-         ("scenarios", "Сценарии"), ("asis", "Как есть"), ("solution", "Решение")]
+STEPS = [
+    ("sphere", "Сфера"),
+    ("competitors", "Конкуренты"),
+    ("analysis", "Анализ"),
+    ("roles", "Роли"),
+    ("scenarios", "Сценарии"),
+    ("asis", "Как есть"),
+    ("solution", "Решение"),
+]
 
 
 def _list(items) -> str:
@@ -23,6 +30,7 @@ def _list(items) -> str:
 
 
 # ---------------------------------------------------------------------- исследователи
+
 
 def competitors(sphere: str, requirements: list[str], known: list[str], rejected: list[str]) -> str:
     return f"""Найди в интернете конкурентов для сферы бизнеса: «{sphere}».
@@ -58,20 +66,44 @@ sources=[адрес страницы, где это видно]. Если сай
 
 # ---------------------------------------------------------------------- помощник
 
-def context(sphere: str, requirements: list[str], competitors_: list[str], facts: list[str], boundaries: list[str] | None = None,
-            built: list[str] | None = None) -> str:
-    done = ("Уже построено в проекте (учитывай: не дублируй, не противоречь, для общих проблем бери согласованные решения):\n"
-            + "\n".join("- " + b for b in built) + "\n") if built else ""
-    walls = ("Границы системы — ЖЁСТКОЕ ПРАВИЛО, человек решил это сам. Действует закрытый мир: ВСЁ, ЧТО НЕ РАЗРЕШЕНО ЯВНО ГРАНИЦАМИ, "
-             "ВНЕ СИСТЕМЫ (функции, разделы, каналы, интеграции, роли, поиск, рассылки и т. п.). Не предлагай и не принимай ничего, "
-             "чего ни одна граница не разрешает и что не неотъемлемо нужно для разрешённого, и ничего, что противоречит границе. "
-             "Разрешённый канал или интеграция используются ТОЛЬКО для того, что граница разрешает явно: если Telegram разрешён для "
-             "уведомлений — без кнопок, команд и ввода данных через него:\n"
-             + "\n".join("- " + b for b in boundaries) + "\n") if boundaries else ""
-    return (f"Сфера бизнеса: {sphere}.\n{walls}{done}"
-            f"Требования пользователя: {_list(requirements)}.\n"
-            f"Конкуренты: {_list(competitors_)}.\n"
-            "Факты из анализа конкурентов (банк знаний):\n" + ("\n".join("- " + f for f in facts) or "- пока нет"))
+
+def context(
+    sphere: str,
+    requirements: list[str],
+    competitors_: list[str],
+    facts: list[str],
+    boundaries: list[str] | None = None,
+    built: list[str] | None = None,
+) -> str:
+    done = (
+        (
+            "Уже построено в проекте (учитывай: не дублируй, не противоречь, для общих проблем бери согласованные решения):\n"
+            + "\n".join("- " + b for b in built)
+            + "\n"
+        )
+        if built
+        else ""
+    )
+    walls = (
+        (
+            "Границы системы — ЖЁСТКОЕ ПРАВИЛО, человек решил это сам. Действует закрытый мир: ВСЁ, ЧТО НЕ РАЗРЕШЕНО ЯВНО ГРАНИЦАМИ, "
+            "ВНЕ СИСТЕМЫ (функции, разделы, каналы, интеграции, роли, поиск, рассылки и т. п.). Не предлагай и не принимай ничего, "
+            "чего ни одна граница не разрешает и что не неотъемлемо нужно для разрешённого, и ничего, что противоречит границе. "
+            "Разрешённый канал или интеграция используются ТОЛЬКО для того, что граница разрешает явно: если Telegram разрешён для "
+            "уведомлений — без кнопок, команд и ввода данных через него:\n"
+            + "\n".join("- " + b for b in boundaries)
+            + "\n"
+        )
+        if boundaries
+        else ""
+    )
+    return (
+        f"Сфера бизнеса: {sphere}.\n{walls}{done}"
+        f"Требования пользователя: {_list(requirements)}.\n"
+        f"Конкуренты: {_list(competitors_)}.\n"
+        "Факты из анализа конкурентов (банк знаний):\n"
+        + ("\n".join("- " + f for f in facts) or "- пока нет")
+    )
 
 
 def roles(ctx: str, known: list[str], rejected: list[str]) -> str:
@@ -111,7 +143,7 @@ def scenarios(ctx: str, roles_: list[str], known: list[str], rejected: list[str]
 Вариантов использования (cases) 2-5; актёры — ТОЛЬКО названия ролей из списка выше (люди и внешние системы, не компоненты)."""
 
 
-SCENARIO_CAP = 8                         # предохранитель режима «по сценариям»: больше сценариев за один прогон не строим
+SCENARIO_CAP = 8  # предохранитель режима «по сценариям»: больше сценариев за один прогон не строим
 
 
 def next_scenario(ctx: str, roles_: list[str], known: list[str], rejected: list[str]) -> str:
@@ -134,8 +166,10 @@ def next_scenario(ctx: str, roles_: list[str], known: list[str], rejected: list[
 
 
 def _scenario(ctx: str, scenario: dict) -> str:
-    return (f"{ctx}\nСценарий: {scenario['title']}. {scenario['body']}\n"
-            f"Роли сценария: {_list(scenario['roles'])}. Варианты использования: {_list(scenario['cases'])}.")
+    return (
+        f"{ctx}\nСценарий: {scenario['title']}. {scenario['body']}\n"
+        f"Роли сценария: {_list(scenario['roles'])}. Варианты использования: {_list(scenario['cases'])}."
+    )
 
 
 def problems(ctx: str, scenario: dict, known: list[str], rejected: list[str]) -> str:
@@ -161,7 +195,11 @@ DIAGRAM_FORMAT = """attrs.diagram — диаграмма последовате�
 
 
 def _names(names: list[str]) -> str:
-    return "ЕДИНОЕ ПРОСТРАНСТВО ИМЁН участников (только эти имена, точно как написано) — " + ("; ".join(names) or "не определено") + "."
+    return (
+        "ЕДИНОЕ ПРОСТРАНСТВО ИМЁН участников (только эти имена, точно как написано) — "
+        + ("; ".join(names) or "не определено")
+        + "."
+    )
 
 
 def asis(ctx: str, scenario: dict, problems_: list[str], names: list[str] | None = None) -> str:
@@ -181,12 +219,14 @@ def asis(ctx: str, scenario: dict, problems_: list[str], names: list[str] | None
 {DIAGRAM_FORMAT}"""
 
 
-def variants(ctx: str, scenario: dict, problem: dict, asis_text: str, known: list[str], rejected: list[str]) -> str:
+def variants(
+    ctx: str, scenario: dict, problem: dict, asis_text: str, known: list[str], rejected: list[str]
+) -> str:
     return f"""ЗАДАЧА: предложить варианты автоматизации — решения ОДНОЙ проблемы.
 {_scenario(ctx, scenario)}
-Проблема: {problem['title']}. {problem['body']}
+Проблема: {problem["title"]}. {problem["body"]}
 Как есть сейчас:
-{asis_text or 'диаграмма ещё не построена'}
+{asis_text or "диаграмма ещё не построена"}
 
 Предложи 2-3 разных способа решить именно эту проблему автоматизацией (можно автоматизировать не весь процесс, а отдельные шаги).
 Жёсткие правила: способ решает только эту проблему и целиком внутри границ системы — не вводи каналов, платформ, интеграций
@@ -198,8 +238,17 @@ def variants(ctx: str, scenario: dict, problem: dict, asis_text: str, known: lis
 НЕ БОЛЬШЕ 250 символов (длиннее пакет отклонит)."""
 
 
-def solution(ctx: str, scenario: dict, solved: list[dict], unsolved: list[str], asis_text: str, names: list[str] | None = None) -> str:
-    pairs = "\n".join(f"- Проблема «{s['problem']}» → решение: {s['title']}. {s['body']}" for s in solved)
+def solution(
+    ctx: str,
+    scenario: dict,
+    solved: list[dict],
+    unsolved: list[str],
+    asis_text: str,
+    names: list[str] | None = None,
+) -> str:
+    pairs = "\n".join(
+        f"- Проблема «{s['problem']}» → решение: {s['title']}. {s['body']}" for s in solved
+    )
     return f"""ЗАДАЧА: построить диаграмму «решение» (как будет).
 {_scenario(ctx, scenario)}
 {_names(names or [])}
@@ -207,7 +256,7 @@ def solution(ctx: str, scenario: dict, solved: list[dict], unsolved: list[str], 
 {pairs}
 Проблемы без решения (оставь их в процессе как есть): {_list(unsolved)}.
 Как есть сейчас:
-{asis_text or 'не описано'}
+{asis_text or "не описано"}
 
 Опиши по шагам, как этот сценарий будет проходить после внедрения выбранных решений. Новые действия системы выполняют её компоненты
 из списка имён выше; новых имён не вводи.
@@ -227,11 +276,20 @@ def solution(ctx: str, scenario: dict, solved: list[dict], unsolved: list[str], 
 {DIAGRAM_FORMAT}"""
 
 
-BOUNDS_LIMIT = 70                          # предохранитель: вопросов о границах не больше; агент заканчивает раньше, когда границы понятны
+BOUNDS_LIMIT = 70  # предохранитель: вопросов о границах не больше; агент заканчивает раньше, когда границы понятны
 BOUNDARY = "Граница системы: "
-BOUND_TOPICS = ("процессы", "люди и роли", "функции для посетителей", "функции для владельца и админки", "уведомления и каналы",
-                "интеграции и внешние сервисы", "данные и хранение", "платформа и размещение", "ограничения (язык, сроки, бюджет)",
-                "явные исключения")
+BOUND_TOPICS = (
+    "процессы",
+    "люди и роли",
+    "функции для посетителей",
+    "функции для владельца и админки",
+    "уведомления и каналы",
+    "интеграции и внешние сервисы",
+    "данные и хранение",
+    "платформа и размещение",
+    "ограничения (язык, сроки, бюджет)",
+    "явные исключения",
+)
 
 
 def bounds(sphere: str, qa: list[tuple[str, str]], left: int) -> str:
@@ -255,11 +313,19 @@ def bounds(sphere: str, qa: list[tuple[str, str]], left: int) -> str:
 
 
 def review(what: str, ctx: str, items: list[dict], rule: str, improve: bool = False) -> str:
-    lines = "\n".join(f"- id={i['id']}: {'[принято] ' if i.get('have') else ''}{i['title']}" + (f" — {i['body']}" if i.get("body") else "")
-                      for i in items)
-    tail = ("Режим «улучшить»: карточки с отметкой [принято] уже есть. Если какая-то слабая, лишняя, дублирует другую или выходит за "
-            "границы — укажи её id в remove. Остальные предложения (без отметки) решай через accept.") if improve else \
-        "Вызови `decide` с accept — списком id принятых предложений."
+    lines = "\n".join(
+        f"- id={i['id']}: {'[принято] ' if i.get('have') else ''}{i['title']}"
+        + (f" — {i['body']}" if i.get("body") else "")
+        for i in items
+    )
+    tail = (
+        (
+            "Режим «улучшить»: карточки с отметкой [принято] уже есть. Если какая-то слабая, лишняя, дублирует другую или выходит за "
+            "границы — укажи её id в remove. Остальные предложения (без отметки) решай через accept."
+        )
+        if improve
+        else "Вызови `decide` с accept — списком id принятых предложений."
+    )
     return f"""ЗАДАЧА: решить, что принять ({what}).
 {ctx}
 

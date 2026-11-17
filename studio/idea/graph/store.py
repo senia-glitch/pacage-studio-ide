@@ -65,21 +65,26 @@ class Store:
         return (Path(folder) / DIR_NAME / "graph.json").is_file()
 
     @classmethod
-    def create(cls, folder: str | os.PathLike, title: str = "") -> "Store":
-        """Создать пустой граф проекта. Корневой карточки нет: граф растёт с карточек верхнего уровня."""
+    def create(cls, folder: str | os.PathLike, title: str = "") -> Store:
+        """Создать пустой граф проекта. Корневой карточки нет: граф растёт с верхнего уровня."""
         if cls.exists(folder):
             raise GraphError("already_exists", "В этой папке уже есть граф")
         store = cls(folder)
         store.dir.mkdir(parents=True, exist_ok=True)
         store._state = {
-            "format": FORMAT, "title": str(title or "").strip()[:200], "revision": 0,
-            "next_card": 1, "next_edge": 1, "cards": {}, "edges": {},
+            "format": FORMAT,
+            "title": str(title or "").strip()[:200],
+            "revision": 0,
+            "next_card": 1,
+            "next_edge": 1,
+            "cards": {},
+            "edges": {},
         }
         store._save(store._state)
         return store
 
     @classmethod
-    def open(cls, folder: str | os.PathLike) -> "Store":
+    def open(cls, folder: str | os.PathLike) -> Store:
         store = cls(folder)
         path = store.dir / "graph.json"
         try:
@@ -102,6 +107,7 @@ class Store:
     def bank(self, name: str):
         """Банк проекта: общие записи, которые пишет один этап и читают другие (см. ``bank.py``)."""
         from .bank import Bank
+
         return Bank(self, name)
 
     # ------------------------------------------------------------------ чтение
@@ -140,8 +146,9 @@ class Store:
 
     # ------------------------------------------------------------------ изменение
 
-    def apply(self, ops: list[dict], author: str, base_revision: int | None = None,
-              note: str = "") -> dict:
+    def apply(
+        self, ops: list[dict], author: str, base_revision: int | None = None, note: str = ""
+    ) -> dict:
         """Применить пакет операций целиком или не применить ничего.
 
         ``base_revision`` — ревизия, на которой автор последний раз читал граф. Для агента
@@ -215,7 +222,7 @@ class Store:
         return out
 
     def changes_since(self, revision: int, exclude_author: str | None = None) -> list[dict]:
-        """Итоговые изменения после ревизии: по одному на объект, с первым «было» и последним «стало»."""
+        """Итог после ревизии: одно изменение на объект, с первым «было» и последним «стало»."""
         merged: dict[tuple, dict] = {}
         for entry in self.journal():
             if entry["rev"] <= revision or entry["author"] == exclude_author:
@@ -225,8 +232,11 @@ class Store:
                 item = merged.get(key)
                 if item is None:
                     merged[key] = {
-                        "type": change["type"], "id": change["id"], "before": change["before"],
-                        "after": change["after"], "authors": [entry["author"]],
+                        "type": change["type"],
+                        "id": change["id"],
+                        "before": change["before"],
+                        "after": change["after"],
+                        "authors": [entry["author"]],
                     }
                 else:
                     item["after"] = change["after"]
@@ -243,7 +253,9 @@ class Store:
                     continue
                 if change["after"] is None and change["before"] is not None:
                     found[change["id"]] = {
-                        "card": change["before"], "rev": entry["rev"], "author": entry["author"],
+                        "card": change["before"],
+                        "rev": entry["rev"],
+                        "author": entry["author"],
                         "ts": entry["ts"],
                     }
                 elif change["after"] is not None:
@@ -255,11 +267,16 @@ class Store:
         for entry in self.journal():
             for change in entry["changes"]:
                 if change["type"] == "card" and change["id"] == card_id:
-                    out.append({
-                        "rev": entry["rev"], "ts": entry["ts"], "author": entry["author"],
-                        "note": entry.get("note", ""), "before": change["before"],
-                        "after": change["after"],
-                    })
+                    out.append(
+                        {
+                            "rev": entry["rev"],
+                            "ts": entry["ts"],
+                            "author": entry["author"],
+                            "note": entry.get("note", ""),
+                            "before": change["before"],
+                            "after": change["after"],
+                        }
+                    )
         return out
 
     def undone_revisions(self) -> set[int]:
@@ -295,7 +312,7 @@ class Store:
                     before, after = old.get(key), new.get(key)
                     if _same(before, after):
                         if after is not None and before is not None:
-                            new[key] = before          # служебные отметки не трогаем
+                            new[key] = before  # служебные отметки не трогаем
                         continue
                     if after is not None:
                         after["updated_rev"] = revision
@@ -306,8 +323,13 @@ class Store:
                 return {"revision": self.revision, "changed": False, **extra}
             changes.sort(key=lambda c: (c["type"] != "card", int(c["id"][1:])))
             work["revision"] = revision
-            entry = {"rev": revision, "ts": time.time(), "author": author, "note": note or "",
-                     "changes": changes}
+            entry = {
+                "rev": revision,
+                "ts": time.time(),
+                "author": author,
+                "note": note or "",
+                "changes": changes,
+            }
             if undo_of:
                 entry["undo_of"] = undo_of
             self._save(work)
@@ -318,7 +340,10 @@ class Store:
 
     def _save(self, state: dict) -> None:
         data = {
-            "format": FORMAT, "title": state.get("title", ""), "revision": state["revision"], "next_card": state["next_card"],
+            "format": FORMAT,
+            "title": state.get("title", ""),
+            "revision": state["revision"],
+            "next_card": state["next_card"],
             "next_edge": state["next_edge"],
             "cards": sorted(state["cards"].values(), key=lambda c: int(c["id"][1:])),
             "edges": sorted(state["edges"].values(), key=lambda e: int(e["id"][1:])),
@@ -330,20 +355,31 @@ class Store:
         seen = set()
         for edge in work["edges"].values():
             if edge["from"] not in work["cards"] or edge["to"] not in work["cards"]:
-                raise GraphError("dangling_edge", f"Связь {edge['id']} ведёт к несуществующей карточке")
+                raise GraphError(
+                    "dangling_edge", f"Связь {edge['id']} ведёт к несуществующей карточке"
+                )
             if edge["from"] == edge["to"]:
                 raise GraphError("self_edge", "Связь карточки с самой собой не допускается")
             key = (edge["from"], edge["to"], edge["kind"])
             if key in seen:
-                raise GraphError("duplicate_edge", f"Такая связь уже есть: {edge['from']} → {edge['to']} ({edge['kind']})")
+                raise GraphError(
+                    "duplicate_edge",
+                    f"Такая связь уже есть: {edge['from']} → {edge['to']} ({edge['kind']})",
+                )
             seen.add(key)
 
     @staticmethod
     def _new_card(work: dict, fields: dict, author: str) -> dict:
         card_id = f"c{work['next_card']}"
         work["next_card"] += 1
-        card = {"id": card_id, **fields, "author": author, "created_rev": work["revision"] + 1,
-                "updated_rev": 0, "human_rev": 0}
+        card = {
+            "id": card_id,
+            **fields,
+            "author": author,
+            "created_rev": work["revision"] + 1,
+            "updated_rev": 0,
+            "human_rev": 0,
+        }
         work["cards"][card_id] = card
         return card
 
@@ -351,8 +387,15 @@ class Store:
     def _new_edge(work: dict, source: str, target: str, kind: str, author: str) -> dict:
         edge_id = f"e{work['next_edge']}"
         work["next_edge"] += 1
-        edge = {"id": edge_id, "from": source, "to": target, "kind": kind, "author": author,
-                "updated_rev": 0, "human_rev": 0}
+        edge = {
+            "id": edge_id,
+            "from": source,
+            "to": target,
+            "kind": kind,
+            "author": author,
+            "updated_rev": 0,
+            "human_rev": 0,
+        }
         work["edges"][edge_id] = edge
         return edge
 
@@ -362,7 +405,9 @@ class Store:
         def resolve(value, what="карточка"):
             if isinstance(value, str) and value.startswith("@"):
                 if value[1:] not in refs:
-                    raise GraphError("unknown_ref", f"Временное имя {value} не объявлено раньше в пакете")
+                    raise GraphError(
+                        "unknown_ref", f"Временное имя {value} не объявлено раньше в пакете"
+                    )
                 return refs[value[1:]]
             if not isinstance(value, str) or not value:
                 raise GraphError("invalid_ops", f"Не указан идентификатор: {what}")
@@ -371,8 +416,10 @@ class Store:
         def existing(bucket, value, what):
             key = resolve(value, what)
             if key not in work[bucket]:
-                raise GraphError("unknown_" + ("card" if bucket == "cards" else "edge"),
-                                 f"В графе нет: {what} {key}")
+                raise GraphError(
+                    "unknown_" + ("card" if bucket == "cards" else "edge"),
+                    f"В графе нет: {what} {key}",
+                )
             return work[bucket][key]
 
         def guard(item):
@@ -381,7 +428,11 @@ class Store:
                 conflicts.append(item["id"])
 
         if name == "add_card":
-            raw = {k: op[k] for k in ("kind", "title", "body", "status", "decision", "attrs") if k in op}
+            raw = {
+                k: op[k]
+                for k in ("kind", "title", "body", "status", "decision", "attrs")
+                if k in op
+            }
             raw.setdefault("status", ACCEPTED if is_human(author) else PROPOSED)
             fields = clean_card_fields(raw, partial=False)
             card = self._new_card(work, fields, author)
@@ -393,7 +444,9 @@ class Store:
                 links.insert(0, {"to": op["parent"], "kind": op.get("edge_kind") or DETAIL})
             for link in links:
                 target = existing("cards", link.get("to"), "карточка")
-                self._new_edge(work, card["id"], target["id"], clean_edge_kind(link.get("kind")), author)
+                self._new_edge(
+                    work, card["id"], target["id"], clean_edge_kind(link.get("kind")), author
+                )
         elif name == "update_card":
             card = existing("cards", op.get("id"), "карточка")
             guard(card)
@@ -417,7 +470,9 @@ class Store:
         elif name == "add_edge":
             source = existing("cards", op.get("from"), "карточка «from»")
             target = existing("cards", op.get("to"), "карточка «to»")
-            edge = self._new_edge(work, source["id"], target["id"], clean_edge_kind(op.get("kind")), author)
+            edge = self._new_edge(
+                work, source["id"], target["id"], clean_edge_kind(op.get("kind")), author
+            )
             ids.append(edge["id"])
             if op.get("ref"):
                 refs[str(op["ref"])] = edge["id"]

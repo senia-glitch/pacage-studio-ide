@@ -1,12 +1,15 @@
 """Настройки: какие агенты и модели работают и где лежат проекты.
 
-Хранятся в домашней папке пользователя (``~/.idea-graph/settings.json``, папку меняет ``IDEA_GRAPH_HOME``)
-и общие для всех проектов. Сам граф лежит в папке проекта.
+Хранятся в файле, путь к которому передаёт вызывающий (в студии — в папке ``.studio`` проекта):
+домашний каталог пользователя студия не читает. Сам граф лежит в папке проекта.
 
-    helper      — помощник: предлагает роли, сценарии, проблемы, варианты решения и строит диаграммы;
+    helper      — помощник: предлагает роли, сценарии, проблемы, варианты решения и строит
+                  диаграммы;
     autopilot   — сильная модель: задаёт вопросы о границах системы и сама проходит цепочку;
-    checker     — независимый проверяющий: перед выгрузкой один раз читает граф и ищет разногласия (модель не та, что строит);
-    researchers — три исследователя с веб-поиском: ищут и анализируют конкурентов (дайте им разные модели).
+    checker     — независимый проверяющий: перед выгрузкой один раз читает граф и ищет
+                  разногласия (модель не та, что строит);
+    researchers — три исследователя с веб-поиском: ищут и анализируют конкурентов
+                  (дайте им разные модели).
 """
 
 from __future__ import annotations
@@ -19,28 +22,33 @@ from pathlib import Path
 DEFAULTS = {
     "helper": {"agent": "claude", "model": "", "effort": ""},
     "autopilot": {"agent": "claude", "model": "opus", "effort": ""},
-    "checker": {"agent": "claude", "model": "sonnet", "effort": ""},      # независимая проверка перед выгрузкой: другая модель, чем строит
-    "researchers": [{"agent": "claude", "model": "opus", "effort": ""},
-                    {"agent": "claude", "model": "sonnet", "effort": ""},
-                    {"agent": "claude", "model": "haiku", "effort": ""}],
-    "projects_root": "",           # пусто — «Документы\Граф идеи»
+    "checker": {
+        "agent": "claude",
+        "model": "sonnet",
+        "effort": "",
+    },  # независимая проверка перед выгрузкой: другая модель, чем строит
+    "researchers": [
+        {"agent": "claude", "model": "opus", "effort": ""},
+        {"agent": "claude", "model": "sonnet", "effort": ""},
+        {"agent": "claude", "model": "haiku", "effort": ""},
+    ],
+    "projects_root": "",  # пусто — «Документы\Граф идеи»
     "recent": [],
 }
 
 
-def home() -> Path:
-    return Path(os.environ.get("IDEA_GRAPH_HOME") or Path.home() / ".idea-graph")
-
-
 def _slot(raw) -> dict:
     raw = raw if isinstance(raw, dict) else {}
-    return {"agent": str(raw.get("agent") or "claude"), "model": str(raw.get("model") or ""),
-            "effort": str(raw.get("effort") or "")}
+    return {
+        "agent": str(raw.get("agent") or "claude"),
+        "model": str(raw.get("model") or ""),
+        "effort": str(raw.get("effort") or ""),
+    }
 
 
 class Settings:
-    def __init__(self, path: Path | None = None):
-        self.path = path or home() / "settings.json"
+    def __init__(self, path: Path):
+        self.path = Path(path)
         self.lock = threading.Lock()
         self.data: dict = json.loads(json.dumps(DEFAULTS))
         try:

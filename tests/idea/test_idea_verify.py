@@ -3,7 +3,7 @@
 import re
 
 import pytest
-from idea_helpers import wait
+from idea_helpers import make, wait  # noqa: F401
 from test_idea_check import build_state
 from test_idea_flow import ASIS, TOBE, kinds
 

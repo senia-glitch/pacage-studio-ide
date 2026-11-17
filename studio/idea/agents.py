@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-OPENCODE_PROVIDER = "opencode-go"        # модели подписки OpenCode Go / Go Plus
+OPENCODE_PROVIDER = "opencode-go"  # модели подписки OpenCode Go / Go Plus
 _MODELS_TTL = 600
 SERVER_NAME = "idea-graph"
 TURN_TIMEOUT = 900
@@ -37,8 +37,21 @@ CLAUDE_MODELS = [
 ]
 CLAUDE_EFFORTS = ["", "low", "medium", "high", "xhigh", "max"]
 # Встроенные инструменты OpenCode, которые агенту не нужны.
-OPENCODE_BUILTINS = ["bash", "edit", "write", "read", "grep", "glob", "list", "patch", "task",
-                     "todowrite", "todoread", "skill", "lsp"]
+OPENCODE_BUILTINS = [
+    "bash",
+    "edit",
+    "write",
+    "read",
+    "grep",
+    "glob",
+    "list",
+    "patch",
+    "task",
+    "todowrite",
+    "todoread",
+    "skill",
+    "lsp",
+]
 
 
 @dataclass
@@ -51,15 +64,15 @@ class TurnResult:
 
 @dataclass
 class TurnRequest:
-    workdir: Path                 # своя папка агента внутри .idea-graph: там нет чужих инструкций
-    system_text: str              # скилл пакета + общие правила оболочки
-    note: str                     # вводные этого хода
-    env: dict                     # адрес и ключ оболочки для MCP-сервера
+    workdir: Path  # своя папка агента внутри .idea-graph: там нет чужих инструкций
+    system_text: str  # скилл пакета + общие правила оболочки
+    note: str  # вводные этого хода
+    env: dict  # адрес и ключ оболочки для MCP-сервера
     session_id: str = ""
     model: str = ""
     effort: str = ""
     web_search: bool = False
-    on_process: object = None     # вызывается с запущенным процессом, чтобы его можно было остановить
+    on_process: object = None  # вызывается с запущенным процессом, чтобы его можно было остановить
     extra: dict = field(default_factory=dict)
 
 
@@ -77,8 +90,13 @@ def _server_command() -> list[str]:
     return [sys.executable, "-m", "studio.idea.mcp_proxy"]
 
 
-def _execute(argv: list[str], request: TurnRequest, stdin_text: str | None, env: dict,
-             fatal: re.Pattern | None = None) -> tuple[str, str, int]:
+def _execute(
+    argv: list[str],
+    request: TurnRequest,
+    stdin_text: str | None,
+    env: dict,
+    fatal: re.Pattern | None = None,
+) -> tuple[str, str, int]:
     """Запустить агента и дождаться конца хода.
 
     ``fatal`` — признак неустранимой ошибки в выводе (нет денег, лимит): некоторые агенты после
@@ -86,12 +104,16 @@ def _execute(argv: list[str], request: TurnRequest, stdin_text: str | None, env:
     """
     request.workdir.mkdir(parents=True, exist_ok=True)
     full_env = {**os.environ, **env, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
-    full_env.pop("CLAUDECODE", None)          # оболочку могли запустить из сессии Claude Code
+    full_env.pop("CLAUDECODE", None)  # оболочку могли запустить из сессии Claude Code
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     proc = subprocess.Popen(  # noqa: S603 — команда собрана оболочкой, без пользовательского ввода
-        argv, cwd=str(request.workdir), env=full_env,
+        argv,
+        cwd=str(request.workdir),
+        env=full_env,
         stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=flags,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        creationflags=flags,
     )
     if callable(request.on_process):
         request.on_process(proc)
@@ -104,11 +126,13 @@ def _execute(argv: list[str], request: TurnRequest, stdin_text: str | None, env:
             chunks[key].append(line)
             if fatal is not None and fatal.search(_ANSI.sub("", line)) and not stopped.is_set():
                 stopped.set()
-                threading.Timer(2.0, proc.kill).start()      # даём дописать сообщение и останавливаем
+                threading.Timer(2.0, proc.kill).start()  # даём дописать сообщение и останавливаем
         stream.close()
 
-    readers = [threading.Thread(target=pump, args=(proc.stdout, "out"), daemon=True),
-               threading.Thread(target=pump, args=(proc.stderr, "err"), daemon=True)]
+    readers = [
+        threading.Thread(target=pump, args=(proc.stdout, "out"), daemon=True),
+        threading.Thread(target=pump, args=(proc.stderr, "err"), daemon=True),
+    ]
     for reader in readers:
         reader.start()
     if stdin_text is not None:
@@ -146,12 +170,21 @@ class Adapter:
             return ""
         try:
             done = subprocess.run(  # noqa: S603
-                [exe, "--version"], capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=30, stdin=subprocess.DEVNULL,
+                [exe, "--version"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+                stdin=subprocess.DEVNULL,
             )
         except (OSError, subprocess.TimeoutExpired):
             return ""
-        return (done.stdout or done.stderr or "").strip().splitlines()[0][:80] if (done.stdout or done.stderr) else ""
+        return (
+            (done.stdout or done.stderr or "").strip().splitlines()[0][:80]
+            if (done.stdout or done.stderr)
+            else ""
+        )
 
     def models(self) -> list[dict]:
         return []
@@ -177,22 +210,46 @@ class ClaudeAdapter(Adapter):
     def run(self, request):
         exe = self.found()
         if not exe:
-            return TurnResult(error="Команда claude не найдена. Установите Claude Code и войдите в него.")
+            return TurnResult(
+                error="Команда claude не найдена. Установите Claude Code и войдите в него."
+            )
         work = request.workdir
         work.mkdir(parents=True, exist_ok=True)
         system = work / "system.md"
         system.write_text(request.system_text, encoding="utf-8")
         mcp = work / "mcp.json"
         command = _server_command()
-        mcp.write_text(json.dumps({"mcpServers": {SERVER_NAME: {
-            "command": command[0], "args": command[1:], "env": request.env}}}, ensure_ascii=False), encoding="utf-8")
+        mcp.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        SERVER_NAME: {
+                            "command": command[0],
+                            "args": command[1:],
+                            "env": request.env,
+                        }
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
         web = ["WebSearch", "WebFetch"] if request.web_search else []
         argv = [
-            exe, "-p", "--output-format", "json",
-            "--mcp-config", str(mcp), "--strict-mcp-config",
-            "--tools", ",".join(web),
-            "--allowedTools", f"mcp__{SERVER_NAME}", *web,
-            "--system-prompt-file", str(system),
+            exe,
+            "-p",
+            "--output-format",
+            "json",
+            "--mcp-config",
+            str(mcp),
+            "--strict-mcp-config",
+            "--tools",
+            ",".join(web),
+            "--allowedTools",
+            f"mcp__{SERVER_NAME}",
+            *web,
+            "--system-prompt-file",
+            str(system),
             "--disable-slash-commands",
         ]
         if request.model:
@@ -211,7 +268,9 @@ class ClaudeAdapter(Adapter):
             cost=float(found.get("total_cost_usd") or 0),
         )
         if found.get("is_error") or (code != 0 and not found):
-            result.error = (result.text or _ANSI.sub("", err).strip() or f"claude завершился с кодом {code}")[:1500]
+            result.error = (
+                result.text or _ANSI.sub("", err).strip() or f"claude завершился с кодом {code}"
+            )[:1500]
             result.text = ""
         return result
 
@@ -225,9 +284,10 @@ class OpenCodeAdapter(Adapter):
     PROMPT = "New turn. Call the idea-graph tool turn_info and do exactly what it returns."
 
     def models(self):
-        """Модели подписки Go (провайдер ``opencode-go``) и усилия, которые каждая из них поддерживает.
+        """Модели подписки Go (провайдер ``opencode-go``) и усилия, которые они поддерживают.
 
-        Усилие в OpenCode — «вариант» модели (``--variant``): у каждой модели свой набор, у части его нет совсем.
+        Усилие в OpenCode — «вариант» модели (``--variant``): у каждой модели свой набор,
+        у части его нет совсем.
         """
         now = time.time()
         cached = getattr(self, "_models_cache", None)
@@ -245,8 +305,13 @@ class OpenCodeAdapter(Adapter):
     def _list(exe: str, *args: str) -> str:
         try:
             done = subprocess.run(  # noqa: S603
-                [exe, "models", OPENCODE_PROVIDER, *args], capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=90, stdin=subprocess.DEVNULL,
+                [exe, "models", OPENCODE_PROVIDER, *args],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=90,
+                stdin=subprocess.DEVNULL,
             )
         except (OSError, subprocess.TimeoutExpired):
             return ""
@@ -257,7 +322,9 @@ class OpenCodeAdapter(Adapter):
         decoder = json.JSONDecoder()
         models, pos = [], 0
         while True:
-            found = re.compile(rf"^({re.escape(OPENCODE_PROVIDER)}/\S+)[ \t]*\r?\n", re.M).search(text, pos)
+            found = re.compile(rf"^({re.escape(OPENCODE_PROVIDER)}/\S+)[ \t]*\r?\n", re.M).search(
+                text, pos
+            )
             if not found:
                 break
             try:
@@ -267,25 +334,36 @@ class OpenCodeAdapter(Adapter):
             pos = end
             if not isinstance(data, dict) or data.get("status", "active") != "active":
                 continue
-            # Веб-поиск OpenCode даёт провайдеру opencode-go целиком, а вызвать его (и наши инструменты) может
-            # только модель с вызовом инструментов: остальные исследователю и агенту не подходят.
+            # Веб-поиск OpenCode даёт провайдеру opencode-go целиком, а вызвать его
+            # (и наши инструменты) может только модель с вызовом инструментов:
+            # остальные исследователю и агенту не подходят.
             if (data.get("capabilities") or {}).get("toolcall") is False:
                 continue
             variants = [v for v in (data.get("variants") or {}) if isinstance(v, str)]
             title = str(data.get("name") or found.group(1).split("/", 1)[1])
-            models.append({"id": found.group(1), "name": f"{title} ({found.group(1).split('/', 1)[1]})",
-                           "efforts": variants})
+            models.append(
+                {
+                    "id": found.group(1),
+                    "name": f"{title} ({found.group(1).split('/', 1)[1]})",
+                    "efforts": variants,
+                }
+            )
         return models
 
     def _plain_models(self, exe: str) -> list[dict]:
         names = [line.strip() for line in self._list(exe).splitlines()]
-        return [{"id": n, "name": n, "efforts": []} for n in names
-                if re.fullmatch(rf"{re.escape(OPENCODE_PROVIDER)}/[\w.:@+/-]+", n)]
+        return [
+            {"id": n, "name": n, "efforts": []}
+            for n in names
+            if re.fullmatch(rf"{re.escape(OPENCODE_PROVIDER)}/[\w.:@+/-]+", n)
+        ]
 
     def run(self, request):
         exe = self.found()
         if not exe:
-            return TurnResult(error="Команда opencode не найдена. Установите OpenCode и войдите в провайдера.")
+            return TurnResult(
+                error="Команда opencode не найдена. Установите OpenCode и войдите в провайдера."
+            )
         work = request.workdir
         work.mkdir(parents=True, exist_ok=True)
         system = work / "system.md"
@@ -298,11 +376,20 @@ class OpenCodeAdapter(Adapter):
             "share": "disabled",
             "autoupdate": False,
             "instructions": [str(system)],
-            "mcp": {SERVER_NAME: {"type": "local", "command": _server_command(),
-                                  "environment": request.env, "enabled": True}},
+            "mcp": {
+                SERVER_NAME: {
+                    "type": "local",
+                    "command": _server_command(),
+                    "environment": request.env,
+                    "enabled": True,
+                }
+            },
             "tools": tools,
-            "permission": {"edit": "deny", "bash": "deny",
-                           "webfetch": "allow" if request.web_search else "deny"},
+            "permission": {
+                "edit": "deny",
+                "bash": "deny",
+                "webfetch": "allow" if request.web_search else "deny",
+            },
         }
         if request.model:
             config["small_model"] = request.model
@@ -315,29 +402,44 @@ class OpenCodeAdapter(Adapter):
             argv += ["--variant", request.effort]
         if request.session_id:
             argv += ["--session", request.session_id]
-        out, err, code = _execute(argv, request, None, {"OPENCODE_CONFIG": str(path)},
-                                  fatal=re.compile(r"level=ERROR.*error\.error="))
+        out, err, code = _execute(
+            argv,
+            request,
+            None,
+            {"OPENCODE_CONFIG": str(path)},
+            fatal=re.compile(r"level=ERROR.*error\.error="),
+        )
         result = TurnResult()
         texts = []
         for parsed in _json_lines(out):
             if not result.session_id and isinstance(parsed.get("sessionID"), str):
                 result.session_id = parsed["sessionID"]
             part = parsed.get("part")
-            if parsed.get("type") == "text" and isinstance(part, dict) and isinstance(part.get("text"), str):
+            if (
+                parsed.get("type") == "text"
+                and isinstance(part, dict)
+                and isinstance(part.get("text"), str)
+            ):
                 texts.append(part["text"])
             if parsed.get("type") == "error":
                 detail = parsed.get("error")
                 if isinstance(detail, dict):
                     data = detail.get("data")
-                    detail = (data.get("message") if isinstance(data, dict) else "") or detail.get("name")
+                    detail = (data.get("message") if isinstance(data, dict) else "") or detail.get(
+                        "name"
+                    )
                 result.error = str(detail or "ошибка OpenCode")[:1500]
         result.text = "\n".join(texts).strip()
         if not result.error:
-            fatal = re.findall(r"level=ERROR.*?error\.error=(.+)$", _ANSI.sub("", out + "\n" + err), re.MULTILINE)
+            fatal = re.findall(
+                r"level=ERROR.*?error\.error=(.+)$", _ANSI.sub("", out + "\n" + err), re.MULTILINE
+            )
             if fatal:
                 result.error = fatal[-1].strip().strip('"')[:1500]
             elif code != 0:
-                result.error = (_ANSI.sub("", err).strip() or f"opencode завершился с кодом {code}")[:1500]
+                result.error = (
+                    _ANSI.sub("", err).strip() or f"opencode завершился с кодом {code}"
+                )[:1500]
         return result
 
 
@@ -362,6 +464,13 @@ class Adapters:
         out = []
         for adapter in self._items.values():
             exe = adapter.found()
-            out.append({"id": adapter.name, "name": adapter.label, "found": bool(exe), "path": exe,
-                        "efforts": adapter.efforts()})
+            out.append(
+                {
+                    "id": adapter.name,
+                    "name": adapter.label,
+                    "found": bool(exe),
+                    "path": exe,
+                    "efforts": adapter.efforts(),
+                }
+            )
         return out

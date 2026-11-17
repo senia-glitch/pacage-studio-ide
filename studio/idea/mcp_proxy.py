@@ -22,9 +22,13 @@ def _call(path: str, payload: dict | None = None) -> dict:
     url = os.environ.get("IDEA_GRAPH_URL", "").rstrip("/") + path
     data = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
-        url, data=data, method="POST",
-        headers={"Content-Type": "application/json",
-                 "X-Idea-Graph-Token": os.environ.get("IDEA_GRAPH_TOKEN", "")},
+        url,
+        data=data,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "X-Idea-Graph-Token": os.environ.get("IDEA_GRAPH_TOKEN", ""),
+        },
     )
     try:
         with urllib.request.urlopen(request, timeout=120) as response:  # noqa: S310 — локальный адрес оболочки
@@ -41,25 +45,33 @@ def _call(path: str, payload: dict | None = None) -> dict:
 def handle(message: dict) -> dict | None:
     method = message.get("method")
     ident = message.get("id")
-    if ident is None:                      # уведомление — ответа не ждут
+    if ident is None:  # уведомление — ответа не ждут
         return None
     if method == "initialize":
         version = (message.get("params") or {}).get("protocolVersion") or PROTOCOL
-        result = {"protocolVersion": version, "capabilities": {"tools": {}},
-                  "serverInfo": {"name": "idea-graph", "version": "0.1.0"}}
+        result = {
+            "protocolVersion": version,
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "idea-graph", "version": "0.1.0"},
+        }
     elif method == "ping":
         result = {}
     elif method == "tools/list":
         result = {"tools": _call("/agent/tools").get("tools", [])}
     elif method == "tools/call":
         params = message.get("params") or {}
-        answer = _call("/agent/call", {"tool": params.get("name"), "args": params.get("arguments") or {}})
+        answer = _call(
+            "/agent/call", {"tool": params.get("name"), "args": params.get("arguments") or {}}
+        )
         failed = "error" in answer
         text = answer.get("message") if failed else answer.get("text", "")
         result = {"content": [{"type": "text", "text": str(text)}], "isError": failed}
     else:
-        return {"jsonrpc": "2.0", "id": ident,
-                "error": {"code": -32601, "message": f"Метод не поддерживается: {method}"}}
+        return {
+            "jsonrpc": "2.0",
+            "id": ident,
+            "error": {"code": -32601, "message": f"Метод не поддерживается: {method}"},
+        }
     return {"jsonrpc": "2.0", "id": ident, "result": result}
 
 

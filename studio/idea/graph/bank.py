@@ -1,7 +1,8 @@
 """Банки: общие хранилища записей проекта, которые пишет один этап и читают другие.
 
-Банк — файл ``.idea-graph/banks/<имя>.json``. Запись — ``{id, type, key, data, sources, schema_version,
-author, created, updated}``. Структуру ``data`` определяет пакет-автор банка (ядро её не знает), а
+Банк — файл ``.idea-graph/banks/<имя>.json``. Запись — ``{id, type, key, data, sources,
+schema_version, author, created, updated}``. Структуру ``data`` определяет пакет-автор банка
+(ядро её не знает), а
 читатели опираются на ``type`` и ``schema_version``. ``key`` — необязательный естественный ключ
 (например, нормализованный адрес конкурента): запись с тем же ключом обновляется, а не дублируется.
 """
@@ -36,7 +37,9 @@ class Bank:
 
     def __init__(self, store, name: str):
         if not _NAME.match(name or ""):
-            raise GraphError("invalid_bank", "Имя банка: латиница, цифры, «-» и «_», начинается с буквы")
+            raise GraphError(
+                "invalid_bank", "Имя банка: латиница, цифры, «-» и «_», начинается с буквы"
+            )
         self.store = store
         self.name = name
         self.path: Path = store.dir / "banks" / f"{name}.json"
@@ -73,9 +76,16 @@ class Bank:
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
         os.replace(tmp, self.path)
 
-    def put(self, type: str, data: dict, author: str, sources=None, key: str = "",
-            schema_version: int = 1) -> dict:
-        """Добавить запись; если запись с таким ``key`` уже есть — обновить её (источники объединяются)."""
+    def put(
+        self,
+        type: str,
+        data: dict,
+        author: str,
+        sources=None,
+        key: str = "",
+        schema_version: int = 1,
+    ) -> dict:
+        """Добавить запись; если с таким ``key`` она есть — обновить (источники объединяются)."""
         if not isinstance(data, dict):
             raise GraphError("invalid_record", "data записи банка — объект")
         type = str(type or "").strip()[:60]
@@ -85,18 +95,35 @@ class Bank:
         now = time.time()
         with self.store.lock:
             state = self._read()
-            existing = next((r for r in state["records"] if key and r.get("key") == key and r.get("type") == type), None)
+            existing = next(
+                (
+                    r
+                    for r in state["records"]
+                    if key and r.get("key") == key and r.get("type") == type
+                ),
+                None,
+            )
             if existing is not None:
                 existing["data"] = copy.deepcopy(data)
-                existing["sources"] = _clean_sources(existing.get("sources", []) + _clean_sources(sources))
+                existing["sources"] = _clean_sources(
+                    existing.get("sources", []) + _clean_sources(sources)
+                )
                 existing["schema_version"] = int(schema_version)
                 existing["updated"] = now
                 existing["author"] = author
                 record = existing
             else:
-                record = {"id": f"b{state['next']}", "type": type, "key": key, "data": copy.deepcopy(data),
-                          "sources": _clean_sources(sources), "schema_version": int(schema_version),
-                          "author": author, "created": now, "updated": now}
+                record = {
+                    "id": f"b{state['next']}",
+                    "type": type,
+                    "key": key,
+                    "data": copy.deepcopy(data),
+                    "sources": _clean_sources(sources),
+                    "schema_version": int(schema_version),
+                    "author": author,
+                    "created": now,
+                    "updated": now,
+                }
                 state["records"].append(record)
                 state["next"] += 1
             self._write(state)

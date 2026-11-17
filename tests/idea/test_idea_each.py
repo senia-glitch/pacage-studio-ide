@@ -1,6 +1,6 @@
 """Автопилот в режиме «по сценариям»: сценарии по одному, каждый до «решения», следующий учитывает прежние."""
 
-from idea_helpers import wait
+from idea_helpers import make, wait  # noqa: F401
 from test_idea_flow import kinds, script
 
 from studio.idea import check

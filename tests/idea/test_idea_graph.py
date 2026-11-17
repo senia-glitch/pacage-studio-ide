@@ -1,6 +1,15 @@
 import pytest
 
-from studio.idea.graph import ACCEPTED, DETAIL, HUMAN, PROPOSED, ConflictError, GraphError, Store, views
+from studio.idea.graph import (
+    ACCEPTED,
+    DETAIL,
+    HUMAN,
+    PROPOSED,
+    ConflictError,
+    GraphError,
+    Store,
+    views,
+)
 
 AGENT = "package:clarify"
 

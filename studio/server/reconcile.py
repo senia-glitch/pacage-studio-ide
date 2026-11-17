@@ -60,9 +60,12 @@ def check_scenario(graph, prefix: str, card: dict) -> dict:
                 return _verdict(EXISTS, where, node.id)
             if slug and str(details.get("function_name") or "") == slug:
                 return _verdict(EXISTS, f"эндпоинт {slug} ({node.file_path})", node.id)
-        elif node.kind == "scenario" and scenario_class:
-            if scenario_class in (details.get("class_name"), details.get("name")):
-                return _verdict(EXISTS, f"сценарий {scenario_class} ({node.file_path})", node.id)
+        elif (
+            node.kind == "scenario"
+            and scenario_class
+            and scenario_class in (details.get("class_name"), details.get("name"))
+        ):
+            return _verdict(EXISTS, f"сценарий {scenario_class} ({node.file_path})", node.id)
     for plan in getattr(graph, "plans", None) or []:
         if plan.slug == slug and plan.status == "done":
             return _verdict(EXISTS, f"план «{slug}» уже выполнен в коде")

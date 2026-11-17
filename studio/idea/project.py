@@ -12,7 +12,7 @@ import json
 import secrets
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 from studio.idea.graph import ACCEPTED, HUMAN, PROPOSED, GraphError, Store, normalize_url
@@ -23,7 +23,9 @@ from .errors import EngineError
 
 AGENT = "agent"
 RESEARCHERS = 3
-SCENARIO_RULE = "Принимай ключевые сценарии, которые стоит автоматизировать и которые в границах системы."
+SCENARIO_RULE = (
+    "Принимай ключевые сценарии, которые стоит автоматизировать и которые в границах системы."
+)
 
 
 def _clip(text, limit: int) -> str:
@@ -35,10 +37,16 @@ class Run:
 
     def __init__(self, kind: str, title: str):
         self.kind, self.title = kind, title
-        self.auto = kind in ("autopilot", "export", "export_auto")     # вопросы помощника отключены: решает автопилот или идёт проверка перед выгрузкой
-        self.improve = False                # автопилот: улучшать уже сделанное, а не только доводить до согласования
-        self.each = False                   # автопилот «по сценариям»: сценарии по одному, каждый до «решения», следующий учитывает прежние
-        self.status = "running"            # running | asking | done | error | stopped
+        self.auto = kind in (
+            "autopilot",
+            "export",
+            "export_auto",
+        )  # вопросы помощника отключены: решает автопилот или идёт проверка перед выгрузкой
+        self.improve = (
+            False  # автопилот: улучшать уже сделанное, а не только доводить до согласования
+        )
+        self.each = False  # автопилот «по сценариям»: сценарии по одному, каждый до «решения», следующий учитывает прежние
+        self.status = "running"  # running | asking | done | error | stopped
         self.error = ""
         self.summary = ""
         self.question: dict | None = None
@@ -47,12 +55,20 @@ class Run:
         self.answer: dict | None = None
         self.answered = threading.Event()
         self.done = self.total = 0
-        self.notes: list[str] = []         # что не вышло или пропущено: показываем человеку
+        self.notes: list[str] = []  # что не вышло или пропущено: показываем человеку
 
     def public(self) -> dict:
-        return {"kind": self.kind, "title": self.title, "status": self.status, "error": self.error,
-                "summary": self.summary, "question": self.question, "done": self.done, "total": self.total,
-                "notes": self.notes[-6:]}
+        return {
+            "kind": self.kind,
+            "title": self.title,
+            "status": self.status,
+            "error": self.error,
+            "summary": self.summary,
+            "question": self.question,
+            "done": self.done,
+            "total": self.total,
+            "notes": self.notes[-6:],
+        }
 
 
 class Project:
@@ -63,7 +79,7 @@ class Project:
         self.settings, self.adapters = settings, adapters
         self.bank = self.store.bank(flow.BANK)
         self.lock = threading.RLock()
-        self._local = threading.local()      # замороженный снимок графа: свой у каждого потока
+        self._local = threading.local()  # замороженный снимок графа: свой у каждого потока
         self._log_lock = threading.Lock()
         self.run: Run | None = None
         self.tokens: dict[str, dict] = {}
@@ -79,8 +95,16 @@ class Project:
         except (OSError, ValueError):
             data = {}
         rejected = data.get("rejected") if isinstance(data, dict) else {}
-        return {"rejected": {str(k): [str(x) for x in v] for k, v in (rejected or {}).items() if isinstance(v, list)},
-                "roles_confirmed": bool(data.get("roles_confirmed")) if isinstance(data, dict) else False}
+        return {
+            "rejected": {
+                str(k): [str(x) for x in v]
+                for k, v in (rejected or {}).items()
+                if isinstance(v, list)
+            },
+            "roles_confirmed": bool(data.get("roles_confirmed"))
+            if isinstance(data, dict)
+            else False,
+        }
 
     @property
     def roles_confirmed(self) -> bool:
@@ -97,7 +121,9 @@ class Project:
         return self.roles_confirmed and bool(self._components())
 
     def _save_flow(self) -> None:
-        (self.dir / "flow.json").write_text(json.dumps(self._flow, ensure_ascii=False, indent=1), encoding="utf-8")
+        (self.dir / "flow.json").write_text(
+            json.dumps(self._flow, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
 
     def _touch(self) -> None:
         self.version += 1
@@ -126,19 +152,32 @@ class Project:
             scenarios = self._accepted_all(flow.SCENARIO)
             untyped = [r["title"] for r in roles if not (r.get("attrs") or {}).get("type")]
             if untyped:
-                out.append("Роли без типа считаются людьми: " + ", ".join(untyped[:5]) + ("…" if len(untyped) > 5 else "")
-                           + ". Исправьте тип кнопкой «Изменить» на шаге «Роли»")
+                out.append(
+                    "Роли без типа считаются людьми: "
+                    + ", ".join(untyped[:5])
+                    + ("…" if len(untyped) > 5 else "")
+                    + ". Исправьте тип кнопкой «Изменить» на шаге «Роли»"
+                )
             if scenarios and not self._components():
-                out.append("Нет компонентов системы (Сайт, Админка…): диаграммы и проверка перед выгрузкой не заработают. "
-                           "Примите хотя бы один компонент на шаге «Роли»")
+                out.append(
+                    "Нет компонентов системы (Сайт, Админка…): диаграммы и проверка перед выгрузкой не заработают. "
+                    "Примите хотя бы один компонент на шаге «Роли»"
+                )
             stale = {i["scenario"] for i in check.issues(self) if i["code"] == "diagram"}
             if stale:
-                out.append(f"Диаграммы не соответствуют графу в сценариях: {len(stale)}. Их перестроит проверка перед выгрузкой")
+                out.append(
+                    f"Диаграммы не соответствуют графу в сценариях: {len(stale)}. Их перестроит проверка перед выгрузкой"
+                )
         return out
 
     def state(self) -> dict:
-        return {"title": self.store.title, "revision": self.store.revision, "version": self.version,
-                "roles_confirmed": self.roles_confirmed, "run": self.run.public() if self.run else None}
+        return {
+            "title": self.store.title,
+            "revision": self.store.revision,
+            "version": self.version,
+            "roles_confirmed": self.roles_confirmed,
+            "run": self.run.public() if self.run else None,
+        }
 
     def graph(self) -> dict:
         return {**self.store.snapshot(), "layout": self.store.layout()}
@@ -158,8 +197,14 @@ class Project:
         snap = self._snap()
         under = None
         if parent:
-            under = {e["from"] for e in snap["edges"] if e["to"] == parent and e["kind"] == "детализирует"}
-        found = [c for c in snap["cards"] if c["kind"] == kind and (under is None or c["id"] in under)]
+            under = {
+                e["from"]
+                for e in snap["edges"]
+                if e["to"] == parent and e["kind"] == "детализирует"
+            }
+        found = [
+            c for c in snap["cards"] if c["kind"] == kind and (under is None or c["id"] in under)
+        ]
         return sorted(found, key=lambda c: int(c["id"][1:]))
 
     def sphere(self) -> dict | None:
@@ -181,22 +226,34 @@ class Project:
     def roles_of(self, scenario_id: str) -> list[dict]:
         snap = self._snap()
         cards = {c["id"]: c for c in snap["cards"]}
-        return [cards[e["to"]] for e in snap["edges"] if e["from"] == scenario_id and e["kind"] == flow.PARTICIPATES and e["to"] in cards]
+        return [
+            cards[e["to"]]
+            for e in snap["edges"]
+            if e["from"] == scenario_id and e["kind"] == flow.PARTICIPATES and e["to"] in cards
+        ]
 
     def scenario_info(self, card: dict) -> dict:
         usecase = (card.get("attrs") or {}).get("usecase") or {}
-        return {"id": card["id"], "title": card["title"], "body": card.get("body", ""),
-                "roles": [r["title"] for r in self.roles_of(card["id"])],
-                "cases": [c.get("name", "") for c in usecase.get("cases", [])]}
+        return {
+            "id": card["id"],
+            "title": card["title"],
+            "body": card.get("body", ""),
+            "roles": [r["title"] for r in self.roles_of(card["id"])],
+            "cases": [c.get("name", "") for c in usecase.get("cases", [])],
+        }
 
     def records(self, type_: str | None = None) -> list[dict]:
         return self.bank.list(type_)
 
     def accepted_competitors(self) -> list[dict]:
-        return [r for r in self.records("competitor") if (r["data"] or {}).get("state") == "accepted"]
+        return [
+            r for r in self.records("competitor") if (r["data"] or {}).get("state") == "accepted"
+        ]
 
     def facts_of(self, competitor_key: str) -> list[dict]:
-        return [r for r in self.records("fact") if (r["data"] or {}).get("competitor") == competitor_key]
+        return [
+            r for r in self.records("fact") if (r["data"] or {}).get("competitor") == competitor_key
+        ]
 
     def built(self, skip: str = "") -> list[str]:
         """Что уже построено по другим сценариям: проблемы и выбранные решения; новое согласуется с этим."""
@@ -206,18 +263,34 @@ class Project:
             if scenario["id"] == skip or not problems:
                 continue
             chosen = {s["problem"]: s["title"] for s in self._solved(scenario["id"])}
-            out.append(f"«{scenario['title']}»: " + "; ".join(f"{p['title']} → {chosen.get(p['title'], 'решения нет')}" for p in problems))
+            out.append(
+                f"«{scenario['title']}»: "
+                + "; ".join(
+                    f"{p['title']} → {chosen.get(p['title'], 'решения нет')}" for p in problems
+                )
+            )
         return out[:12]
 
     def knowledge(self, skip: str = "") -> str:
         requirements = [r["data"].get("text", "") for r in self.records("requirement")]
         names = {r["key"]: r["data"].get("name", r["key"]) for r in self.accepted_competitors()}
-        facts = [f"{r['data'].get('kind', 'факт')}: {r['data'].get('text', '')}"
-                 + (f" ({names[r['data']['competitor']]})" if r["data"].get("competitor") in names else "")
-                 for r in self.records("fact") if (r["data"] or {}).get("competitor") in names or not (r["data"] or {}).get("competitor")]
+        facts = [
+            f"{r['data'].get('kind', 'факт')}: {r['data'].get('text', '')}"
+            + (
+                f" ({names[r['data']['competitor']]})"
+                if r["data"].get("competitor") in names
+                else ""
+            )
+            for r in self.records("fact")
+            if (r["data"] or {}).get("competitor") in names
+            or not (r["data"] or {}).get("competitor")
+        ]
         sphere = self.need_sphere()
-        comps = [f"{d.get('name')} ({d.get('url')})" for d in (r["data"] for r in self.accepted_competitors())]
-        bounds = [t[len(flow.BOUNDARY):] for t in requirements if t.startswith(flow.BOUNDARY)]
+        comps = [
+            f"{d.get('name')} ({d.get('url')})"
+            for d in (r["data"] for r in self.accepted_competitors())
+        ]
+        bounds = [t[len(flow.BOUNDARY) :] for t in requirements if t.startswith(flow.BOUNDARY)]
         wishes = [t for t in requirements if not t.startswith(flow.BOUNDARY)]
         return flow.context(sphere["title"], wishes, comps, facts[:80], bounds, self.built(skip))
 
@@ -227,8 +300,14 @@ class Project:
         handler = getattr(self, "do_" + action, None)
         if not callable(handler) or action.startswith("_"):
             raise EngineError("unknown_action", "Нет такого действия")
-        if self.run and self.run.status in ("running", "asking") and action not in ("bank_add", "bank_remove", "bank_update"):
-            raise EngineError("busy", "Сейчас работают агенты: дождитесь конца или остановите работу")
+        if (
+            self.run
+            and self.run.status in ("running", "asking")
+            and action not in ("bank_add", "bank_remove", "bank_update")
+        ):
+            raise EngineError(
+                "busy", "Сейчас работают агенты: дождитесь конца или остановите работу"
+            )
         out = handler(d) or {}
         self._touch()
         return out
@@ -261,7 +340,11 @@ class Project:
         while todo:
             current = todo.pop()
             out.append(current)
-            todo += [e["from"] for e in snap["edges"] if e["to"] == current and e["kind"] == "детализирует"]
+            todo += [
+                e["from"]
+                for e in snap["edges"]
+                if e["to"] == current and e["kind"] == "детализирует"
+            ]
         return out[::-1]
 
     def do_remove(self, d: dict) -> dict:
@@ -271,7 +354,10 @@ class Project:
             raise EngineError("forbidden", "Сферу удалить нельзя: её можно переписать")
         if card["kind"] not in (flow.ASIS, flow.SOLUTION):
             self._reject(card["kind"], card["title"].lower())
-        self._human([{"op": "delete_card", "id": i} for i in self._subtree(card["id"])], f"Удалено: {card['title']}")
+        self._human(
+            [{"op": "delete_card", "id": i} for i in self._subtree(card["id"])],
+            f"Удалено: {card['title']}",
+        )
         if card["kind"] == flow.ROLE:
             self._forget_actor(card["title"])
         return {}
@@ -288,7 +374,13 @@ class Project:
                 if actors:
                     cases.append({**case, "actors": actors})
             if cases != usecase.get("cases"):
-                ops.append({"op": "update_card", "id": scenario["id"], "attrs": {"usecase": {**usecase, "cases": cases}}})
+                ops.append(
+                    {
+                        "op": "update_card",
+                        "id": scenario["id"],
+                        "attrs": {"usecase": {**usecase, "cases": cases}},
+                    }
+                )
         if ops:
             self._human(ops)
 
@@ -296,9 +388,21 @@ class Project:
         title = _clip(title, 200)
         if not title:
             raise EngineError("empty", "Название не может быть пустым")
-        if any(c["title"].lower() == title.lower() for c in self.cards(kind, parent if kind != flow.ROLE else None)):
+        if any(
+            c["title"].lower() == title.lower()
+            for c in self.cards(kind, parent if kind != flow.ROLE else None)
+        ):
             raise EngineError("duplicate", f"«{title}» уже есть")
-        ops = [{"op": "add_card", "kind": kind, "title": title, "body": str(body or "").strip(), "parent": parent, **extra}]
+        ops = [
+            {
+                "op": "add_card",
+                "kind": kind,
+                "title": title,
+                "body": str(body or "").strip(),
+                "parent": parent,
+                **extra,
+            }
+        ]
         return self._human(ops)["ids"][0]
 
     def _role_names(self) -> list[str]:
@@ -307,20 +411,33 @@ class Project:
 
     @staticmethod
     def _role_type(card: dict) -> str:
-        return (card.get("attrs") or {}).get("type") or flow.HUMAN_TYPE      # у старых ролей типа нет: считаются людьми
+        return (card.get("attrs") or {}).get(
+            "type"
+        ) or flow.HUMAN_TYPE  # у старых ролей типа нет: считаются людьми
 
     def _components(self) -> list[dict]:
-        return [c for c in self._accepted_all(flow.ROLE) if self._role_type(c) == flow.COMPONENT_TYPE]
+        return [
+            c for c in self._accepted_all(flow.ROLE) if self._role_type(c) == flow.COMPONENT_TYPE
+        ]
 
     def _need_components(self) -> None:
         if not self._components():
-            raise EngineError("no_components", "Не определены компоненты системы (Сайт, Админка…): без них нельзя строить диаграммы. "
-                              "На шаге «Роли» нажмите «Предложить роли» и примите хотя бы один компонент")
+            raise EngineError(
+                "no_components",
+                "Не определены компоненты системы (Сайт, Админка…): без них нельзя строить диаграммы. "
+                "На шаге «Роли» нажмите «Предложить роли» и примите хотя бы один компонент",
+            )
 
     def _names_groups(self) -> list[str]:
         groups = []
-        for label, kind in (("люди", flow.HUMAN_TYPE), ("внешние системы", flow.EXTERNAL_TYPE), ("компоненты системы", flow.COMPONENT_TYPE)):
-            titles = [c["title"] for c in self._accepted_all(flow.ROLE) if self._role_type(c) == kind]
+        for label, kind in (
+            ("люди", flow.HUMAN_TYPE),
+            ("внешние системы", flow.EXTERNAL_TYPE),
+            ("компоненты системы", flow.COMPONENT_TYPE),
+        ):
+            titles = [
+                c["title"] for c in self._accepted_all(flow.ROLE) if self._role_type(c) == kind
+            ]
             if titles:
                 groups.append(f"{label}: {', '.join(titles)}")
         return groups
@@ -329,7 +446,15 @@ class Project:
         kind = str(d.get("type") or flow.HUMAN_TYPE)
         if kind not in flow.ROLE_TYPES:
             raise EngineError("bad_type", "Тип роли: " + ", ".join(flow.ROLE_TYPES))
-        return {"id": self._add_unique(flow.ROLE, d.get("title"), d.get("body"), self.need_sphere()["id"], attrs={"type": kind})}
+        return {
+            "id": self._add_unique(
+                flow.ROLE,
+                d.get("title"),
+                d.get("body"),
+                self.need_sphere()["id"],
+                attrs={"type": kind},
+            )
+        }
 
     def _role_used(self, role: dict) -> bool:
         """Роль или компонент уже стоит в сценарии, в диаграмме вариантов использования или в диаграмме последовательности."""
@@ -345,7 +470,10 @@ class Project:
             diagram = attrs.get("diagram") or {}
             if any(str(p).lower() == name for p in diagram.get("participants", [])):
                 return True
-            if any(name in (str(s.get("from", "")).lower(), str(s.get("to", "")).lower()) for s in diagram.get("steps", [])):
+            if any(
+                name in (str(s.get("from", "")).lower(), str(s.get("to", "")).lower())
+                for s in diagram.get("steps", [])
+            ):
                 return True
         return False
 
@@ -363,9 +491,15 @@ class Project:
                 raise EngineError("empty", "Название не может быть пустым")
             if title != role["title"]:
                 if used:
-                    raise EngineError("role_used", f"«{role['title']}» уже есть в сценариях и диаграммах: переименование их сломает. "
-                                      "Измените описание или тип, либо добавьте новую роль и удалите эту")
-                if any(c["id"] != role["id"] and c["title"].lower() == title.lower() for c in self.cards(flow.ROLE)):
+                    raise EngineError(
+                        "role_used",
+                        f"«{role['title']}» уже есть в сценариях и диаграммах: переименование их сломает. "
+                        "Измените описание или тип, либо добавьте новую роль и удалите эту",
+                    )
+                if any(
+                    c["id"] != role["id"] and c["title"].lower() == title.lower()
+                    for c in self.cards(flow.ROLE)
+                ):
                     raise EngineError("duplicate", f"«{title}» уже есть")
                 op["title"] = title
         if "body" in d:
@@ -379,8 +513,11 @@ class Project:
             old = self._role_type(role)
             if kind != old:
                 if used and (kind == flow.COMPONENT_TYPE) != (old == flow.COMPONENT_TYPE):
-                    raise EngineError("role_used", f"«{role['title']}» уже стоит в сценариях и диаграммах: менять «компонент» на роль "
-                                      "(и наоборот) нельзя. Между «человек» и «внешняя система» менять можно")
+                    raise EngineError(
+                        "role_used",
+                        f"«{role['title']}» уже стоит в сценариях и диаграммах: менять «компонент» на роль "
+                        "(и наоборот) нельзя. Между «человек» и «внешняя система» менять можно",
+                    )
                 op["attrs"] = {"type": kind}
         if len(op) > 2:
             self._human([op], f"Правка роли: {role['title']}")
@@ -391,8 +528,12 @@ class Project:
         или не запустите «Улучшить уже есть»."""
         pending = [r["title"] for r in self.cards(flow.ROLE) if r["status"] == PROPOSED]
         if pending:
-            raise EngineError("pending_roles", f"Есть роли, которые ждут решения ({len(pending)}): " + ", ".join(pending[:5])
-                              + ". Примите или отклоните их")
+            raise EngineError(
+                "pending_roles",
+                f"Есть роли, которые ждут решения ({len(pending)}): "
+                + ", ".join(pending[:5])
+                + ". Примите или отклоните их",
+            )
         self._need_components()
         self._set_confirmed(True)
         return {}
@@ -401,10 +542,17 @@ class Project:
         """Люди и внешние системы из диаграммы сценария становятся его ролями: «Роли» сценария совпадают с тем, кто действует."""
         have = {r["id"] for r in self.roles_of(scenario_id)}
         names = {str(p).lower() for p in diagram.get("participants", [])}
-        names |= {str(s.get(k, "")).lower() for s in diagram.get("steps", []) for k in ("from", "to")}
-        ops = [{"op": "add_edge", "from": scenario_id, "to": r["id"], "kind": flow.PARTICIPATES}
-               for r in self.cards(flow.ROLE) if r["title"].lower() in names and r["status"] == ACCEPTED
-               and self._role_type(r) != flow.COMPONENT_TYPE and r["id"] not in have]
+        names |= {
+            str(s.get(k, "")).lower() for s in diagram.get("steps", []) for k in ("from", "to")
+        }
+        ops = [
+            {"op": "add_edge", "from": scenario_id, "to": r["id"], "kind": flow.PARTICIPATES}
+            for r in self.cards(flow.ROLE)
+            if r["title"].lower() in names
+            and r["status"] == ACCEPTED
+            and self._role_type(r) != flow.COMPONENT_TYPE
+            and r["id"] not in have
+        ]
         if ops:
             self.store.apply(ops, author, note="Роли сценария по диаграмме")
 
@@ -412,18 +560,38 @@ class Project:
         """Свой сценарий: название и роли; диаграмма вариантов использования строится из них."""
         sphere = self.need_sphere()
         names = [_clip(n, 60) for n in (d.get("roles") or [])]
-        roles = {r["title"].lower(): r for r in self.cards(flow.ROLE) if self._role_type(r) != flow.COMPONENT_TYPE}      # компоненты не актёры
+        roles = {
+            r["title"].lower(): r
+            for r in self.cards(flow.ROLE)
+            if self._role_type(r) != flow.COMPONENT_TYPE
+        }  # компоненты не актёры
         found = [roles[n.lower()] for n in names if n.lower() in roles]
         title = _clip(d.get("title"), 200)
-        usecase = {"system": title, "cases": [{"name": title, "actors": [r["title"] for r in found]}] if found else []}
-        card_id = self._add_unique(flow.SCENARIO, title, d.get("body"), sphere["id"], attrs={"usecase": usecase},
-                                   links=[{"to": r["id"], "kind": flow.PARTICIPATES} for r in found])
+        usecase = {
+            "system": title,
+            "cases": [{"name": title, "actors": [r["title"] for r in found]}] if found else [],
+        }
+        card_id = self._add_unique(
+            flow.SCENARIO,
+            title,
+            d.get("body"),
+            sphere["id"],
+            attrs={"usecase": usecase},
+            links=[{"to": r["id"], "kind": flow.PARTICIPATES} for r in found],
+        )
         return {"id": card_id}
 
     def do_add_problem(self, d: dict) -> dict:
         scenario = self.card(str(d.get("scenario") or ""))
-        return {"id": self._add_unique(flow.PROBLEM, d.get("title"), d.get("body"), scenario["id"],
-                                       attrs={"importance": _clip(d.get("importance"), 20)})}
+        return {
+            "id": self._add_unique(
+                flow.PROBLEM,
+                d.get("title"),
+                d.get("body"),
+                scenario["id"],
+                attrs={"importance": _clip(d.get("importance"), 20)},
+            )
+        }
 
     def do_add_variant(self, d: dict) -> dict:
         problem = self.card(str(d.get("problem") or ""))
@@ -435,9 +603,19 @@ class Project:
         """Выбрать один вариант решения проблемы: он принят, остальные варианты этой проблемы убираются."""
         variant = self.card(str(d.get("id") or ""))
         snap = self.store.snapshot()
-        parent = next((e["to"] for e in snap["edges"] if e["from"] == variant["id"] and e["kind"] == "детализирует"), "")
+        parent = next(
+            (
+                e["to"]
+                for e in snap["edges"]
+                if e["from"] == variant["id"] and e["kind"] == "детализирует"
+            ),
+            "",
+        )
         others = [c["id"] for c in self.cards(flow.VARIANT, parent) if c["id"] != variant["id"]]
-        self._human([{"op": "update_card", "id": variant["id"], "status": ACCEPTED}] + [{"op": "delete_card", "id": i} for i in others])
+        self._human(
+            [{"op": "update_card", "id": variant["id"], "status": ACCEPTED}]
+            + [{"op": "delete_card", "id": i} for i in others]
+        )
         return {}
 
     def do_save_steps(self, d: dict) -> dict:
@@ -448,14 +626,27 @@ class Project:
             raise EngineError("bad_kind", "Диаграмма бывает «как есть» или «решение»")
         diagram = diagrams.parse_text(str(d.get("text") or ""))
         if not diagram["steps"]:
-            raise EngineError("no_steps", "Не вижу шагов. Формат строки: «Кто → Кому: что происходит»")
+            raise EngineError(
+                "no_steps", "Не вижу шагов. Формат строки: «Кто → Кому: что происходит»"
+            )
         existing = self.cards(kind, scenario["id"])
         if existing:
-            self._human([{"op": "update_card", "id": existing[0]["id"], "attrs": {"diagram": diagram}}])
+            self._human(
+                [{"op": "update_card", "id": existing[0]["id"], "attrs": {"diagram": diagram}}]
+            )
         else:
             prefix = "Как есть" if kind == flow.ASIS else "Решение"
-            self._human([{"op": "add_card", "kind": kind, "title": f"{prefix}: {scenario['title']}"[:200], "parent": scenario["id"],
-                          "attrs": {"diagram": diagram}}])
+            self._human(
+                [
+                    {
+                        "op": "add_card",
+                        "kind": kind,
+                        "title": f"{prefix}: {scenario['title']}"[:200],
+                        "parent": scenario["id"],
+                        "attrs": {"diagram": diagram},
+                    }
+                ]
+            )
         self._sync_scenario_roles(scenario["id"], diagram, HUMAN)
         return {}
 
@@ -468,7 +659,11 @@ class Project:
             return self.add_competitor(_clip(d.get("name") or text, 120), _clip(d.get("url"), 300))
         if kind not in ("fact", "requirement") or not text:
             raise EngineError("invalid", "Введите текст факта или требования")
-        data = {"text": text} if kind == "requirement" else {"kind": _clip(d.get("kind"), 20) or "факт", "text": text, "competitor": ""}
+        data = (
+            {"text": text}
+            if kind == "requirement"
+            else {"kind": _clip(d.get("kind"), 20) or "факт", "text": text, "competitor": ""}
+        )
         self.bank.put(kind, data, HUMAN, key=f"{kind}|{text.lower()}")
         return {}
 
@@ -476,7 +671,13 @@ class Project:
         key = normalize_url(url)
         if not name or not key:
             raise EngineError("invalid", "Нужны название и сайт конкурента")
-        self.bank.put("competitor", {"name": name, "url": url, "why": "", "state": "accepted"}, HUMAN, sources=[url], key=key)
+        self.bank.put(
+            "competitor",
+            {"name": name, "url": url, "why": "", "state": "accepted"},
+            HUMAN,
+            sources=[url],
+            key=key,
+        )
         return {}
 
     def do_bank_update(self, d: dict) -> dict:
@@ -507,13 +708,17 @@ class Project:
 
     # ------------------------------------------------------------------ запуск агентов
 
-    def start(self, kind: str, ids: list[str] | None = None, redo: bool = False, each: bool = False) -> dict:
-        with self.lock:                      # проверка «не занято» и запуск — одна неделимая операция
+    def start(
+        self, kind: str, ids: list[str] | None = None, redo: bool = False, each: bool = False
+    ) -> dict:
+        with self.lock:  # проверка «не занято» и запуск — одна неделимая операция
             if self.run and self.run.status in ("running", "asking"):
                 raise EngineError("busy", "Уже идёт работа агентов")
             plan = self._plan(kind, [str(i) for i in (ids or [])], redo)
             if kind == "roles":
-                self._set_confirmed(False)         # вы сами просите предложить ещё: список снова открыт, потом подтвердите
+                self._set_confirmed(
+                    False
+                )  # вы сами просите предложить ещё: список снова открыт, потом подтвердите
             run = Run(kind, plan["title"])
             run.total = plan.get("total", 1)
             run.improve = kind == "autopilot" and redo
@@ -526,36 +731,72 @@ class Project:
     def _plan(self, kind: str, ids: list[str], redo: bool) -> dict:
         sphere = self.need_sphere()
         if kind in ("export", "export_auto"):
-            return {"title": "Проверка графа перед выгрузкой…" if kind == "export" else "Автоматическая проверка и правка графа…",
-                    "kind": kind}
+            return {
+                "title": "Проверка графа перед выгрузкой…"
+                if kind == "export"
+                else "Автоматическая проверка и правка графа…",
+                "kind": kind,
+            }
         if kind == "autopilot":
             return {"title": "Автопилот: уточняет границы системы…", "kind": kind}
         if kind == "competitors":
             return {"title": "Исследователи ищут конкурентов…", "kind": kind}
         if kind == "analysis":
-            targets = self.accepted_competitors() if redo else [
-                r for r in self.accepted_competitors() if not (r["data"] or {}).get("analyzed")]
+            targets = (
+                self.accepted_competitors()
+                if redo
+                else [
+                    r for r in self.accepted_competitors() if not (r["data"] or {}).get("analyzed")
+                ]
+            )
             if not targets:
-                raise EngineError("nothing", "Нет принятых конкурентов, которых нужно проанализировать")
-            return {"title": "Исследователи анализируют сайты…", "kind": kind, "targets": targets, "redo": redo}
+                raise EngineError(
+                    "nothing", "Нет принятых конкурентов, которых нужно проанализировать"
+                )
+            return {
+                "title": "Исследователи анализируют сайты…",
+                "kind": kind,
+                "targets": targets,
+                "redo": redo,
+            }
         if kind in ("roles", "scenarios"):
             if kind == "scenarios" and not self.cards(flow.ROLE):
                 raise EngineError("no_roles", "Сначала нужны роли")
-            return {"title": "Помощник предлагает " + ("роли…" if kind == "roles" else "сценарии…"), "kind": kind, "sphere": sphere}
+            return {
+                "title": "Помощник предлагает " + ("роли…" if kind == "roles" else "сценарии…"),
+                "kind": kind,
+                "sphere": sphere,
+            }
         if kind == "variants":
             # ids — проблемы (одна или несколько); без ids — все принятые проблемы принятых сценариев
             if ids:
                 problems = [self.card(i) for i in ids]
-                problems = [p for p in problems if p["kind"] == flow.PROBLEM and p["status"] == ACCEPTED]
+                problems = [
+                    p for p in problems if p["kind"] == flow.PROBLEM and p["status"] == ACCEPTED
+                ]
             else:
-                problems = [p for s in self.cards(flow.SCENARIO) if s["status"] == ACCEPTED for p in self._accepted(flow.PROBLEM, s["id"])]
+                problems = [
+                    p
+                    for s in self.cards(flow.SCENARIO)
+                    if s["status"] == ACCEPTED
+                    for p in self._accepted(flow.PROBLEM, s["id"])
+                ]
             if not problems:
                 raise EngineError("no_problems", "Сначала примите проблемы сценария")
-            return {"title": "Помощник предлагает варианты автоматизации…", "kind": kind, "problems": problems, "total": len(problems)}
+            return {
+                "title": "Помощник предлагает варианты автоматизации…",
+                "kind": kind,
+                "problems": problems,
+                "total": len(problems),
+            }
         if kind in ("problems", "asis", "solution"):
             if kind != "problems":
-                self._need_components()                      # диаграммы строятся из единого списка имён: нужны компоненты
-            scenarios = [self.card(i) for i in ids] if ids else [c for c in self.cards(flow.SCENARIO) if c["status"] == ACCEPTED]
+                self._need_components()  # диаграммы строятся из единого списка имён: нужны компоненты
+            scenarios = (
+                [self.card(i) for i in ids]
+                if ids
+                else [c for c in self.cards(flow.SCENARIO) if c["status"] == ACCEPTED]
+            )
             scenarios = [s for s in scenarios if s["kind"] == flow.SCENARIO]
             if not scenarios:
                 raise EngineError("no_scenarios", "Нет принятых сценариев")
@@ -566,9 +807,20 @@ class Project:
             if kind == "solution":
                 scenarios = [s for s in scenarios if self._solved(s["id"])]
                 if not scenarios:
-                    raise EngineError("no_variant", "Сначала выберите вариант решения хотя бы для одной проблемы")
-            names = {"problems": "проблемы", "asis": "диаграмму «как есть»", "solution": "диаграмму «решение»"}
-            return {"title": f"Помощник предлагает {names[kind]}…", "kind": kind, "scenarios": scenarios, "total": len(scenarios)}
+                    raise EngineError(
+                        "no_variant", "Сначала выберите вариант решения хотя бы для одной проблемы"
+                    )
+            names = {
+                "problems": "проблемы",
+                "asis": "диаграмму «как есть»",
+                "solution": "диаграмму «решение»",
+            }
+            return {
+                "title": f"Помощник предлагает {names[kind]}…",
+                "kind": kind,
+                "scenarios": scenarios,
+                "total": len(scenarios),
+            }
         raise EngineError("unknown_job", "Нет такой работы")
 
     def _accepted(self, kind: str, parent_id: str) -> list[dict]:
@@ -579,7 +831,13 @@ class Project:
         out = []
         for problem in self._accepted(flow.PROBLEM, scenario_id):
             for variant in self._accepted(flow.VARIANT, problem["id"]):
-                out.append({"problem": problem["title"], "title": variant["title"], "body": variant["body"]})
+                out.append(
+                    {
+                        "problem": problem["title"],
+                        "title": variant["title"],
+                        "body": variant["body"],
+                    }
+                )
         return out
 
     def _work(self, run: Run, plan: dict) -> None:
@@ -617,10 +875,8 @@ class Project:
             run.stop = True
             run.answered.set()
             for proc in list(run.procs):
-                try:
+                with suppress(OSError):
                     proc.kill()
-                except OSError:
-                    pass
         return {}
 
     # ---- вопрос помощника
@@ -638,26 +894,51 @@ class Project:
     @staticmethod
     def _answer_text(question: dict, choice: dict) -> str:
         if choice.get("type") == "rejected":
-            return "ни один вариант не подходит" + (f"; пояснение: {choice.get('value')}" if choice.get("value") else "")
-        picked = [question["options"][i - 1]["title"] for i in choice.get("indexes", []) if 1 <= i <= len(question["options"])]
+            return "ни один вариант не подходит" + (
+                f"; пояснение: {choice.get('value')}" if choice.get("value") else ""
+            )
+        picked = [
+            question["options"][i - 1]["title"]
+            for i in choice.get("indexes", [])
+            if 1 <= i <= len(question["options"])
+        ]
         extra = _clip(choice.get("text"), 600)
         return "; ".join(picked + ([f"своё: {extra}"] if extra else [])) or "решай сам"
 
     # ---- вызов агента
 
-    def _request(self, slot: dict, name: str, system: str, note: str, token: str, session: str, web: bool, run: Run) -> TurnResult:
+    def _request(
+        self,
+        slot: dict,
+        name: str,
+        system: str,
+        note: str,
+        token: str,
+        session: str,
+        web: bool,
+        run: Run,
+    ) -> TurnResult:
         adapter = self.adapters.get(slot.get("agent") or "")
         if adapter is None:
-            return TurnResult(error=f"Агент «{slot.get('agent')}» не настроен. Откройте «Настройки».")
+            return TurnResult(
+                error=f"Агент «{slot.get('agent')}» не настроен. Откройте «Настройки»."
+            )
 
         def remember(proc):
             run.procs.add(proc)
 
         request = TurnRequest(
-            workdir=self.dir / "agent" / name, system_text=system, note=note,
-            env={"IDEA_GRAPH_URL": self.base_url, "IDEA_GRAPH_TOKEN": token}, session_id=session,
-            model=slot.get("model") or "", effort=slot.get("effort") or "", web_search=web, on_process=remember,
-            extra={"token": token, "project": self})
+            workdir=self.dir / "agent" / name,
+            system_text=system,
+            note=note,
+            env={"IDEA_GRAPH_URL": self.base_url, "IDEA_GRAPH_TOKEN": token},
+            session_id=session,
+            model=slot.get("model") or "",
+            effort=slot.get("effort") or "",
+            web_search=web,
+            on_process=remember,
+            extra={"token": token, "project": self},
+        )
         began = time.time()
         result = adapter.run(request)
         self._journal(name, slot, began, result)
@@ -665,9 +946,15 @@ class Project:
 
     def _journal(self, name: str, slot: dict, began: float, result: TurnResult) -> None:
         """Журнал работы агентов (.idea-graph/agents.log): время, кто, какая модель, сколько длилось, чем кончилось. Тексты графа не пишутся."""
-        line = {"time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(began)), "turn": name, "agent": slot.get("agent") or "",
-                "model": slot.get("model") or "", "seconds": round(time.time() - began, 1), "cost": result.cost,
-                "error": _clip(result.error, 300)}
+        line = {
+            "time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(began)),
+            "turn": name,
+            "agent": slot.get("agent") or "",
+            "model": slot.get("model") or "",
+            "seconds": round(time.time() - began, 1),
+            "cost": result.cost,
+            "error": _clip(result.error, 300),
+        }
         try:
             with self._log_lock:
                 path = self.dir / "agents.log"
@@ -676,7 +963,7 @@ class Project:
                 with path.open("a", encoding="utf-8") as handle:
                     handle.write(json.dumps(line, ensure_ascii=False) + "\n")
         except OSError:
-            pass                              # журнал не должен ломать работу
+            pass  # журнал не должен ломать работу
 
     # ---- исследователи
 
@@ -690,8 +977,16 @@ class Project:
             ctx = {"kind": "researcher", "note": note, "report": None}
             self.tokens[token] = ctx
             try:
-                result = self._request(self.settings.data["researchers"][index], f"researcher{index + 1}", tools.RESEARCHER_RULES,
-                                       note, token, "", True, run)
+                result = self._request(
+                    self.settings.data["researchers"][index],
+                    f"researcher{index + 1}",
+                    tools.RESEARCHER_RULES,
+                    note,
+                    token,
+                    "",
+                    True,
+                    run,
+                )
                 if result.error and not run.stop:
                     errors.append(f"Исследователь {index + 1}: {result.error}")
                 reports[index] = ctx["report"]
@@ -709,7 +1004,10 @@ class Project:
         run.notes += errors
         found = [r for r in reports if r]
         if not found and not run.stop:
-            raise EngineError("no_report", errors[0] if errors else "Исследователи не прислали результат. Попробуйте ещё раз")
+            raise EngineError(
+                "no_report",
+                errors[0] if errors else "Исследователи не прислали результат. Попробуйте ещё раз",
+            )
         return [item for r in found for item in r["findings"]]
 
     def _job_competitors(self, run: Run) -> None:
@@ -724,8 +1022,13 @@ class Project:
             if not key or key in self.rejected("competitor") or self.bank.find(key):
                 continue
             name = item["title"]
-            self.bank.put("competitor", {"name": name, "url": url, "why": item["description"], "state": "proposed"}, AGENT,
-                          sources=item["sources"], key=key)
+            self.bank.put(
+                "competitor",
+                {"name": name, "url": url, "why": item["description"], "state": "proposed"},
+                AGENT,
+                sources=item["sources"],
+                key=key,
+            )
             added += 1
         run.summary = f"Новых конкурентов: {added}"
 
@@ -733,7 +1036,10 @@ class Project:
         sphere = self.need_sphere()
         targets = plan["targets"]
         by_key = {t["key"]: t for t in targets}
-        note = flow.analysis(sphere["title"], [(t["data"].get("name", ""), t["data"].get("url", "")) for t in targets])
+        note = flow.analysis(
+            sphere["title"],
+            [(t["data"].get("name", ""), t["data"].get("url", "")) for t in targets],
+        )
         findings = self._research(run, note)
         if run.stop:
             return
@@ -748,8 +1054,13 @@ class Project:
             if kind not in ("роль", "процесс", "фича") or owner not in by_key:
                 continue
             text = item["title"] + (f". {item['description']}" if item["description"] else "")
-            self.bank.put("fact", {"kind": kind, "text": text, "competitor": owner}, AGENT, sources=item["sources"],
-                          key=f"{owner}|{kind}|{item['title'].lower()}")
+            self.bank.put(
+                "fact",
+                {"kind": kind, "text": text, "competitor": owner},
+                AGENT,
+                sources=item["sources"],
+                key=f"{owner}|{kind}|{item['title'].lower()}",
+            )
             added += 1
         for target in targets:
             self.bank.update(target["id"], AGENT, data={**target["data"], "analyzed": True})
@@ -758,15 +1069,22 @@ class Project:
     # ---- помощник
 
     def _job_global(self, run: Run, kind: str) -> None:
-        sphere = self.need_sphere()
+        self.need_sphere()
         ctx = self.knowledge()
         roles = [c["title"] for c in self.cards(flow.ROLE)]
         if kind == "roles":
             note, allowed = flow.roles(ctx, roles, self.rejected(flow.ROLE)), {flow.ROLE}
         else:
             known = [c["title"] for c in self.cards(flow.SCENARIO)]
-            actors = [c["title"] for c in self.cards(flow.ROLE) if self._role_type(c) != flow.COMPONENT_TYPE]
-            note, allowed = flow.scenarios(ctx, actors, known, self.rejected(flow.SCENARIO)), {flow.SCENARIO}
+            actors = [
+                c["title"]
+                for c in self.cards(flow.ROLE)
+                if self._role_type(c) != flow.COMPONENT_TYPE
+            ]
+            note, allowed = (
+                flow.scenarios(ctx, actors, known, self.rejected(flow.SCENARIO)),
+                {flow.SCENARIO},
+            )
         self._converse(run, note, allowed, "")
 
     def _job_scenarios(self, run: Run, plan: dict) -> None:
@@ -777,21 +1095,41 @@ class Project:
         for scenario in plan["scenarios"]:
             if run.stop:
                 return
-            ctx = self.knowledge(skip=scenario["id"])          # новое согласуется с уже построенными сценариями
+            ctx = self.knowledge(
+                skip=scenario["id"]
+            )  # новое согласуется с уже построенными сценариями
             info = self.scenario_info(self.card(scenario["id"]))
-            problems = [c["title"] + (f": {c['body']}" if c["body"] else "") for c in self._accepted(flow.PROBLEM, scenario["id"])]
+            problems = [
+                c["title"] + (f": {c['body']}" if c["body"] else "")
+                for c in self._accepted(flow.PROBLEM, scenario["id"])
+            ]
             asis = self.cards(flow.ASIS, scenario["id"])
-            asis_text = diagrams.to_text(asis[0]["attrs"]["diagram"]) if asis and (asis[0].get("attrs") or {}).get("diagram") else ""
+            asis_text = (
+                diagrams.to_text(asis[0]["attrs"]["diagram"])
+                if asis and (asis[0].get("attrs") or {}).get("diagram")
+                else ""
+            )
             if kind == "problems":
-                note = flow.problems(ctx, info, [c["title"] for c in self.cards(flow.PROBLEM, scenario["id"])],
-                                     self.rejected(flow.PROBLEM)); allowed = {flow.PROBLEM}
+                note = flow.problems(
+                    ctx,
+                    info,
+                    [c["title"] for c in self.cards(flow.PROBLEM, scenario["id"])],
+                    self.rejected(flow.PROBLEM),
+                )
+                allowed = {flow.PROBLEM}
             elif kind == "asis":
                 note, allowed = flow.asis(ctx, info, problems, self._names_groups()), {flow.ASIS}
             else:
                 solved = self._solved(scenario["id"])
-                unsolved = [c["title"] for c in self._accepted(flow.PROBLEM, scenario["id"])
-                            if c["title"] not in {s["problem"] for s in solved}]
-                note, allowed = flow.solution(ctx, info, solved, unsolved, asis_text, self._names_groups()), {flow.SOLUTION}
+                unsolved = [
+                    c["title"]
+                    for c in self._accepted(flow.PROBLEM, scenario["id"])
+                    if c["title"] not in {s["problem"] for s in solved}
+                ]
+                note, allowed = (
+                    flow.solution(ctx, info, solved, unsolved, asis_text, self._names_groups()),
+                    {flow.SOLUTION},
+                )
             self._converse(run, note, allowed, scenario["id"])
             run.done += 1
             self._touch()
@@ -803,13 +1141,30 @@ class Project:
         for problem in plan["problems"]:
             if run.stop:
                 return
-            parent = next((e["to"] for e in snap["edges"] if e["from"] == problem["id"] and e["kind"] == "детализирует"), "")
+            parent = next(
+                (
+                    e["to"]
+                    for e in snap["edges"]
+                    if e["from"] == problem["id"] and e["kind"] == "детализирует"
+                ),
+                "",
+            )
             ctx = self.knowledge(skip=parent)
             info = self.scenario_info(self.card(parent))
             asis = self.cards(flow.ASIS, parent)
-            asis_text = diagrams.to_text(asis[0]["attrs"]["diagram"]) if asis and (asis[0].get("attrs") or {}).get("diagram") else ""
-            note = flow.variants(ctx, info, {"title": problem["title"], "body": problem["body"]}, asis_text,
-                                 [c["title"] for c in self.cards(flow.VARIANT, problem["id"])], self.rejected(flow.VARIANT))
+            asis_text = (
+                diagrams.to_text(asis[0]["attrs"]["diagram"])
+                if asis and (asis[0].get("attrs") or {}).get("diagram")
+                else ""
+            )
+            note = flow.variants(
+                ctx,
+                info,
+                {"title": problem["title"], "body": problem["body"]},
+                asis_text,
+                [c["title"] for c in self.cards(flow.VARIANT, problem["id"])],
+                self.rejected(flow.VARIANT),
+            )
             self._converse(run, note, {flow.VARIANT}, problem["id"])
             run.done += 1
             self._touch()
@@ -821,12 +1176,30 @@ class Project:
             note = task = "Автоматический режим: вопросов не задавай, реши сам.\n\n" + note
         while True:
             token = secrets.token_urlsafe(24)
-            ctx = {"kind": "helper", "run": run, "allowed": allowed, "target": target, "asked": False, "note": note, "created": 0,
-                   "auto": run.auto, "limit": limit}
+            ctx = {
+                "kind": "helper",
+                "run": run,
+                "allowed": allowed,
+                "target": target,
+                "asked": False,
+                "note": note,
+                "created": 0,
+                "auto": run.auto,
+                "limit": limit,
+            }
             self.tokens[token] = ctx
             run.answered.clear()
             try:
-                result = self._request(self.settings.data["helper"], "helper", tools.HELPER_RULES, note, token, session, False, run)
+                result = self._request(
+                    self.settings.data["helper"],
+                    "helper",
+                    tools.HELPER_RULES,
+                    note,
+                    token,
+                    session,
+                    False,
+                    run,
+                )
             finally:
                 self.tokens.pop(token, None)
             if run.stop:
@@ -841,12 +1214,16 @@ class Project:
                 if run.stop:
                     return
                 question = run.question
-                note = (f"Ответ человека на твой вопрос «{question['question']}»: {self._answer_text(question, run.answer or {})}. "
-                        "Продолжи работу с учётом ответа.\n\nЗадача прежняя:\n" + task)
+                note = (
+                    f"Ответ человека на твой вопрос «{question['question']}»: {self._answer_text(question, run.answer or {})}. "
+                    "Продолжи работу с учётом ответа.\n\nЗадача прежняя:\n" + task
+                )
                 run.question = None
                 continue
             if not ctx["created"]:
-                run.notes.append("Помощник ничего не добавил" + (f": {result.text[:200]}" if result.text else ""))
+                run.notes.append(
+                    "Помощник ничего не добавил" + (f": {result.text[:200]}" if result.text else "")
+                )
             return
 
     # ------------------------------------------------------------------ инструменты агентов
@@ -863,7 +1240,11 @@ class Project:
             return tools.CHECK_TOOLS
         if ctx["kind"] == "pilot":
             return tools.PILOT_TOOLS
-        return [x for x in tools.HELPER_TOOLS if x["name"] != "ask"] if ctx.get("auto") else tools.HELPER_TOOLS
+        return (
+            [x for x in tools.HELPER_TOOLS if x["name"] != "ask"]
+            if ctx.get("auto")
+            else tools.HELPER_TOOLS
+        )
 
     def tool_call(self, token: str, tool: str, args: dict) -> str:
         ctx = self.tokens.get(token)
@@ -878,8 +1259,11 @@ class Project:
             raw = args.get("accept")
             ids = [str(i) for i in raw if i is not None] if isinstance(raw, list) else []
             rm = args.get("remove")
-            ctx["decision"] = {"accept": ids, "reason": _clip(args.get("reason"), 300),
-                               "remove": [str(i) for i in rm if i is not None] if isinstance(rm, list) else []}
+            ctx["decision"] = {
+                "accept": ids,
+                "reason": _clip(args.get("reason"), 300),
+                "remove": [str(i) for i in rm if i is not None] if isinstance(rm, list) else [],
+            }
             return "Принято. Заверши ход."
         if ctx["kind"] == "check":
             if tool == "report":
@@ -892,8 +1276,12 @@ class Project:
                 topics = args.get("topics") if isinstance(args.get("topics"), dict) else {}
                 missing = [name for name in flow.BOUND_TOPICS if not _clip(topics.get(name), 120)]
                 if missing:
-                    raise EngineError("topics", "В topics нет статуса по темам: " + "; ".join(missing)
-                                      + ". По каждой теме — что решено ответами или почему неприменимо; если тема не ясна — задай вопрос")
+                    raise EngineError(
+                        "topics",
+                        "В topics нет статуса по темам: "
+                        + "; ".join(missing)
+                        + ". По каждой теме — что решено ответами или почему неприменимо; если тема не ясна — задай вопрос",
+                    )
                 ctx["finished"] = True
                 return "Принято."
             raise EngineError("unknown_tool", "Здесь есть только turn_info, ask и finish")
@@ -923,30 +1311,56 @@ class Project:
                 except ValueError:
                     data = {}
             sources = item.get("sources") or []
-            findings.append({"kind": _clip(item.get("kind"), 40), "title": _clip(item.get("title"), 200),
-                             "description": _clip(item.get("description"), 400), "data": data if isinstance(data, dict) else {},
-                             "sources": [_clip(s, 300) for s in (sources if isinstance(sources, list) else [sources]) if _clip(s, 300)][:5]})
+            findings.append(
+                {
+                    "kind": _clip(item.get("kind"), 40),
+                    "title": _clip(item.get("title"), 200),
+                    "description": _clip(item.get("description"), 400),
+                    "data": data if isinstance(data, dict) else {},
+                    "sources": [
+                        _clip(s, 300)
+                        for s in (sources if isinstance(sources, list) else [sources])
+                        if _clip(s, 300)
+                    ][:5],
+                }
+            )
         if not findings:
-            raise EngineError("empty_report", "В отчёте нет находок. Найди хотя бы что-то подтверждённое")
+            raise EngineError(
+                "empty_report", "В отчёте нет находок. Найди хотя бы что-то подтверждённое"
+            )
         ctx["report"] = {"findings": findings}
         return "Принято. Заверши ход."
 
     def _tool_ask(self, ctx: dict, args: dict) -> str:
         if ctx.get("auto"):
-            raise EngineError("auto_mode", "Сейчас автоматический режим: вопросов не задавай, реши сам")
+            raise EngineError(
+                "auto_mode", "Сейчас автоматический режим: вопросов не задавай, реши сам"
+            )
         if ctx["asked"]:
             raise EngineError("one_question", "За ход можно задать только один вопрос")
-        options = [{"title": _clip(o.get("title"), 400), "consequence": ""}
-                   for o in args.get("options") or [] if isinstance(o, dict) and _clip(o.get("title"), 400)][:4]
+        options = [
+            {"title": _clip(o.get("title"), 400), "consequence": ""}
+            for o in args.get("options") or []
+            if isinstance(o, dict) and _clip(o.get("title"), 400)
+        ][:4]
         question = _clip(args.get("question"), 600)
         if not question or len(options) < 2:
             raise EngineError("bad_question", "Нужен вопрос и от двух вариантов ответа")
         long = rules.question_errors(question, [o["title"] for o in options])
         if long:
             raise EngineError("too_long", "; ".join(long))
-        recommended = [i for i in (args.get("recommended") or []) if isinstance(i, int) and 1 <= i <= len(options)]
-        ctx["run"].question = {"id": secrets.token_urlsafe(6), "question": question, "options": options,
-                               "recommended": recommended, "reason": ""}
+        recommended = [
+            i
+            for i in (args.get("recommended") or [])
+            if isinstance(i, int) and 1 <= i <= len(options)
+        ]
+        ctx["run"].question = {
+            "id": secrets.token_urlsafe(6),
+            "question": question,
+            "options": options,
+            "recommended": recommended,
+            "reason": "",
+        }
         ctx["asked"] = True
         return "Вопрос задан. Заверши ход: ответ придёт в следующем ходе."
 
@@ -962,14 +1376,25 @@ class Project:
                 raise EngineError("bad_op", f"Операция {number}: разрешён только add_card")
             kind = str(op.get("kind") or "")
             if kind not in ctx["allowed"]:
-                raise EngineError("bad_kind", f"Операция {number}: сейчас можно создавать только карточки вида: {', '.join(sorted(ctx['allowed']))}")
+                raise EngineError(
+                    "bad_kind",
+                    f"Операция {number}: сейчас можно создавать только карточки вида: {', '.join(sorted(ctx['allowed']))}",
+                )
             title = _clip(op.get("title"), 200)
             if not title:
                 raise EngineError("bad_title", f"Операция {number}: нужен title")
             parent = ctx["target"] or sphere["id"]
-            replaces = kind in (flow.ASIS, flow.SOLUTION)          # диаграмма сценария одна: новая заменяет старую, а не считается дублем
-            if not replaces and (title.lower() in self.rejected(kind) or any(
-                    c["title"].lower() == title.lower() for c in self.cards(kind, parent if ctx["target"] else None))):
+            replaces = kind in (
+                flow.ASIS,
+                flow.SOLUTION,
+            )  # диаграмма сценария одна: новая заменяет старую, а не считается дублем
+            if not replaces and (
+                title.lower() in self.rejected(kind)
+                or any(
+                    c["title"].lower() == title.lower()
+                    for c in self.cards(kind, parent if ctx["target"] else None)
+                )
+            ):
                 skipped.append(title)
                 continue
             attrs, links, status = {}, [], PROPOSED
@@ -980,54 +1405,104 @@ class Project:
                 except ValueError as error:
                     raise EngineError("bad_usecase", f"Операция {number}: {error}") from None
                 if not usecase["cases"]:
-                    raise EngineError("bad_usecase", f"Операция {number}: в attrs.usecase нужны cases с name и actors (роли)")
-                parts = sorted({a for c in usecase["cases"] for a in c["actors"] if a.lower() in roles
-                                and self._role_type(roles[a.lower()]) == flow.COMPONENT_TYPE})
+                    raise EngineError(
+                        "bad_usecase",
+                        f"Операция {number}: в attrs.usecase нужны cases с name и actors (роли)",
+                    )
+                parts = sorted(
+                    {
+                        a
+                        for c in usecase["cases"]
+                        for a in c["actors"]
+                        if a.lower() in roles
+                        and self._role_type(roles[a.lower()]) == flow.COMPONENT_TYPE
+                    }
+                )
                 if parts:
-                    raise EngineError("bad_actor", f"Операция {number}: {', '.join(parts)} — компоненты системы, а не актёры. "
-                                      "Актёры — только люди и внешние системы")
-                unknown = sorted({a for c in usecase["cases"] for a in c["actors"] if a.lower() not in roles})
+                    raise EngineError(
+                        "bad_actor",
+                        f"Операция {number}: {', '.join(parts)} — компоненты системы, а не актёры. "
+                        "Актёры — только люди и внешние системы",
+                    )
+                unknown = sorted(
+                    {a for c in usecase["cases"] for a in c["actors"] if a.lower() not in roles}
+                )
                 if unknown:
-                    raise EngineError("bad_actor", f"Операция {number}: актёры {', '.join(unknown)} — не роли. Роли: "
-                                      + ", ".join(r["title"] for r in roles.values()))
+                    raise EngineError(
+                        "bad_actor",
+                        f"Операция {number}: актёры {', '.join(unknown)} — не роли. Роли: "
+                        + ", ".join(r["title"] for r in roles.values()),
+                    )
                 usecase["system"] = usecase["system"] or title
                 actors = {a.lower() for c in usecase["cases"] for a in c["actors"]}
                 links = [{"to": roles[a]["id"], "kind": flow.PARTICIPATES} for a in actors]
                 attrs = {"usecase": usecase}
             elif kind in (flow.ASIS, flow.SOLUTION):
                 try:
-                    diagram = diagrams.normalize({"participants": (raw.get("diagram") or {}).get("participants"),
-                                                  "steps": (raw.get("diagram") or {}).get("steps")})
+                    diagram = diagrams.normalize(
+                        {
+                            "participants": (raw.get("diagram") or {}).get("participants"),
+                            "steps": (raw.get("diagram") or {}).get("steps"),
+                        }
+                    )
                 except (ValueError, AttributeError) as error:
                     raise EngineError("bad_diagram", f"Операция {number}: {error}") from None
                 if len(diagram["steps"]) < 2:
-                    raise EngineError("bad_diagram", f"Операция {number}: в attrs.diagram нужны participants и минимум два шага steps (from, to, text)")
-                diagram = rules.canonical_names(diagram, self._role_names())          # регистр и пробелы приводятся к имени из списка
+                    raise EngineError(
+                        "bad_diagram",
+                        f"Операция {number}: в attrs.diagram нужны participants и минимум два шага steps (from, to, text)",
+                    )
+                diagram = rules.canonical_names(
+                    diagram, self._role_names()
+                )  # регистр и пробелы приводятся к имени из списка
                 broken = rules.diagram_errors(kind, diagram, self, parent)
                 if broken:
                     raise EngineError("bad_diagram", f"Операция {number}: " + "; ".join(broken))
-                attrs, status = {"diagram": diagram, "basis": check.basis(self, parent, kind)}, ACCEPTED
+                attrs, status = (
+                    {"diagram": diagram, "basis": check.basis(self, parent, kind)},
+                    ACCEPTED,
+                )
                 synced.append((parent, diagram))
                 for old in self.cards(kind, parent):
                     build.append({"op": "delete_card", "id": old["id"]})
             elif kind == flow.ROLE:
                 if self.roles_confirmed:
-                    raise EngineError("roles_locked", "Список ролей подтверждён человеком и в этом прогоне не меняется")
+                    raise EngineError(
+                        "roles_locked",
+                        "Список ролей подтверждён человеком и в этом прогоне не меняется",
+                    )
                 role_type = str(raw.get("type") or "").strip().lower()
                 if role_type not in flow.ROLE_TYPES:
-                    raise EngineError("bad_type", f"Операция {number}: у роли обязателен attrs.type — один из: " + ", ".join(flow.ROLE_TYPES))
+                    raise EngineError(
+                        "bad_type",
+                        f"Операция {number}: у роли обязателен attrs.type — один из: "
+                        + ", ".join(flow.ROLE_TYPES),
+                    )
                 attrs = {"type": role_type}
             elif kind == flow.PROBLEM:
                 attrs = {"importance": _clip(raw.get("importance"), 20).lower()}
             too_long = rules.text_errors(kind, str(op.get("body") or "").strip())
             if too_long:
                 raise EngineError("too_long", f"Операция {number}: " + "; ".join(too_long))
-            build.append({"op": "add_card", "kind": kind, "title": title, "body": str(op.get("body") or "").strip()[:4000],
-                          "status": status, "attrs": attrs, "parent": parent, "links": links})
+            build.append(
+                {
+                    "op": "add_card",
+                    "kind": kind,
+                    "title": title,
+                    "body": str(op.get("body") or "").strip()[:4000],
+                    "status": status,
+                    "attrs": attrs,
+                    "parent": parent,
+                    "links": links,
+                }
+            )
         created = 0
         adds = sum(1 for b in build if b["op"] == "add_card")
         if ctx.get("limit") and ctx["created"] + adds > ctx["limit"]:
-            raise EngineError("too_many", f"Сейчас можно создать не более {ctx['limit']} карточки: оставь одну, самую важную")
+            raise EngineError(
+                "too_many",
+                f"Сейчас можно создать не более {ctx['limit']} карточки: оставь одну, самую важную",
+            )
         if build:
             try:
                 result = self.store.apply(build, AGENT, note="Предложено помощником")
@@ -1038,14 +1513,19 @@ class Project:
             for scenario_id, diagram in synced:
                 self._sync_scenario_roles(scenario_id, diagram, AGENT)
             self._touch()
-        return f"Добавлено карточек: {created}." + (f" Уже есть или отклонялись, пропущено: {', '.join(skipped)}." if skipped else "")
+        return f"Добавлено карточек: {created}." + (
+            f" Уже есть или отклонялись, пропущено: {', '.join(skipped)}." if skipped else ""
+        )
 
     # ------------------------------------------------------------------ проверка согласованности перед выгрузкой
 
     def _tool_check_report(self, ctx: dict, args: dict) -> str:
         report, errors = check.parse_report(self, args, ctx["bounds"], ctx["found"])
         if errors:
-            raise EngineError("bad_report", "Отчёт не принят, исправь и вызови report снова: " + "; ".join(errors[:8]))
+            raise EngineError(
+                "bad_report",
+                "Отчёт не принят, исправь и вызови report снова: " + "; ".join(errors[:8]),
+            )
         ctx["report"] = report
         return "Отчёт принят. Заверши ход."
 
@@ -1055,7 +1535,9 @@ class Project:
         for name, label in (("helper", "Помощник"), ("autopilot", "Автопилот")):
             other = self.settings.data.get(name) or {}
             if (other.get("agent"), other.get("model")) == (slot.get("agent"), slot.get("model")):
-                run.notes.append(f"Внимание: проверяющий совпадает с «{label}», проверка не независима. Выберите другую модель в «Настройках».")
+                run.notes.append(
+                    f"Внимание: проверяющий совпадает с «{label}», проверка не независима. Выберите другую модель в «Настройках»."
+                )
                 break
         return slot
 
@@ -1066,11 +1548,28 @@ class Project:
         except GraphError:
             return False
 
-    def _checker_turn(self, run: Run, slot: dict, sphere: dict, bounds: list[str], found: list[dict], text: str | None = None) -> dict | None:
+    def _checker_turn(
+        self,
+        run: Run,
+        slot: dict,
+        sphere: dict,
+        bounds: list[str],
+        found: list[dict],
+        text: str | None = None,
+    ) -> dict | None:
         """Один вызов проверяющего на весь граф. Возвращает отчёт (None — остановлено)."""
-        note = flow.verify(sphere["title"], bounds, text if text is not None else check.graph_text(self), found)
+        note = flow.verify(
+            sphere["title"], bounds, text if text is not None else check.graph_text(self), found
+        )
         token = secrets.token_urlsafe(24)
-        ctx = {"kind": "check", "run": run, "note": note, "report": None, "bounds": bounds, "found": found}
+        ctx = {
+            "kind": "check",
+            "run": run,
+            "note": note,
+            "report": None,
+            "bounds": bounds,
+            "found": found,
+        }
         self.tokens[token] = ctx
         run.title = "Проверяющий читает граф…"
         self._touch()
@@ -1090,9 +1589,14 @@ class Project:
         """Вопрос человеку по одному пункту; возвращает номер выбранного варианта (None — остановлено)."""
         while True:
             run.answered.clear()
-            run.question = {"id": secrets.token_urlsafe(6), "question": item["question"], "single": True, "reason": "",
-                            "options": [{"title": o["title"], "consequence": ""} for o in item["options"]],
-                            "recommended": [item["recommended"]]}
+            run.question = {
+                "id": secrets.token_urlsafe(6),
+                "question": item["question"],
+                "single": True,
+                "reason": "",
+                "options": [{"title": o["title"], "consequence": ""} for o in item["options"]],
+                "recommended": [item["recommended"]],
+            }
             run.title = f"Проверка: вопрос {number} из {total}"
             run.status = "asking"
             self._touch()
@@ -1101,13 +1605,19 @@ class Project:
             run.question = None
             if run.stop:
                 return None
-            picked = [i for i in choice.get("indexes", []) if isinstance(i, int) and 1 <= i <= len(item["options"])]
+            picked = [
+                i
+                for i in choice.get("indexes", [])
+                if isinstance(i, int) and 1 <= i <= len(item["options"])
+            ]
             if picked:
                 return picked[0]
 
     def _fix_diagrams(self, run: Run) -> None:
         """В конце, после всех правок: диаграммы без вопросов перестраиваются помощником по итоговым проблемам и решениям."""
-        todo = list(dict.fromkeys(i["scenario"] for i in check.issues(self) if i["code"] == "diagram"))
+        todo = list(
+            dict.fromkeys(i["scenario"] for i in check.issues(self) if i["code"] == "diagram")
+        )
         for index, sid in enumerate(todo, 1):
             if run.stop:
                 return
@@ -1129,19 +1639,25 @@ class Project:
         seen: set = set()
         fixed = 0
         while True:
-            bounds = [str((r["data"] or {}).get("text", ""))[len(flow.BOUNDARY):] for r in self._boundary_records()]
-            with self.frozen():                                           # найденное кодом и текст графа для проверяющего — из одного снимка
+            bounds = [
+                str((r["data"] or {}).get("text", ""))[len(flow.BOUNDARY) :]
+                for r in self._boundary_records()
+            ]
+            with self.frozen():  # найденное кодом и текст графа для проверяющего — из одного снимка
                 found = check.issues(self)
                 text = check.graph_text(self)
-            run.total = run.done = 0                                      # числа в заголовке — только пока идёт вопрос или правка
+            run.total = run.done = 0  # числа в заголовке — только пока идёт вопрос или правка
             report = self._checker_turn(run, slot, sphere, bounds, found, text)
             if report is None:
                 return
             items = check.build_items(self, report, bounds, found)
             signature = tuple(sorted(item["question"] for item in items))
             if items and signature in seen:
-                raise EngineError("no_progress", "Проверка ходит по кругу: те же разногласия после правок. Разберите их вручную: "
-                                  + "; ".join(i["question"] for i in items[:3]))
+                raise EngineError(
+                    "no_progress",
+                    "Проверка ходит по кругу: те же разногласия после правок. Разберите их вручную: "
+                    + "; ".join(i["question"] for i in items[:3]),
+                )
             seen.add(signature)
             applied = 0
             run.total = len(items)
@@ -1149,8 +1665,10 @@ class Project:
                 if run.stop:
                     return
                 if not all(self._exists(card_id) for card_id in item["cards"]):
-                    continue                                              # карточку уже убрала предыдущая правка
-                pick = item["recommended"] if auto else self._ask_item(run, item, number, len(items))
+                    continue  # карточку уже убрала предыдущая правка
+                pick = (
+                    item["recommended"] if auto else self._ask_item(run, item, number, len(items))
+                )
                 if pick is None:
                     return
                 option = item["options"][pick - 1]
@@ -1167,21 +1685,31 @@ class Project:
                 self._touch()
             fixed += applied
             if items and not applied:
-                raise EngineError("no_progress", "Правки не применились: " + "; ".join(i["question"] for i in items[:3]))
+                raise EngineError(
+                    "no_progress",
+                    "Правки не применились: " + "; ".join(i["question"] for i in items[:3]),
+                )
             self._fix_diagrams(run)
             if run.stop:
                 return
             left = check.issues(self)
             if not items:
                 if left:
-                    raise EngineError("no_progress", "Остались разногласия: " + "; ".join(i["text"] for i in left[:3]))
+                    raise EngineError(
+                        "no_progress",
+                        "Остались разногласия: " + "; ".join(i["text"] for i in left[:3]),
+                    )
                 break
         path = self.do_export_md({})["path"]
-        run.summary = f"Разногласий нет, документация записана: {path}" if not fixed else             f"{'Автоматически исправлено' if auto else 'Исправлено'} правок: {fixed}. Документация записана: {path}"
+        run.summary = (
+            f"Разногласий нет, документация записана: {path}"
+            if not fixed
+            else f"{'Автоматически исправлено' if auto else 'Исправлено'} правок: {fixed}. Документация записана: {path}"
+        )
 
     def _apply_fix(self, run: Run, fix: dict) -> None:
         do, card_id = fix["do"], fix["id"]
-        total, done = run.total, run.done                # фоновые работы помощника трогают счётчики прогона
+        total, done = run.total, run.done  # фоновые работы помощника трогают счётчики прогона
         if do == "remove":
             self.do_remove({"id": card_id})
         elif do == "choose_variant":
@@ -1204,13 +1732,22 @@ class Project:
     def _rebuild(self, run: Run, scenario: dict) -> None:
         """Диаграммы сценария заново по принятым проблемам и выбранным решениям; если строить не из чего — убрать."""
         sid = scenario["id"]
-        for kind, ready in ((flow.ASIS, bool(self._accepted(flow.PROBLEM, sid))), (flow.SOLUTION, bool(self._solved(sid)))):
+        for kind, ready in (
+            (flow.ASIS, bool(self._accepted(flow.PROBLEM, sid))),
+            (flow.SOLUTION, bool(self._solved(sid))),
+        ):
             if ready:
-                self._job_scenarios(run, {"kind": "asis" if kind == flow.ASIS else "solution", "scenarios": [scenario]})
+                self._job_scenarios(
+                    run,
+                    {"kind": "asis" if kind == flow.ASIS else "solution", "scenarios": [scenario]},
+                )
             else:
                 old = self.cards(kind, sid)
                 if old:
-                    self._human([{"op": "delete_card", "id": c["id"]} for c in old], "Диаграмма убрана: строить не из чего")
+                    self._human(
+                        [{"op": "delete_card", "id": c["id"]} for c in old],
+                        "Диаграмма убрана: строить не из чего",
+                    )
 
     # ------------------------------------------------------------------ автопилот
 
@@ -1219,7 +1756,11 @@ class Project:
         self._touch()
 
     def _boundary_records(self) -> list[dict]:
-        return [r for r in self.records("requirement") if str((r["data"] or {}).get("text", "")).startswith(flow.BOUNDARY)]
+        return [
+            r
+            for r in self.records("requirement")
+            if str((r["data"] or {}).get("text", "")).startswith(flow.BOUNDARY)
+        ]
 
     def _bounds(self, run: Run) -> None:
         """Сильная модель по одному задаёт закрытые вопросы о границах, пока они не станут понятны (не больше предела); ответы — в банке."""
@@ -1233,7 +1774,16 @@ class Project:
             self.tokens[token] = ctx
             run.answered.clear()
             try:
-                result = self._request(self.settings.data["autopilot"], "autopilot", tools.BOUNDS_RULES, note, token, session, False, run)
+                result = self._request(
+                    self.settings.data["autopilot"],
+                    "autopilot",
+                    tools.BOUNDS_RULES,
+                    note,
+                    token,
+                    session,
+                    False,
+                    run,
+                )
             finally:
                 self.tokens.pop(token, None)
             if run.stop:
@@ -1246,7 +1796,10 @@ class Project:
             if not ctx["asked"]:
                 idle += 1
                 if idle >= 2:
-                    raise EngineError("no_decision", "Автопилот не задал вопроса и не завершил уточнение границ. Повторите")
+                    raise EngineError(
+                        "no_decision",
+                        "Автопилот не задал вопроса и не завершил уточнение границ. Повторите",
+                    )
                 continue
             idle = 0
             run.status = "asking"
@@ -1262,7 +1815,9 @@ class Project:
             run.question = None
             run.done = len(qa)
 
-    def _pilot_decide(self, run: Run, what: str, items: list[dict], rule: str, improve: bool = False) -> tuple[set[str], set[str]]:
+    def _pilot_decide(
+        self, run: Run, what: str, items: list[dict], rule: str, improve: bool = False
+    ) -> tuple[set[str], set[str]]:
         """Сильная модель выбирает, что принять из предложенного (и, в режиме улучшения, что убрать из принятого)."""
         if not items:
             return set(), set()
@@ -1271,7 +1826,16 @@ class Project:
         ctx = {"kind": "pilot", "run": run, "note": note, "decision": None}
         self.tokens[token] = ctx
         try:
-            result = self._request(self.settings.data["autopilot"], "autopilot", tools.PILOT_RULES, note, token, "", False, run)
+            result = self._request(
+                self.settings.data["autopilot"],
+                "autopilot",
+                tools.PILOT_RULES,
+                note,
+                token,
+                "",
+                False,
+                run,
+            )
         finally:
             self.tokens.pop(token, None)
         if run.stop:
@@ -1279,20 +1843,37 @@ class Project:
         if result.error:
             raise EngineError("agent_error", result.error)
         if ctx["decision"] is None:
-            raise EngineError("no_decision", f"Автопилот не принял решения ({what}). Попробуйте ещё раз")
+            raise EngineError(
+                "no_decision", f"Автопилот не принял решения ({what}). Попробуйте ещё раз"
+            )
         fresh = {i["id"] for i in items if not i.get("have")}
         have = {i["id"] for i in items if i.get("have")}
         accept = {a for a in ctx["decision"]["accept"] if a in fresh}
         remove = {a for a in ctx["decision"]["remove"] if a in have} if improve else set()
-        run.notes.append(f"{what}: принято {len(accept)} из {len(fresh)}" + (f", убрано {len(remove)}" if remove else "")
-                         + (f" — {ctx['decision']['reason']}" if ctx["decision"]["reason"] else ""))
+        run.notes.append(
+            f"{what}: принято {len(accept)} из {len(fresh)}"
+            + (f", убрано {len(remove)}" if remove else "")
+            + (f" — {ctx['decision']['reason']}" if ctx["decision"]["reason"] else "")
+        )
         return accept, remove
-    def _decide_cards(self, run: Run, what: str, kind: str, parent: str | None, rule: str, review_existing: bool = False) -> None:
+
+    def _decide_cards(
+        self,
+        run: Run,
+        what: str,
+        kind: str,
+        parent: str | None,
+        rule: str,
+        review_existing: bool = False,
+    ) -> None:
         """Предложенное принимается или отклоняется; в режиме улучшения заодно убирается слабое из уже принятого."""
         cards = self.cards(kind, parent)
         pending = [c for c in cards if c["status"] == PROPOSED]
         existing = [c for c in cards if c["status"] == ACCEPTED] if review_existing else []
-        items = [{"id": c["id"], "title": c["title"], "body": c["body"], "have": c in existing} for c in existing + pending]
+        items = [
+            {"id": c["id"], "title": c["title"], "body": c["body"], "have": c in existing}
+            for c in existing + pending
+        ]
         accept, remove = self._pilot_decide(run, what, items, rule, review_existing)
         if run.stop:
             return
@@ -1303,47 +1884,76 @@ class Project:
                 self.do_remove({"id": c["id"]})
         self._touch()
 
-    def _step_cards(self, run: Run, label: str, kind: str, parent: str | None, rule: str, generate) -> None:
+    def _step_cards(
+        self, run: Run, label: str, kind: str, parent: str | None, rule: str, generate
+    ) -> None:
         """Один шаг цепочки в трёх режимах: нет — строим; есть — доводим до согласования; режим улучшения — ещё и дополняем."""
         cards = self.cards(kind, parent)
         have = [c for c in cards if c["status"] == ACCEPTED]
         pending = [c for c in cards if c["status"] == PROPOSED]
         if run.improve and have:
-            self._decide_cards(run, label, kind, parent, rule, review_existing=True)    # оценить то, что есть
+            self._decide_cards(
+                run, label, kind, parent, rule, review_existing=True
+            )  # оценить то, что есть
             if run.stop:
                 return
-            generate()                                                                  # дополнить недостающим
+            generate()  # дополнить недостающим
             if run.stop:
                 return
             self._decide_cards(run, label, kind, parent, rule)
         else:
             if not have and not pending:
-                generate()                                                              # ничего нет — строим
+                generate()  # ничего нет — строим
                 if run.stop:
                     return
-            self._decide_cards(run, label, kind, parent, rule)                          # доводим до согласования
+            self._decide_cards(run, label, kind, parent, rule)  # доводим до согласования
 
     def _survey(self) -> str:
         """Что уже есть в проекте: по этому автопилот выбирает режим."""
         cards = self.store.snapshot()["cards"]
 
         def count(kind):
-            return [sum(1 for c in cards if c["kind"] == kind and c["status"] == ACCEPTED),
-                    sum(1 for c in cards if c["kind"] == kind and c["status"] == PROPOSED)]
+            return [
+                sum(1 for c in cards if c["kind"] == kind and c["status"] == ACCEPTED),
+                sum(1 for c in cards if c["kind"] == kind and c["status"] == PROPOSED),
+            ]
 
         comps = self.records("competitor")
-        parts = [("конкуренты", [sum(1 for r in comps if r["data"].get("state") == "accepted"),
-                                 sum(1 for r in comps if r["data"].get("state") == "proposed")]),
-                 ("факты", [len(self.records("fact")), 0])] + [(n, count(k)) for n, k in (
-                     ("роли", flow.ROLE), ("сценарии", flow.SCENARIO), ("проблемы", flow.PROBLEM), ("варианты", flow.VARIANT),
-                     ("«как есть»", flow.ASIS), ("«решение»", flow.SOLUTION))]
-        found = [f"{n}: {a} принято" + (f", {p} ждёт решения" if p else "") for n, (a, p) in parts if a or p]
+        parts = [
+            (
+                "конкуренты",
+                [
+                    sum(1 for r in comps if r["data"].get("state") == "accepted"),
+                    sum(1 for r in comps if r["data"].get("state") == "proposed"),
+                ],
+            ),
+            ("факты", [len(self.records("fact")), 0]),
+        ] + [
+            (n, count(k))
+            for n, k in (
+                ("роли", flow.ROLE),
+                ("сценарии", flow.SCENARIO),
+                ("проблемы", flow.PROBLEM),
+                ("варианты", flow.VARIANT),
+                ("«как есть»", flow.ASIS),
+                ("«решение»", flow.SOLUTION),
+            )
+        ]
+        found = [
+            f"{n}: {a} принято" + (f", {p} ждёт решения" if p else "")
+            for n, (a, p) in parts
+            if a or p
+        ]
         return "; ".join(found)
 
     def _job_autopilot(self, run: Run) -> None:
         self.need_sphere()
         survey = self._survey()
-        mode = "построить" if not survey else ("улучшить" if run.improve else "довести до согласования")
+        mode = (
+            "построить"
+            if not survey
+            else ("улучшить" if run.improve else "довести до согласования")
+        )
         run.improve = run.improve and bool(survey)
         run.notes.append(f"Уже есть: {survey or 'ничего'}. Режим: {mode}")
         if not self._boundary_records():
@@ -1367,16 +1977,26 @@ class Project:
         if self._roles_locked() and not run.improve:
             run.notes.append("Список ролей подтверждён вами: автопилот его не меняет")
         else:
-            self._pilot_roles(run)                                    # единый список имён определяется до сценариев и диаграмм
+            self._pilot_roles(run)  # единый список имён определяется до сценариев и диаграмм
             if run.stop:
                 return
         if not run.each:
             self._stage(run, "сценарии")
-            self._step_cards(run, "сценарии", flow.SCENARIO, None, SCENARIO_RULE, lambda: self._job_global(run, "scenarios"))
+            self._step_cards(
+                run,
+                "сценарии",
+                flow.SCENARIO,
+                None,
+                SCENARIO_RULE,
+                lambda: self._job_global(run, "scenarios"),
+            )
             if run.stop:
                 return
             if not self._accepted_all(flow.SCENARIO):
-                raise EngineError("pilot_stuck", "Автопилот не принял ни одной карточки «сценарии»: добавьте свои или повторите")
+                raise EngineError(
+                    "pilot_stuck",
+                    "Автопилот не принял ни одной карточки «сценарии»: добавьте свои или повторите",
+                )
         if run.each:
             count = self._each_scenario(run)
             if not run.stop:
@@ -1392,26 +2012,43 @@ class Project:
 
     def _pilot_roles(self, run: Run) -> None:
         """Шаг «роли» автопилота: единый список ролей и компонентов; по его итогам список считается подтверждённым и дальше не меняется."""
-        self._set_confirmed(False)                                    # пока идёт шаг, список открыт
+        self._set_confirmed(False)  # пока идёт шаг, список открыт
         self._stage(run, "роли")
-        self._step_cards(run, "роли", flow.ROLE, None,
-                         "Принимай полный строгий список имён: люди, внешние системы, разрешённые границами, и компоненты системы (минимум один). "
-                         "Ничего лишнего, что границы не требуют.", lambda: self._job_global(run, "roles"))
+        self._step_cards(
+            run,
+            "роли",
+            flow.ROLE,
+            None,
+            "Принимай полный строгий список имён: люди, внешние системы, разрешённые границами, и компоненты системы (минимум один). "
+            "Ничего лишнего, что границы не требуют.",
+            lambda: self._job_global(run, "roles"),
+        )
         if run.stop:
             return
         if not self._accepted_all(flow.ROLE):
-            raise EngineError("pilot_stuck", "Автопилот не принял ни одной карточки «роли»: добавьте свои или повторите")
+            raise EngineError(
+                "pilot_stuck",
+                "Автопилот не принял ни одной карточки «роли»: добавьте свои или повторите",
+            )
         if not self._components():
             self._stage(run, "компоненты системы")
             self._job_global(run, "roles")
             if run.stop:
                 return
-            self._decide_cards(run, "роли и компоненты", flow.ROLE, None,
-                               "Принимай компоненты системы (Сайт, Админка…) и недостающие роли строго по границам; минимум один компонент.")
+            self._decide_cards(
+                run,
+                "роли и компоненты",
+                flow.ROLE,
+                None,
+                "Принимай компоненты системы (Сайт, Админка…) и недостающие роли строго по границам; минимум один компонент.",
+            )
             if run.stop:
                 return
             if not self._components():
-                raise EngineError("pilot_stuck", "Автопилот не определил компоненты системы. Добавьте их на шаге «Роли» вручную")
+                raise EngineError(
+                    "pilot_stuck",
+                    "Автопилот не определил компоненты системы. Добавьте их на шаге «Роли» вручную",
+                )
         self._set_confirmed(True)
 
     def _each_scenario(self, run: Run) -> int:
@@ -1420,7 +2057,9 @@ class Project:
         self._stage(run, "сценарии")
         cards = self.cards(flow.SCENARIO)
         if any(c["status"] == PROPOSED for c in cards) or (run.improve and cards):
-            self._decide_cards(run, "сценарии", flow.SCENARIO, None, SCENARIO_RULE, review_existing=run.improve)
+            self._decide_cards(
+                run, "сценарии", flow.SCENARIO, None, SCENARIO_RULE, review_existing=run.improve
+            )
             if run.stop:
                 return 0
         built, misses = set(), 0
@@ -1430,7 +2069,9 @@ class Project:
                 scenario = waiting[0]
             else:
                 if len(built) >= flow.SCENARIO_CAP:
-                    run.notes.append(f"Достигнут предел {flow.SCENARIO_CAP} сценариев за один прогон")
+                    run.notes.append(
+                        f"Достигнут предел {flow.SCENARIO_CAP} сценариев за один прогон"
+                    )
                     break
                 state, scenario = self._next_scenario(run)
                 if state == "enough":
@@ -1438,7 +2079,9 @@ class Project:
                 if state == "rejected":
                     misses += 1
                     if misses >= 2:
-                        run.notes.append("Два предложенных сценария подряд отклонены: считаю, что основное покрыто")
+                        run.notes.append(
+                            "Два предложенных сценария подряд отклонены: считаю, что основное покрыто"
+                        )
                         break
                     continue
                 misses = 0
@@ -1447,16 +2090,26 @@ class Project:
             run.done = len(built)
             self._touch()
         if not self._accepted_all(flow.SCENARIO):
-            raise EngineError("pilot_stuck", "Автопилот не принял ни одного сценария: добавьте свои или повторите")
+            raise EngineError(
+                "pilot_stuck", "Автопилот не принял ни одного сценария: добавьте свои или повторите"
+            )
         return len(built)
 
     def _next_scenario(self, run: Run) -> tuple[str, dict | None]:
         """Агент предлагает один следующий сценарий (или говорит «хватит»), автопилот принимает или отклоняет его."""
         self._stage(run, "следующий сценарий")
         known = [c["id"] for c in self.cards(flow.SCENARIO)]
-        roles = [c["title"] for c in self._accepted_all(flow.ROLE) if self._role_type(c) != flow.COMPONENT_TYPE]
-        note = flow.next_scenario(self.knowledge(), roles, [c["title"] for c in self._accepted_all(flow.SCENARIO)],
-                                  self.rejected(flow.SCENARIO))
+        roles = [
+            c["title"]
+            for c in self._accepted_all(flow.ROLE)
+            if self._role_type(c) != flow.COMPONENT_TYPE
+        ]
+        note = flow.next_scenario(
+            self.knowledge(),
+            roles,
+            [c["title"] for c in self._accepted_all(flow.SCENARIO)],
+            self.rejected(flow.SCENARIO),
+        )
         self._converse(run, note, {flow.SCENARIO}, "", limit=1)
         if run.stop:
             return "stop", None
@@ -1466,19 +2119,36 @@ class Project:
         self._decide_cards(run, "сценарий", flow.SCENARIO, None, SCENARIO_RULE)
         if run.stop:
             return "stop", None
-        taken = [c for c in self._accepted_all(flow.SCENARIO) if c["id"] in {f["id"] for f in fresh}]
+        taken = [
+            c for c in self._accepted_all(flow.SCENARIO) if c["id"] in {f["id"] for f in fresh}
+        ]
         return ("accepted", taken[0]) if taken else ("rejected", None)
 
     def _pilot_competitors(self, run: Run) -> None:
         def decide(review_existing: bool) -> None:
             comps = self.records("competitor")
             pending = [r for r in comps if r["data"].get("state") == "proposed"]
-            existing = [r for r in comps if r["data"].get("state") == "accepted"] if review_existing else []
-            items = [{"id": r["id"], "title": r["data"].get("name", ""), "have": r in existing,
-                      "body": f"{r['data'].get('url', '')} {r['data'].get('why', '')}"} for r in existing + pending]
+            existing = (
+                [r for r in comps if r["data"].get("state") == "accepted"]
+                if review_existing
+                else []
+            )
+            items = [
+                {
+                    "id": r["id"],
+                    "title": r["data"].get("name", ""),
+                    "have": r in existing,
+                    "body": f"{r['data'].get('url', '')} {r['data'].get('why', '')}",
+                }
+                for r in existing + pending
+            ]
             accept, remove = self._pilot_decide(
-                run, "конкуренты", items,
-                "Принимай только сайты настоящих бизнесов этой сферы: не конструкторы сайтов, не гиганты, не агрегаторы.", review_existing)
+                run,
+                "конкуренты",
+                items,
+                "Принимай только сайты настоящих бизнесов этой сферы: не конструкторы сайтов, не гиганты, не агрегаторы.",
+                review_existing,
+            )
             if run.stop:
                 return
             for r in pending:
@@ -1507,7 +2177,10 @@ class Project:
                     return
             decide(False)
         if not run.stop and not self.accepted_competitors():
-            raise EngineError("pilot_stuck", "Автопилот не принял ни одного конкурента: добавьте своих или повторите")
+            raise EngineError(
+                "pilot_stuck",
+                "Автопилот не принял ни одного конкурента: добавьте своих или повторите",
+            )
 
     def _accepted_all(self, kind: str) -> list[dict]:
         return [c for c in self.cards(kind) if c["status"] == ACCEPTED]
@@ -1515,32 +2188,49 @@ class Project:
     def _scenario_pilot(self, run: Run, scenario: dict, label: str) -> None:
         sid = scenario["id"]
         self._stage(run, f"проблемы, сценарий {label}")
-        self._step_cards(run, "проблемы", flow.PROBLEM, sid,
-                         "Принимай существенные проблемы, которые стоит автоматизировать и которые в границах системы.",
-                         lambda: self._job_scenarios(run, {"kind": "problems", "scenarios": [scenario]}))
+        self._step_cards(
+            run,
+            "проблемы",
+            flow.PROBLEM,
+            sid,
+            "Принимай существенные проблемы, которые стоит автоматизировать и которые в границах системы.",
+            lambda: self._job_scenarios(run, {"kind": "problems", "scenarios": [scenario]}),
+        )
         if run.stop:
             return
         if not self._accepted(flow.PROBLEM, sid):
             run.notes.append(f"Сценарий «{scenario['title']}»: проблем не принято, пропущен")
             return
-        if run.improve or not self.cards(flow.ASIS, sid):          # в режиме улучшения диаграмма перестраивается по обновлённым проблемам
+        if run.improve or not self.cards(
+            flow.ASIS, sid
+        ):  # в режиме улучшения диаграмма перестраивается по обновлённым проблемам
             self._stage(run, f"«как есть», сценарий {label}")
             self._job_scenarios(run, {"kind": "asis", "scenarios": [scenario]})
             if run.stop:
                 return
         self._stage(run, f"варианты решения, сценарий {label}")
-        unsolved = [p for p in self._accepted(flow.PROBLEM, sid) if not self._accepted(flow.VARIANT, p["id"])]
+        unsolved = [
+            p
+            for p in self._accepted(flow.PROBLEM, sid)
+            if not self._accepted(flow.VARIANT, p["id"])
+        ]
         fresh = [p for p in unsolved if not self.cards(flow.VARIANT, p["id"])]
         if fresh:
             self._job_variants(run, {"problems": fresh})
             if run.stop:
                 return
         for problem in unsolved:
-            pending = [c for c in self.cards(flow.VARIANT, problem["id"]) if c["status"] == PROPOSED]
+            pending = [
+                c for c in self.cards(flow.VARIANT, problem["id"]) if c["status"] == PROPOSED
+            ]
             items = [{"id": c["id"], "title": c["title"], "body": c["body"]} for c in pending]
-            accept, _ = self._pilot_decide(run, f"решение проблемы «{problem['title']}»", items,
-                                           "Выбери не более ОДНОГО варианта, который лучше всего решает проблему в границах системы; "
-                                           "если ни один не подходит — оставь accept пустым.")
+            accept, _ = self._pilot_decide(
+                run,
+                f"решение проблемы «{problem['title']}»",
+                items,
+                "Выбери не более ОДНОГО варианта, который лучше всего решает проблему в границах системы; "
+                "если ни один не подходит — оставь accept пустым.",
+            )
             if run.stop:
                 return
             chosen = next((c for c in pending if c["id"] in accept), None)
@@ -1549,15 +2239,23 @@ class Project:
             else:
                 for c in pending:
                     self.do_remove({"id": c["id"]})
-        dropped = [p for p in self._accepted(flow.PROBLEM, sid) if not self._accepted(flow.VARIANT, p["id"])]
-        for problem in dropped:                                   # без подходящего решения проблема не остаётся висеть в графе
+        dropped = [
+            p
+            for p in self._accepted(flow.PROBLEM, sid)
+            if not self._accepted(flow.VARIANT, p["id"])
+        ]
+        for problem in dropped:  # без подходящего решения проблема не остаётся висеть в графе
             self.do_remove({"id": problem["id"]})
-            run.notes.append(f"Проблема «{problem['title']}» убрана: подходящего решения в границах нет")
-        if dropped:                                               # «как есть» должна совпадать с оставшимися проблемами
+            run.notes.append(
+                f"Проблема «{problem['title']}» убрана: подходящего решения в границах нет"
+            )
+        if dropped:  # «как есть» должна совпадать с оставшимися проблемами
             if self._accepted(flow.PROBLEM, sid):
                 self._job_scenarios(run, {"kind": "asis", "scenarios": [scenario]})
             else:
-                self._human([{"op": "delete_card", "id": c["id"]} for c in self.cards(flow.ASIS, sid)])
+                self._human(
+                    [{"op": "delete_card", "id": c["id"]} for c in self.cards(flow.ASIS, sid)]
+                )
             if run.stop:
                 return
         if self._solved(sid) and (run.improve or not self.cards(flow.SOLUTION, sid)):

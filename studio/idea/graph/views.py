@@ -57,7 +57,7 @@ def detail_cycles(store: Store) -> list[list[str]]:
         path.append(node)
         for parent in parents.get(node, []):
             if state.get(parent) == 1:
-                cycles.append(path[path.index(parent):] + [parent])
+                cycles.append(path[path.index(parent) :] + [parent])
             elif parent not in state:
                 walk(parent, path)
         path.pop()
@@ -114,7 +114,9 @@ def outline(store: Store) -> str:
     """Оглавление графа: дерево по связям «детализирует», затем остальные связи."""
     with store.lock:
         children = children_of(store)
-        lines = [f"Граф проекта «{store.title}» · ревизия {store.revision} · карточек {len(store.cards)}"]
+        lines = [
+            f"Граф проекта «{store.title}» · ревизия {store.revision} · карточек {len(store.cards)}"
+        ]
         shown: set[str] = set()
 
         def walk(card_id: str, depth: int) -> None:
@@ -129,7 +131,7 @@ def outline(store: Store) -> str:
 
         parents = parents_of(store)
         for card_id in sorted(store.cards, key=lambda c: int(c[1:])):
-            if not parents.get(card_id):        # верхний уровень: карточки без родителя
+            if not parents.get(card_id):  # верхний уровень: карточки без родителя
                 walk(card_id, 0)
         rest = [c for c in sorted(store.cards, key=lambda c: int(c[1:])) if c not in shown]
         if rest:
@@ -160,8 +162,14 @@ def card_view(store: Store, card_id: str) -> str:
             for index, option in enumerate(decision.get("options") or [], 1):
                 lines.append(f"  вариант {index}: {option}")
             chosen = decision.get("chosen") or {}
-            lines.append("  выбрано: " + ("все варианты отклонены" if chosen.get("type") == "rejected"
-                                           else str(chosen.get("value", ""))))
+            lines.append(
+                "  выбрано: "
+                + (
+                    "все варианты отклонены"
+                    if chosen.get("type") == "rejected"
+                    else str(chosen.get("value", ""))
+                )
+            )
             if decision.get("rationale"):
                 lines.append("  обоснование: " + str(decision["rationale"]))
         if card.get("attrs"):
@@ -171,7 +179,10 @@ def card_view(store: Store, card_id: str) -> str:
             lines.append("Связи:")
             for item in near:
                 arrow = "→" if item["direction"] == "out" else "←"
-                lines.append(f"  {item['edge']['id']} {arrow} {item['edge']['kind']}: {card_line(item['card'])}")
+                lines.append(
+                    f"  {item['edge']['id']} {arrow} {item['edge']['kind']}: "
+                    f"{card_line(item['card'])}"
+                )
         lines.append(f"От этой карточки зависит карточек: {len(dependents(store, card_id))}")
         return "\n".join(lines)
 
@@ -184,7 +195,9 @@ def _card_change(before: dict | None, after: dict | None) -> str:
     parts = []
     for field, label in (("title", "заголовок"), ("kind", "вид"), ("status", "статус")):
         if before.get(field) != after.get(field):
-            value = STATUS_NAMES.get(after[field], after[field]) if field == "status" else after[field]
+            value = (
+                STATUS_NAMES.get(after[field], after[field]) if field == "status" else after[field]
+            )
             parts.append(f"{label} → «{value}»")
     if before.get("body") != after.get("body"):
         parts.append("текст → «" + " ".join((after.get("body") or "").split())[:BODY_PREVIEW] + "»")
@@ -192,7 +205,9 @@ def _card_change(before: dict | None, after: dict | None) -> str:
         parts.append("решение изменено")
     if before.get("attrs") != after.get("attrs"):
         parts.append("доп. поля изменены")
-    return f"изменена [{after['id']}] {after['title']}: " + "; ".join(parts or ["без видимых отличий"])
+    return f"изменена [{after['id']}] {after['title']}: " + "; ".join(
+        parts or ["без видимых отличий"]
+    )
 
 
 def changes_text(store: Store, revision: int, exclude_author: str | None = None) -> str:
@@ -204,12 +219,19 @@ def changes_text(store: Store, revision: int, exclude_author: str | None = None)
         if item["type"] == "card":
             lines.append(f"- {_card_change(before, after)} ({who})")
         elif before is None:
-            lines.append(f"- добавлена связь {after['id']}: {after['from']} —{after['kind']}→ {after['to']} ({who})")
+            lines.append(
+                f"- добавлена связь {after['id']}: "
+                f"{after['from']} —{after['kind']}→ {after['to']} ({who})"
+            )
         elif after is None:
-            lines.append(f"- удалена связь {before['id']}: {before['from']} —{before['kind']}→ {before['to']} ({who})")
+            lines.append(
+                f"- удалена связь {before['id']}: "
+                f"{before['from']} —{before['kind']}→ {before['to']} ({who})"
+            )
         else:
             lines.append(
-                f"- изменена связь {after['id']}: теперь {after['from']} —{after['kind']}→ {after['to']} ({who})"
+                f"- изменена связь {after['id']}: "
+                f"теперь {after['from']} —{after['kind']}→ {after['to']} ({who})"
             )
     return "\n".join(lines)
 

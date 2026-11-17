@@ -5,7 +5,8 @@
     {"type": "sequence",
      "participants": ["Пациент", "Регистратура"],
      "steps": [{"from": "Пациент", "to": "Регистратура", "text": "Звонит и просит запись",
-                "pain": {"what": "Не дозвониться", "often": "часто", "cost": "20 минут", "importance": "высокая"},
+                "pain": {"what": "Не дозвониться", "often": "часто", "cost": "20 минут",
+                         "importance": "высокая"},
                 "mark": ""}]}
 
 ``pain`` — боль на шаге (необязательно, только в «как есть»); ``mark`` — отличие в «как будет»:
@@ -35,15 +36,19 @@ def _text(value, limit: int) -> str:
 def _pain(raw) -> dict | None:
     if not isinstance(raw, dict):
         return None
-    pain = {"what": _text(raw.get("what"), 200), "often": _text(raw.get("often"), 80),
-            "cost": _text(raw.get("cost"), 120), "importance": _text(raw.get("importance"), 20).lower()}
+    pain = {
+        "what": _text(raw.get("what"), 200),
+        "often": _text(raw.get("often"), 80),
+        "cost": _text(raw.get("cost"), 120),
+        "importance": _text(raw.get("importance"), 20).lower(),
+    }
     if pain["importance"] not in IMPORTANCE:
         pain["importance"] = ""
     return pain if any(pain.values()) else None
 
 
 def normalize(raw) -> dict:
-    """Привести диаграмму к чистому виду; участники, которых не было в списке, добавляются по шагам."""
+    """Привести диаграмму к чистому виду; недостающие участники добавляются по шагам."""
     if not isinstance(raw, dict):
         raise ValueError("диаграмма должна быть объектом")
     participants: list[str] = []
@@ -55,7 +60,11 @@ def normalize(raw) -> dict:
     for item in (raw.get("steps") or [])[:MAX_STEPS]:
         if not isinstance(item, dict):
             continue
-        source, target, text = _text(item.get("from"), 60), _text(item.get("to"), 60), _text(item.get("text"), 300)
+        source, target, text = (
+            _text(item.get("from"), 60),
+            _text(item.get("to"), 60),
+            _text(item.get("text"), 300),
+        )
         if not (source and target and text):
             continue
         for name in (source, target):
@@ -69,7 +78,7 @@ def normalize(raw) -> dict:
         step["mark"] = mark if mark in MARKS else ""
         by = _text(item.get("by"), 200)
         if by and step["mark"]:
-            step["by"] = by                                   # какое выбранное решение вводит этот шаг («решение»)
+            step["by"] = by  # какое выбранное решение вводит этот шаг («решение»)
         steps.append(step)
     if len(participants) > MAX_PARTICIPANTS:
         raise ValueError(f"участников не больше {MAX_PARTICIPANTS}")
@@ -92,7 +101,9 @@ def problems(raw) -> list[str]:
         if isinstance(step, dict):
             for name in (_text(step.get("from"), 60), _text(step.get("to"), 60)):
                 if name and declared and name not in declared:
-                    out.append(f"участник «{name}» есть в шагах, но не объявлен в списке участников")
+                    out.append(
+                        f"участник «{name}» есть в шагах, но не объявлен в списке участников"
+                    )
     return list(dict.fromkeys(out))
 
 
@@ -100,7 +111,8 @@ def parse_text(text: str) -> dict:
     """Разобрать текст шагов «кто → кому: что» в диаграмму.
 
     Строка: ``[N.] [знак] Кто → Кому: что происходит [боль: что | как часто | цена | важность]``;
-    знак отличия: ``+`` новый, ``~`` изменён, ``*`` автоматизирован, ``-`` убран. Пустые и непонятные строки пропускаются.
+    знак отличия: ``+`` новый, ``~`` изменён, ``*`` автоматизирован, ``-`` убран.
+    Пустые и непонятные строки пропускаются.
     """
     steps = []
     for line in str(text or "").splitlines():
@@ -108,15 +120,17 @@ def parse_text(text: str) -> dict:
         if not line:
             continue
         mark = ""
-        if line[0] in MARK_SIGNS and (len(line) > 1 and line[1] in " \t" or not line[1:2].isalnum()):
+        if line[0] in MARK_SIGNS and (
+            len(line) > 1 and line[1] in " \t" or not line[1:2].isalnum()
+        ):
             mark, line = MARK_SIGNS[line[0]], line[1:].strip()
         pain, by = None, ""
         made = BY.search(line)
         if made:
-            line, by = line[:made.start()].strip(), made.group(1).strip()
+            line, by = line[: made.start()].strip(), made.group(1).strip()
         found = PAIN.search(line)
         if found:
-            line = line[:found.start()].strip()
+            line = line[: found.start()].strip()
             parts = [p.strip() for p in found.group(1).split("|")] + ["", "", "", ""]
             pain = {"what": parts[0], "often": parts[1], "cost": parts[2], "importance": parts[3]}
         head, _, text_part = line.partition(":")
@@ -135,10 +149,15 @@ def to_text(diagram: dict) -> str:
     lines = []
     for number, step in enumerate(normalize(diagram)["steps"], 1):
         sign = SIGN_OF.get(step.get("mark", ""), "")
-        line = f"{number}. {sign + ' ' if sign else ''}{step['from']} → {step['to']}: {step['text']}"
+        line = (
+            f"{number}. {sign + ' ' if sign else ''}{step['from']} → {step['to']}: {step['text']}"
+        )
         pain = step.get("pain")
         if pain:
-            line += f" [боль: {pain.get('what', '')} | {pain.get('often', '')} | {pain.get('cost', '')} | {pain.get('importance', '')}]"
+            line += (
+                f" [боль: {pain.get('what', '')} | {pain.get('often', '')} | "
+                f"{pain.get('cost', '')} | {pain.get('importance', '')}]"
+            )
         if step.get("by"):
             line += f" [решение: {step['by']}]"
         lines.append(line)
@@ -163,10 +182,11 @@ def to_mermaid(diagram: dict) -> str:
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------- диаграмма вариантов использования (UML)
+# ------------------------------------------------ диаграмма вариантов использования (UML)
+
 
 def normalize_usecase(raw) -> dict:
-    """Диаграмма вариантов использования: граница системы, варианты использования и актёры при каждом.
+    """Диаграмма вариантов использования: граница системы, варианты и актёры при каждом.
 
     ``{"system": "Запись к врачу", "cases": [{"name": "Выбрать время", "actors": ["Пациент"]}]}``
     """

@@ -8,14 +8,14 @@ from __future__ import annotations
 
 from .errors import GraphError
 
-DETAIL = "детализирует"       # связь «потомок детализирует родителя»: из неё строится дерево
+DETAIL = "детализирует"  # связь «потомок детализирует родителя»: из неё строится дерево
 
-PROPOSED = "proposed"         # «предложена» — ждёт решения человека
-ACCEPTED = "accepted"         # «принята»
+PROPOSED = "proposed"  # «предложена» — ждёт решения человека
+ACCEPTED = "accepted"  # «принята»
 STATUSES = (PROPOSED, ACCEPTED)
 STATUS_NAMES = {PROPOSED: "предложена", ACCEPTED: "принята"}
 
-HUMAN = "human"               # автор-человек; все остальные авторы — пакеты и решатели
+HUMAN = "human"  # автор-человек; все остальные авторы — пакеты и решатели
 
 CARD_FIELDS = ("kind", "title", "body", "status", "decision", "attrs")
 EDGE_FIELDS = ("from", "to", "kind")

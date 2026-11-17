@@ -4,10 +4,10 @@ import time
 
 import pytest
 
-from studio.idea.graph import Store
 from studio.idea import Adapters, Project, Settings
 from studio.idea.agents import Adapter, TurnResult
 from studio.idea.errors import EngineError
+from studio.idea.graph import Store
 
 
 class ScriptAdapter(Adapter):

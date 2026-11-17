@@ -1,7 +1,7 @@
 """Список ролей: ручная правка, подтверждение, защита подтверждённого списка от агентов."""
 
 import pytest
-from idea_helpers import wait
+from idea_helpers import make, wait  # noqa: F401
 from test_idea_check import build_state
 from test_idea_flow import answer_bounds, kinds, script
 
@@ -129,7 +129,9 @@ def test_autopilot_does_not_touch_confirmed_roles_but_improve_may(make):
     p.start("autopilot")
     assert answer_bounds(p).status == "done"
     assert p.roles_confirmed                                                            # итог шага «роли» автопилота — подтверждённый список
-    asked = lambda: sum("определить ВСЕ роли" in r.note for r in p.adapter.requests)
+    def asked():
+        return sum("определить ВСЕ роли" in r.note for r in p.adapter.requests)
+
     before = asked()
     p.start("autopilot")                                                                # довести до согласования: роли не трогает
     run = wait(p, ("done", "error", "stopped"))

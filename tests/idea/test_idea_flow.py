@@ -1,9 +1,10 @@
 """Цепочка целиком: исследователи, банк, роли, сценарии, проблемы, диаграммы, решение."""
 
 import re
+from pathlib import Path
 
 import pytest
-from idea_helpers import wait
+from idea_helpers import make, wait  # noqa: F401
 
 from studio.idea import flow
 from studio.idea.errors import EngineError
@@ -178,13 +179,13 @@ def test_whole_chain(make):
     wait(p)
     assert len(kinds(p, "решение")) == 1
     path = p.act("export_md", {})["path"]                                           # выгрузка документации в папку проекта
-    text = open(path, encoding="utf-8").read()
+    text = Path(path).read_text(encoding="utf-8")
     assert path.endswith("Документация.md")
     assert "Онлайн-запись" not in text                                              # находки анализа в документ не попадают
     for part in ("## 1. Сфера", "парикмахерская", "Нужна интеграция с 1С", "## 2. Конкуренты", "## 3. Роли", "### ", "Не дозвониться",
                  "Запись на сайте", "**Как есть", "Как будет (решение)", "| № | От кого | Кому |"):
         assert part in text, part
-    assert text == open(p.act("export_md", {})["path"], encoding="utf-8").read()    # повторная выгрузка даёт тот же файл
+    assert text == Path(p.act("export_md", {})["path"]).read_text(encoding="utf-8")    # повторная выгрузка даёт тот же файл
 
 
 def test_human_edits_and_cascades(make):
@@ -296,7 +297,9 @@ def test_autopilot_improve_may_remove_and_rebuild(make):
     p.start("autopilot")
     assert answer_bounds(p).status == "done"
     assert len(p.accepted_competitors()) == 2
-    builds = lambda: sum("диаграмму «решение»" in r.note for r in p.adapter.requests)
+    def builds():
+        return sum("диаграмму «решение»" in r.note for r in p.adapter.requests)
+
     before = builds()
     p.start("autopilot", redo=True)                                                          # без вопросов: границы уже есть
     run = wait(p, ("done", "error", "stopped"))

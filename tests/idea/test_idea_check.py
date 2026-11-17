@@ -1,8 +1,7 @@
 """Проверка согласованности перед выгрузкой: разногласия исправляются в графе по диалогу, документ — отражение графа."""
 
-import re
 
-from idea_helpers import wait
+from idea_helpers import make  # noqa: F401
 from test_idea_flow import ASIS, TOBE, kinds
 
 from studio.idea import check

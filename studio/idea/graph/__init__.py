@@ -1,5 +1,7 @@
 """Ядро графа идеи: карточки, связи, операции, журнал. Без интерфейса и без моделей."""
 
+from . import views
+from .bank import Bank, normalize_url
 from .errors import ConflictError, GraphError
 from .model import (
     ACCEPTED,
@@ -11,13 +13,24 @@ from .model import (
     author_name,
     is_human,
 )
-from .bank import Bank, normalize_url
 from .store import DIR_NAME, Store
-from . import views
 
 __version__ = "0.1.0"
 
 __all__ = [
-    "ACCEPTED", "DETAIL", "DIR_NAME", "HUMAN", "PROPOSED", "STATUSES", "STATUS_NAMES",
-    "Bank", "ConflictError", "GraphError", "Store", "normalize_url", "author_name", "is_human", "views",
+    "ACCEPTED",
+    "DETAIL",
+    "DIR_NAME",
+    "HUMAN",
+    "PROPOSED",
+    "STATUSES",
+    "STATUS_NAMES",
+    "Bank",
+    "ConflictError",
+    "GraphError",
+    "Store",
+    "normalize_url",
+    "author_name",
+    "is_human",
+    "views",
 ]
