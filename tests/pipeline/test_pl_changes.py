@@ -33,9 +33,7 @@ def test_accept_edit_makes_new_version_and_marks_stale_only_impact(tmp_path):
     r = accepted_idea(bank)
     other = bank.add("problem", "Другая проблема", parents=[r["boundary"]["id"]])
     bank.set_status([other["id"]], ACCEPTED)
-    req = changes.open(
-        "Уточнить", "human", patches={r["req"]["id"]: {"body": "в течение минуты"}}
-    )
+    req = changes.open("Уточнить", "human", patches={r["req"]["id"]: {"body": "в течение минуты"}})
     done = changes.decide(req["id"], "accept", "human", keep=[r["crit"]["id"]])
     assert done["status"] == "accepted"
     assert bank.get(r["req"]["id"])["attrs"]["version"] == 2
@@ -61,10 +59,14 @@ def test_reject_changes_nothing(tmp_path):
 def test_small_fix_is_a_quick_path(tmp_path):
     bank, settings, _, changes = make(tmp_path)
     r = accepted_idea(bank)
-    page = changes.open("Поправить подпись", "human", patches={r["page"]["id"]: {"title": "Запись!"}})
+    page = changes.open(
+        "Поправить подпись", "human", patches={r["page"]["id"]: {"title": "Запись!"}}
+    )
     assert page["size"] == "small"  # одна страница, без схемы, контракта и смысла
     settings.set_number("quick_fix_limit", 1)
-    assert changes.open("То же", "human", patches={r["page"]["id"]: {"body": "x"}})["size"] == "small"
+    assert (
+        changes.open("То же", "human", patches={r["page"]["id"]: {"body": "x"}})["size"] == "small"
+    )
 
 
 def test_new_feature_goes_to_stage_one_and_conflicts_are_caught(tmp_path):
@@ -76,9 +78,7 @@ def test_new_feature_goes_to_stage_one_and_conflicts_are_caught(tmp_path):
     done = changes.decide(req["id"], "accept", "human")
     new = bank.get(done["result"])
     assert new["status"] == PROPOSED and new["kind"] == "problem"  # проходит ворота как все
-    clash = changes.open(
-        "Дубль", "agent:analyst", new={**spec, "title": " нет НАПОМИНАНИЙ "}
-    )
+    clash = changes.open("Дубль", "agent:analyst", new={**spec, "title": " нет НАПОМИНАНИЙ "})
     assert clash["conflicts"]
     with pytest.raises(PipelineError) as err:
         changes.decide(clash["id"], "accept", "human")

@@ -19,7 +19,9 @@ def test_criteria_are_independent_per_gate_and_persist(tmp_path):
     settings.set_criterion("schema", "extensibility", threshold=9, enabled=True)
     settings.set_criterion("requirements", "clarity", enabled=False)
     again = PipelineSettings(tmp_path)
-    assert next(c for c in again.criteria("schema") if c["key"] == "extensibility")["threshold"] == 9
+    assert (
+        next(c for c in again.criteria("schema") if c["key"] == "extensibility")["threshold"] == 9
+    )
     assert [c["key"] for c in again.enabled_criteria("requirements")] == [
         "adequacy",
         "testability",

@@ -6,12 +6,15 @@
 
 from .bank import ProjectBank
 from .changes import ChangeLog
+from .engine import Pipeline
 from .errors import PipelineError
 from .gates import GATES, STAGE_GATES, gate, run_code_layer
 from .keeper import GateKeeper
 from .kinds import KINDS, SOURCE, STAGE_NAMES
 from .roles import ROLES
 from .settings import MODE_NAMES, MODES, PipelineSettings
+
+from . import stage1  # isort: skip  # noqa: E402
 
 __all__ = [
     "GATES",
@@ -25,8 +28,10 @@ __all__ = [
     "ChangeLog",
     "GateKeeper",
     "PipelineError",
+    "Pipeline",
     "PipelineSettings",
     "ProjectBank",
     "gate",
     "run_code_layer",
+    "stage1",
 ]

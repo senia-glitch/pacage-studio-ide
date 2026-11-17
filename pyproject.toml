@@ -89,3 +89,6 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 "studio/idea/check.py" = ["E501"]
 "studio/idea/rules.py" = ["E501"]
 "studio/idea/project.py" = ["E501"]
+# Конвейер: тексты подсказок ролям — перенос строк менял бы сами подсказки.
+"studio/pipeline/stage1.py" = ["E501"]
+"studio/pipeline/engine.py" = ["E501"]
