@@ -158,6 +158,12 @@ function modeSelect(state) {
   return h("label", {class: "pl-modebox"}, "Режим участия: ", select);
 }
 
+/* Открыть экран конвейера на нужной вкладке (например, «settings» — из «Настройки»). */
+export function showView(view) {
+  ctx.view = view;
+  if (ctx.host && ctx.state) draw();
+}
+
 export async function renderPipeline(host) {
   ctx.host = host;
   await ctx.refresh();

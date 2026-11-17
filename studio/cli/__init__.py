@@ -1,4 +1,4 @@
-"""CLI студии: dev, scan, list, brief, verify, doctor, chain, install-full, help."""
+"""CLI студии: dev, scan, list, test, doctor, migrate, install-full, help."""
 
 from __future__ import annotations
 
@@ -13,23 +13,9 @@ from pathlib import Path
 from studio import __version__, store
 from studio import log as slog
 from studio._constants import FASTBASE_FULL_SPEC
-from studio.agent import (
-    BriefError,
-    BriefNotFound,
-    BriefOptions,
-    build_brief,
-    load_brief,
-    render_report,
-    save_brief,
-    save_brief_sidecars,
-    verify_brief,
-)
-from studio.agent.report import build_report, save_report
-from studio.env import read_env
-from studio.frontend.brief import report_frontend
 from studio.scanner import scan
 from studio.server import PortInUse, serve
-from studio.source import load_sources, module_files, tests_files
+from studio.source import module_files, tests_files
 
 PROJECT_MARKERS = (".env.fastbase", "app", "models.py")
 
@@ -219,208 +205,6 @@ def cmd_list(args) -> int:
     return 0
 
 
-def _brief_options(args) -> BriefOptions:
-    raw_only = getattr(args, "only", None)
-    raw_plans = getattr(args, "plan", None)
-    raw_sections = getattr(args, "section", None)
-    return BriefOptions(
-        map_mode=str(getattr(args, "map", "") or ""),
-        only=tuple(str(item) for item in raw_only) if raw_only else None,
-        plans=tuple(str(item) for item in raw_plans) if raw_plans else None,
-        scenario=str(getattr(args, "scenario", "") or ""),
-        include_empty=bool(getattr(args, "include_empty", False)),
-        sections=tuple(str(item) for item in raw_sections) if raw_sections else None,
-    )
-
-
-def cmd_brief(args) -> int:
-    root, explicit = _find_root(args.project)
-    slog.start_run(root, "brief")
-    graph = scan(root)
-    try:
-        sources = load_sources(read_env(root))
-        brief = build_brief(graph, sources, _brief_options(args))
-    except BriefError as exc:
-        raise CliError(exc.message, 2 if exc.code == "plan_not_found" else 1) from exc
-
-    if getattr(args, "json", False):
-        try:
-            save_brief_sidecars(root, brief)
-        except BriefError as exc:
-            raise CliError(exc.message) from exc
-        print(
-            json.dumps(
-                {
-                    "root": root.as_posix(),
-                    "markdown": brief.markdown,
-                    "brief_id": brief.brief_id,
-                    "fingerprint": brief.fingerprint,
-                    "stats": brief.stats,
-                    "warnings": brief.warnings,
-                    "tasks": [
-                        {
-                            "number": item["number"],
-                            "kind": item.get("kind") or item.get("type", ""),
-                            "anchor": item.get("anchor")
-                            or item.get("slug")
-                            or item.get("title", ""),
-                            "target_file": item.get("target_file", ""),
-                        }
-                        for item in brief.tasks
-                    ],
-                    "unready": brief.unready,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-        return 0
-    if getattr(args, "stdout", False):
-        try:
-            save_brief_sidecars(root, brief)
-        except BriefError as exc:
-            raise CliError(exc.message) from exc
-        print(brief.markdown, end="")
-        return 0
-    target = Path(args.out) if getattr(args, "out", None) else None
-    try:
-        path = save_brief(root, brief, target)
-    except BriefError as exc:
-        raise CliError(exc.message) from exc
-    try:
-        shown = path.resolve().relative_to(root.resolve()).as_posix()
-    except (OSError, ValueError):
-        shown = path.as_posix()
-    _print_root(root, explicit)
-    print(f"ТЗ: {shown}")
-    print(
-        f"Задач: {brief.stats['tasks']} · не готово: {brief.stats['unready']} · "
-        f"{brief.stats['chars']} символов (~{brief.stats['approx_tokens']} токенов)"
-    )
-    print(
-        "ТЗ содержит фрагменты вашего кода и описания — перед отправкой "
-        "во внешний AI-сервис это решает пользователь."
-    )
-    for warning in brief.warnings:
-        print(f"  ! {warning}")
-    if brief.tasks:
-        print(
-            "Прочитай и выполни ТЗ из файла "
-            f"{shown}, следуй его правилам"
-        )
-    else:
-        print("Нет узлов к реализации")
-    for item in brief.unready:
-        print(
-            f"  не готово: {item['kind']} {item['anchor']} — {item['file']}: "
-            + ", ".join(item["missing"])
-        )
-    return 0
-
-
-def cmd_report(args) -> int:
-    """Отчёт по проекту: бэкенд (по графу) или фронтенд (по frontend/)."""
-    root, _explicit = _find_root(args.project)
-    slog.start_run(root, "report")
-    sections = list(args.section) or None
-    try:
-        if args.part == "frontend":
-            result = report_frontend(root, sections=sections)
-        else:
-            result = build_report(scan(root), sections=sections)
-            result["path"] = save_report(root, result["markdown"])
-    except ValueError as exc:
-        raise CliError(str(exc), 2) from exc
-    if args.json:
-        print(
-            json.dumps(
-                {
-                    "root": root.as_posix(),
-                    "part": args.part,
-                    "path": result["path"],
-                    "markdown": result["markdown"],
-                    "data": result["data"],
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-    elif args.stdout:
-        print(result["markdown"], end="")
-    else:
-        print(f"Отчёт сохранён: {result['path']}")
-    return 0
-
-
-def _cmd_verify_frontend(args, root, explicit, graph) -> int:
-    from studio.frontend.brief import load_front_brief
-    from studio.frontend.graph import build_front_graph
-    from studio.frontend.links import check_links
-    from studio.frontend.verify import render_front_report, verify_front_brief
-
-    try:
-        brief = load_front_brief(root, getattr(args, "brief", None))
-    except FileNotFoundError as exc:
-        raise CliError(str(exc), 2) from exc
-    front = build_front_graph(root)
-    links = check_links(front, graph, read_env(root).api_prefix)
-    report = verify_front_brief(front, brief, links)
-    if getattr(args, "json", False):
-        print(json.dumps(report, ensure_ascii=False, indent=2))
-        return int(report["code"])
-    _print_root(root, explicit)
-    print(render_front_report(report))
-    return int(report["code"])
-
-
-def cmd_verify(args) -> int:
-    root, explicit = _find_root(args.project)
-    slog.start_run(root, "verify")
-    graph = scan(root)
-    if getattr(args, "part", "backend") == "frontend":
-        return _cmd_verify_frontend(args, root, explicit, graph)
-    try:
-        data = load_brief(root, getattr(args, "brief", None))
-    except BriefNotFound as exc:
-        raise CliError(exc.message, 2) from exc
-    report = verify_brief(graph, data)
-    if getattr(args, "json", False):
-        print(json.dumps(report, ensure_ascii=False, indent=2))
-        return int(report["code"])
-    _print_root(root, explicit)
-    print(render_report(report))
-    return int(report["code"])
-
-
-def cmd_migrate(args) -> int:
-    """Убрать записи заглушек старой модели (по умолчанию — только показать)."""
-    from studio.metadata import MetadataError
-    from studio.metadata.migrate import migrate
-
-    root, explicit = _find_root(args.project)
-    slog.start_run(root, "migrate")
-    graph = scan(root)
-    try:
-        result = migrate(root, graph, apply=bool(args.apply))
-    except MetadataError as exc:
-        raise CliError(exc.message, 1) from exc
-    if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0
-    _print_root(root, explicit)
-    if not result["removed"]:
-        print("Хвостов старой модели нет: убирать нечего.")
-        return 0
-    for item in result["removed"][:30]:
-        print(f"  - {item['id']} — {item['reason']}")
-    if len(result["removed"]) > 30:
-        print(f"  … и ещё {len(result['removed']) - 30}")
-    print(f"Записей: {len(result['removed'])} · связей: {result['edges_removed']}")
-    if result["applied"]:
-        print(f"Убрано. Копия файла: .studio/{result['backup']}")
-    else:
-        print("Это пробный запуск. Чтобы убрать: studio migrate --apply")
-    return 0
 
 
 def cmd_test(args) -> int:
@@ -508,19 +292,6 @@ def _source_stats(root, graph, env) -> list[dict]:
     ]
 
 
-def _print_mcp(mcp: dict) -> None:
-    """Раздел «MCP-сервер» для doctor: результат рукопожатия, причина и команда исправления."""
-    if mcp["ok"]:
-        server = mcp.get("server") or {}
-        name = f"{server.get('name', 'pacage-studio')} {server.get('version', '')}".strip()
-        where = " (команда по умолчанию)" if mcp.get("default") else ""
-        print(f"MCP-сервер: ✓ отвечает на initialize{where} · {name}")
-        return
-    print(f"MCP-сервер: ✗ {mcp.get('reason', 'не отвечает')}")
-    if mcp.get("fix"):
-        print(f"  Что сделать: {mcp['fix']}")
-    if mcp.get("fix_command"):
-        print(f"  Команда:     {mcp['fix_command']}")
 
 
 def cmd_doctor(args) -> int:
@@ -534,10 +305,7 @@ def cmd_doctor(args) -> int:
     errors = [d for d in graph.diagnostics if d.level == "error"]
     warnings = [d for d in graph.diagnostics if d.level == "warning"]
     strict = bool(getattr(args, "strict", False))
-    from studio.agent import mcpcheck
-
-    mcp = mcpcheck.check(root, use_default=True)  # настоящее рукопожатие initialize
-    code = 1 if errors or not mcp["ok"] or (strict and warnings) else 0
+    code = 1 if errors or (strict and warnings) else 0
     if getattr(args, "json", False):
         print(
             json.dumps(
@@ -554,7 +322,6 @@ def cmd_doctor(args) -> int:
                         or ", ".join(path.name for path in env.models_paths),
                     },
                     "graph": _graph_counts(graph),
-                    "mcp": mcp,
                     "brief": {
                         "tasks": sum(
                             1
@@ -599,12 +366,11 @@ def cmd_doctor(args) -> int:
     planned = [node for node in graph.nodes if node.planned]
     ready = sum(1 for node in planned if (node.description or "").strip())
     print(f"К реализации: {ready} · не готово: {len(planned) - ready}")
-    _print_mcp(mcp)
     print(f"Диагностика: {len(errors)} ошибок · {len(warnings)} предупреждений")
     for diagnostic in graph.diagnostics:
         where = f" {diagnostic.file}:{diagnostic.line}" if diagnostic.file else ""
         print(f"  {diagnostic.code}{where} — {diagnostic.message}")
-    bad = errors or not mcp["ok"]
+    bad = errors
     print("Итог: есть ошибки" if bad else ("есть предупреждения" if warnings else "порядок"))
     if strict and warnings and not errors:
         print("Режим --strict: предупреждения считаются ошибкой")
@@ -626,8 +392,8 @@ def cmd_install_full(args) -> int:
     check = subprocess.run([sys.executable, "-m", "pip", "check"])  # noqa: S603
     if check.returncode != 0:
         print(
-            "Внимание: pip check нашёл конфликты зависимостей (см. выше). Студия и MCP-сервер "
-            "могут не запускаться, пока их не устранить."
+            "Внимание: pip check нашёл конфликты зависимостей (см. выше). Студия "
+            "может не запускаться, пока их не устранить."
         )
     return 0
 
@@ -650,26 +416,6 @@ def cmd_dev(args) -> int:
     return 0
 
 
-def cmd_skill(args) -> int:
-    """Руководство для AI-агента: печать или установка в проект (скилл, AGENTS.md)."""
-    from studio import __version__
-    from studio.agent import guide
-
-    if args.target == "stdout":
-        print(guide.load_guide(), end="")
-        return 0
-    root, explicit = _find_root(args.project)
-    _print_root(root, explicit)
-    try:
-        written = guide.install(root, args.target, __version__)
-    except OSError as exc:
-        raise CliError(str(exc)) from exc
-    for path in written:
-        print(f"записано: {path.relative_to(root).as_posix()}")
-    print("Подключите MCP-сервер студии клиенту, например:")
-    print("  claude mcp add pacage-studio -- studio mcp")
-    print("Подробнее — docs/mcp.md. То же руководство клиент получает от сервера сам.")
-    return 0
 
 
 def _chain_root(explicit: str | None) -> tuple[Path, bool]:
@@ -683,73 +429,8 @@ def _chain_root(explicit: str | None) -> tuple[Path, bool]:
     return _find_root(explicit)
 
 
-def cmd_chain(args) -> int:
-    """Цепочка «Продукт → Фронтенд»: установка ролей в OpenCode и проверки артефактов."""
-    from studio import productchain
-
-    action = getattr(args, "chain_cmd", None)
-    if action is None:
-        print("studio chain install [--dest DIR] [--force]")
-        print("studio chain check [--json]")
-        print("studio chain merge-research RUN")
-        print("studio chain summary")
-        return 0
-    if action == "install":
-        if args.dest:
-            dest = Path(args.dest).resolve()
-            print(f"Папка OpenCode: {dest}")
-        else:
-            root, explicit = _find_root(getattr(args, "project", None))
-            _print_root(root, explicit)
-            dest = root / ".opencode"
-        try:
-            result = productchain.install(dest, force=args.force)
-        except OSError as exc:
-            raise CliError(str(exc)) from exc
-        for path in result.written:
-            print(f"записано: {path.relative_to(dest).as_posix()}")
-        for path in result.skipped:
-            relative = path.relative_to(dest).as_posix()
-            print(f"пропущено (изменён вручную, --force перезапишет): {relative}")
-        print(
-            f"агентов и скиллов: записано {len(result.written)}, без изменений "
-            f"{len(result.unchanged)}, пропущено {len(result.skipped)}"
-        )
-        print("Дальше: запустите opencode, выберите агента chain (Tab) и напишите идею.")
-        return 0
-
-    root, _explicit = _chain_root(getattr(args, "project", None))
-    chain_dir = root / productchain.CHAIN_DIR
-    if action == "merge-research":
-        try:
-            result = productchain.merge_research(chain_dir, args.run)
-        except (OSError, ValueError) as exc:
-            raise CliError(str(exc)) from exc
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0
-    if action == "summary":
-        print(json.dumps(productchain.summary(chain_dir), ensure_ascii=False, indent=2))
-        return 0
-    report = productchain.validate(chain_dir)
-    if args.json:
-        print(json.dumps(productchain.report_json(report), ensure_ascii=False, indent=2))
-    else:
-        print(productchain.format_report(report))
-    return productchain.exit_code(report)
 
 
-def cmd_mcp(args) -> int:
-    """MCP-сервер (stdio) для AI-агента. В stdout — только протокол, поэтому без печати."""
-    if getattr(args, "project", None):
-        os.environ["STUDIO_PROJECT"] = str(args.project)
-    try:
-        from studio.mcp_server import create_server
-
-        server = create_server()
-    except ImportError as exc:
-        raise CliError(str(exc)) from exc
-    server.run()
-    return 0
 
 
 def cmd_help(_args) -> int:
@@ -762,21 +443,6 @@ def cmd_help(_args) -> int:
     print("                                       автоскан и интерфейс")
     print("  scan  [--project .] [--json]       код → .studio/graph.json")
     print("  list  [--project .] [--json]       сценарии в терминале")
-    print("  brief [--out PATH | --stdout] [--plan SLUG ...] [--only A ...]")
-    print("        [--scenario NAME] [--map full|related|compact|none] [--include-empty]")
-    print("        [--section map|unready|diagnostics|anchors ...] [--json]")
-    print("                                       ТЗ для AI-агента")
-    print("  verify [BRIEF] [--json]            проверить выполнение ТЗ")
-    print("  report [--part backend|frontend] [--section S ...] [--stdout | --json]")
-    print("                                       отчёт по проекту")
-    print("  skill [--target stdout|claude|agents|all] [--project .]")
-    print("                                       руководство для AI-агента: печать или")
-    print("                                       установка (скилл Claude Code, AGENTS.md)")
-    print("  chain install [--dest DIR] [--force]")
-    print("        check [--json] | merge-research RUN | summary")
-    print("                                       цепочка «Продукт → Фронтенд»: роли и")
-    print("                                       скиллы OpenCode, проверки артефактов")
-    print("  mcp                                MCP-сервер для AI-агента (stdio)")
     print("  doctor [--project .] [--json] [--strict]  диагностика одной командой")
     print("  install-full [--project .]         установить/обновить fastbase[full]")
     print("  help                               этот экран")
@@ -817,88 +483,10 @@ def build_parser() -> argparse.ArgumentParser:
     list_p.add_argument("--json", action="store_true")
     list_p.set_defaults(f=cmd_list)
 
-    brief_p = sub.add_parser("brief", help="ТЗ для AI-агента")
-    _add_project(brief_p)
-    brief_out = brief_p.add_mutually_exclusive_group()
-    brief_out.add_argument("--out", default=None, help="куда записать markdown")
-    brief_out.add_argument("--stdout", action="store_true", help="печатать ТЗ в stdout")
-    brief_p.add_argument("--plan", action="append", default=[], metavar="SLUG")
-    brief_p.add_argument("--only", action="append", default=[], metavar="ANCHOR")
-    brief_p.add_argument("--scenario", default="", metavar="NAME")
-    brief_p.add_argument("--map", choices=["full", "related", "compact", "none"], default="")
-    brief_p.add_argument("--include-empty", action="store_true")
-    brief_p.add_argument(
-        "--section", action="append", default=[], metavar="NAME",
-        help="необязательный раздел ТЗ: map, unready, diagnostics, anchors "
-        "(можно повторять); без флага — все",
-    )
-    brief_p.add_argument("--json", action="store_true")
-    brief_p.set_defaults(f=cmd_brief)
-
-    report_p = sub.add_parser("report", help="отчёт по проекту")
-    _add_project(report_p)
-    report_p.add_argument("--part", choices=["backend", "frontend"], default="backend")
-    report_p.add_argument(
-        "--section", action="append", default=[], metavar="NAME",
-        help="раздел отчёта (можно повторять); без флага — все",
-    )
-    report_out = report_p.add_mutually_exclusive_group()
-    report_out.add_argument("--stdout", action="store_true", help="печатать отчёт в stdout")
-    report_out.add_argument("--json", action="store_true")
-    report_p.set_defaults(f=cmd_report)
-
-    migrate_p = sub.add_parser("migrate", help="убрать заглушки старой модели из metadata.json")
-    _add_project(migrate_p)
-    migrate_p.add_argument("--apply", action="store_true", help="убрать (по умолчанию — показать)")
-    migrate_p.add_argument("--json", action="store_true")
-    migrate_p.set_defaults(f=cmd_migrate)
     test_p = sub.add_parser("test", help="прогнать тесты проекта и привязать итог к узлам")
     _add_project(test_p)
     test_p.add_argument("--json", action="store_true")
     test_p.set_defaults(f=cmd_test)
-    verify_p = sub.add_parser("verify", help="проверить выполнение ТЗ")
-    _add_project(verify_p)
-    verify_p.add_argument("brief", nargs="?", default=None, help="файл, id или last")
-    verify_p.add_argument("--part", choices=["backend", "frontend"], default="backend")
-    verify_p.add_argument("--json", action="store_true")
-    verify_p.set_defaults(f=cmd_verify)
-
-    skill_p = sub.add_parser("skill", help="руководство для AI-агента: печать или установка")
-    _add_project(skill_p)
-    skill_p.add_argument(
-        "--target",
-        choices=["stdout", "claude", "agents", "all"],
-        default="stdout",
-        help="stdout — напечатать; claude — .claude/skills; agents — блок в AGENTS.md",
-    )
-    skill_p.set_defaults(f=cmd_skill)
-
-    chain_p = sub.add_parser("chain", help="цепочка «Продукт → Фронтенд»: роли OpenCode и проверки")
-    _add_project(chain_p)
-    chain_sub = chain_p.add_subparsers(dest="chain_cmd")
-    chain_install = chain_sub.add_parser("install", help="агенты и скиллы в OpenCode")
-    _add_project(chain_install)
-    chain_install.add_argument(
-        "--dest", default=None, metavar="DIR",
-        help="папка OpenCode; по умолчанию .opencode/ проекта, глобально — ~/.config/opencode",
-    )
-    chain_install.add_argument("--force", action="store_true", help="перезаписать изменённые файлы")
-    chain_check = chain_sub.add_parser("check", help="механические проверки .studio/chain")
-    _add_project(chain_check)
-    chain_check.add_argument("--json", action="store_true")
-    chain_merge = chain_sub.add_parser("merge-research", help="влить черновики исследования")
-    _add_project(chain_merge)
-    chain_merge.add_argument("run", type=int, help="номер прогона")
-    chain_summary = chain_sub.add_parser("summary", help="сколько объектов в артефактах")
-    _add_project(chain_summary)
-    chain_p.set_defaults(f=cmd_chain)
-
-    mcp_p = sub.add_parser("mcp", help="MCP-сервер для AI-агента (stdio)")
-    mcp_p.add_argument(
-        "--project", default=None, help="папка проекта со студией (по умолчанию — текущая)"
-    )
-    mcp_p.set_defaults(f=cmd_mcp)
-
     doctor_p = sub.add_parser("doctor", help="диагностика проекта")
     _add_project(doctor_p)
     doctor_p.add_argument("--json", action="store_true")

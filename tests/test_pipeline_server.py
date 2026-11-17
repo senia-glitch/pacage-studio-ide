@@ -2,19 +2,38 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import pytest
-from agent_helpers import call
 from fake_llm import agents_with, full_rules
 from test_server import _Server
 
 from studio.pipeline import PipelineError
 from studio.pipeline.llm import Reply
-from studio.server import access
 from studio.server.pipeline import PREFIX, PipelineService
+
+
+def call(srv, method: str, path: str, token: str, payload: dict | None = None):
+    """Запрос к студии с токеном; вернуть (код, тело)."""
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
+    headers = {"X-Studio-Token": token}
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(srv.url + path, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            return exc.code, json.loads(exc.read().decode("utf-8"))
+        finally:
+            exc.close()
+
 
 P = PREFIX
 
@@ -206,10 +225,6 @@ def test_http_routes_are_human_only_and_errors_are_plain(demo: Path) -> None:
         assert call(srv, "GET", f"{P}/state", "wrong")[0] == 403
         status, body = call(srv, "GET", f"{P}/state", srv.token)
         assert status == 200 and body["started"] is False
-        for mode in (*access.AGENT_MODES, access.IDEA):
-            token = access.derive_token(srv.token, mode)
-            assert call(srv, "GET", f"{P}/state", token)[0] == 403
-            assert call(srv, "POST", f"{P}/area", token, {"text": "x"})[0] == 403
         status, body = call(srv, "POST", f"{P}/area", srv.token, {"text": "x"})
         assert status == 400 and body["error"]["code"] == "not_started"
         assert call(srv, "POST", f"{P}/start", srv.token, {})[0] == 200

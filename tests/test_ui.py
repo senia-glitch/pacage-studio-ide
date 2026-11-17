@@ -15,32 +15,34 @@ JS = "\n".join(
 
 def test_две_рабочие_области_одного_окна():
     assert 'data-tab="map"' in HTML
-    assert 'data-tab="ideas"' in HTML
+    assert 'data-tab="ideas"' not in HTML and 'data-tab="idea"' not in HTML  # прежние вкладки убраны
     assert 'data-tab="scenario"' not in HTML
     assert "Бэкенд" in HTML
-    assert "План: идеи и сценарии" in HTML
     assert 'data-map-mode="fact"' in HTML
     assert 'data-map-mode="plan"' in HTML
 
 
 def test_разделы_в_порядке_цепочки():
-    """Конвейер → (прежние) Идея → План → Система → Настройки; в «Системе» — обзор, карты."""
+    """Конвейер → Система → Настройки; в «Системе» — обзор, карты."""
     top = re.findall(r'<button class="tabbtn[^"]*" id="tab-[a-z]+-button" data-tab="([a-z]+)"', HTML)
-    assert top == ["pipeline", "idea", "ideas", "system", "settings"]
+    assert top == ["pipeline", "system", "settings"]
     sub = re.findall(r'<button class="subtab[^"]*" id="tab-[a-z]+-button" data-tab="([a-z]+)"', HTML)
     assert sub == ["overview", "map", "frontend"]
-    for title in ("Конвейер", "Идея", "План", "Система", "Настройки", "Обзор", "Бэкенд", "Фронтенд"):
+    for title in ("Конвейер", "Система", "Настройки", "Обзор", "Бэкенд", "Фронтенд"):
         assert title in HTML
-    for section in ("pipeline", "overview", "idea", "map", "ideas", "frontend", "settings"):
+    for section in ("pipeline", "overview", "map", "frontend", "settings"):
         assert f'id="tab-{section}"' in HTML
-    assert 'id="tab-agent"' not in HTML  # отдельной вкладки настроек агента больше нет
+    for gone in ("idea", "ideas", "agent"):
+        assert f'id="tab-{gone}"' not in HTML
 
 
-def test_настройки_в_одном_месте():
-    nav = HTML[HTML.index('id="settingsNav"'):HTML.index('class="settings-pane"')]
-    for section in ("agents", "project", "prompts", "mode"):
-        assert f'data-sec="{section}"' in nav
-    assert 'id="agentBody"' in HTML and 'id="settingsBody"' in HTML
+def test_настройки_проекта_отдельно_от_конвейера():
+    """«Настройки» — серверы, тесты и откат проекта; настройки конвейера — на его экране."""
+    assert 'id="projectBody"' in HTML
+    project = (JS_DIR / "projectview.js").read_text(encoding="utf-8")
+    for route in ("/api/devservers/config", "/api/tests/config", "/api/git/rollback"):
+        assert route in project
+    assert "showView" in project and "settings" in project
 
 
 def test_верхняя_панель_без_лишнего():
@@ -48,8 +50,8 @@ def test_верхняя_панель_без_лишнего():
     assert 'id="editorChoice"' not in HTML  # поддерживается только VS Code
     header = HTML[HTML.index("<header>"):HTML.index("</header>")]
     assert 'id="searchBox"' not in header and 'id="frontSearch"' not in header
-    assert "data-ui-mode" not in header  # режим работы переехал в «Настройки → Режим работы»
-    assert 'data-ui-mode="agent"' in JS and 'data-ui-mode="manual"' in JS
+    for gone in ("briefBtn", "agentBtn", "agentReportsBtn", "todoMenuPanel"):
+        assert f'id="{gone}"' not in header  # агентской цепочки в шапке больше нет
 
 
 def test_поиск_узлов_в_левых_панелях_карт():
@@ -57,7 +59,6 @@ def test_поиск_узлов_в_левых_панелях_карт():
     assert 'id="searchBox"' in tree
     front = HTML[HTML.index('class="front-tree"'):HTML.index('id="frontTreeBody"')]
     assert 'id="frontSearch"' in front
-    assert 'id="ideaSearch"' in HTML
 
 
 def test_интерфейс_на_русском():
@@ -89,11 +90,15 @@ def test_статика_на_месте():
     assert (JS_DIR / "drag.js").is_file()
     assert (JS_DIR / "geometry.js").is_file()
     assert (JS_DIR / "diagnosticsview.js").is_file()
-    assert (JS_DIR / "briefview.js").is_file()
+    assert (JS_DIR / "projectview.js").is_file()
+    assert (JS_DIR / "pipeline" / "main.js").is_file()
     assert not (JS_DIR / "scenarioview.js").exists()
     assert not (JS_DIR / "createview.js").exists()
     assert not (JS_DIR / "chainmodel.js").exists()
     assert not (JS_DIR / "legacy.js").exists()
+    for gone in ("ideaview.js", "roadmapview.js", "agentview.js", "briefview.js", "syncview.js", "idea"):
+        assert not (JS_DIR / gone).exists(), gone
+    assert not (STATIC / "idea.css").exists() and not (STATIC / "roadmap.css").exists()
     assert '<meta name="studio-token" content="">' in HTML
 
 
@@ -111,21 +116,6 @@ def test_есть_ключевые_возможности():
     assert "@branch:" in (JS_DIR / "mapview.js").read_text(encoding="utf-8")
     assert 'id="inspectorResize"' in HTML
     assert 'id="inspectorToggle"' in HTML
-
-
-def test_есть_тз_для_агента():
-    assert 'id="briefBtn"' in HTML
-    assert 'id="todoMenuPanel"' in HTML
-    assert 'id="todoBriefAction"' in HTML
-    assert "openBriefDialog" in JS
-    assert "/api/brief" in JS
-    assert "Выполнено" in JS
-
-
-def test_планирование_и_бриф_для_агента():
-    assert 'id="briefBtn"' in HTML
-    assert "К реализации" in (JS_DIR / "briefmodel.js").read_text(encoding="utf-8")
-    assert "openBriefDialog" in (JS_DIR / "briefview.js").read_text(encoding="utf-8")
 
 
 def test_редактор_только_vscode():

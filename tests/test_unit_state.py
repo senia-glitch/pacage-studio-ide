@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from studio.creator.plan import PlanDeleteResult, PlanResult
 from studio.metadata import MetadataError
 from studio.metamodel import Graph
 from studio.server import state as state_mod
@@ -94,72 +93,8 @@ def test_save_metadata_validation(tmp_path: Path) -> None:
     assert read_metadata(root).nodes[scenario.id]["domain"] == ""
 
 
-def test_plans_methods(tmp_path: Path, monkeypatch) -> None:
-    root = _demo(tmp_path)
-    state = ProjectState(root)
-    graph = state.rescan("start")
-    assert state._plan_state(graph, "нет") is None
-    plan = SimpleNamespace(slug="p", model_dump=lambda: {"slug": "p"})
-    graph.plans = [plan]
-    assert state._plan_state(graph, "p") is plan
-    monkeypatch.setattr(state_mod, "preview_plan", lambda data, env: {"preview": data})
-    assert state.plan_preview({"x": 1}) == {"preview": {"x": 1}}
-
-    created_plan = SimpleNamespace(slug="new")
-    monkeypatch.setattr(
-        state_mod,
-        "create_plan",
-        lambda data, env: PlanResult(plan=created_plan, created=[]),
-    )
-    state.rescan = lambda reason: Graph(version=7)
-    state._plan_state = lambda graph, slug: SimpleNamespace(model_dump=lambda: {"slug": slug})
-    result = state.plan_create({})
-    assert result["plan"] == {"slug": "new"}
-
-    monkeypatch.setattr(state_mod, "update_plan", lambda data, env: SimpleNamespace(slug="new"))
-    result = state.plan_update({})
-    assert result["plan"] == {"slug": "new"}
-
-    monkeypatch.setattr(
-        state_mod,
-        "delete_plan",
-        lambda data, env: PlanDeleteResult(slug="new", deleted_files=["a"], kept_files=["b"], removed_nodes=["n"], removed_edges=1),
-    )
-    result = state.plan_delete({})
-    assert result["slug"] == "new" and result["removed_edges"] == 1
 
 
-def test_brief_options_and_collect(tmp_path: Path, monkeypatch) -> None:
-    root = _demo(tmp_path)
-    state = ProjectState(root)
-    state.ensure_graph = lambda: Graph(version=7)
-    opts = state._brief_options({"scope": "all", "only": ["x"], "plans": "p", "map": "full"})
-    assert opts.only is None and opts.plans == ("p",) and opts.map_mode == "full"
-    opts = state._brief_options({"only": "a", "include_empty": 1})
-    assert opts.only == ("a",) and opts.include_empty is True
-    opts = state._brief_options({"only": ["a", " "], "plans": ["p", " "]})
-    assert opts.only == ("a",) and opts.plans == ("p",)
-    opts = state._brief_options({"scope": "scenario", "only": ["x"]})
-    assert opts.only is None
-
-    fake = SimpleNamespace(
-        markdown="md",
-        brief_id="b",
-        fingerprint="f",
-        stats={"x": 1},
-        warnings=["w"],
-        tasks=[{"number": 1, "kind": "plan", "anchor": "a", "target_file": "f"}],
-        unready=["u"],
-    )
-    monkeypatch.setattr(state_mod, "build_brief", lambda graph, sources, options: fake)
-    monkeypatch.setattr(state_mod, "save_brief_sidecars", lambda root, brief: None)
-    assert state.brief({})["markdown"] == "md"
-    monkeypatch.setattr(state_mod, "save_brief_file", lambda root, brief, path=None: Path(root) / "b.md")
-    saved = state.save_brief({})
-    assert saved["brief_id"] == "b"
-    monkeypatch.setattr(state_mod, "load_brief", lambda root, target: {"tasks": []})
-    monkeypatch.setattr(state_mod, "verify_brief_data", lambda graph, data: {"status": "ok"})
-    assert state.verify_brief(None) == {"status": "ok"}
 
 
 def test_wait_and_snapshot(tmp_path: Path) -> None:

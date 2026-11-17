@@ -108,44 +108,8 @@ def test_list_reads_graph_and_missing_nodes(tmp_path: Path, capsys, monkeypatch)
     assert "io" in out and "calls: missing" in out
 
 
-def test_brief_errors_and_variants(tmp_path: Path, capsys, monkeypatch) -> None:
-    root = _demo(tmp_path)
-
-    monkeypatch.setattr(cli, "build_brief", lambda graph, sources, options: (_ for _ in ()).throw(cli.BriefError("plan_not_found", "bad")))
-    assert main(["brief", "--project", str(root), "--stdout"]) == 2
-    monkeypatch.undo()
-
-    class FakeBrief:
-        markdown = "# x"
-        brief_id = "b"
-        fingerprint = "f"
-        stats = {"tasks": 1, "unready": 1, "chars": 3, "approx_tokens": 1}
-        warnings = ["w"]
-        tasks = [{"number": 1, "kind": "plan", "slug": "p", "target_file": "a.py"}]
-        unready = [{"kind": "endpoint", "anchor": "a", "file": "f", "missing": ["m"]}]
-
-    monkeypatch.setattr(cli, "build_brief", lambda graph, sources, options: FakeBrief())
-    monkeypatch.setattr(cli, "save_brief_sidecars", lambda root, brief: (_ for _ in ()).throw(cli.BriefError("x", "side")))
-    assert main(["brief", "--project", str(root), "--json"]) == 1
-    assert main(["brief", "--project", str(root), "--stdout"]) == 1
-    monkeypatch.undo()
-
-    monkeypatch.setattr(cli, "build_brief", lambda graph, sources, options: FakeBrief())
-    monkeypatch.setattr(cli, "save_brief", lambda root, brief, target: (_ for _ in ()).throw(cli.BriefError("x", "save")))
-    assert main(["brief", "--project", str(root), "--out", "x.md"]) == 1
-    monkeypatch.undo()
-
-    monkeypatch.setattr(cli, "build_brief", lambda graph, sources, options: FakeBrief())
-    monkeypatch.setattr(cli, "save_brief", lambda root, brief, target: Path(root) / "out.md")
-    assert main(["brief", "--project", str(root), "--out", "out.md"]) == 0
-    out = _capture(capsys)
-    assert "не готово" in out and "! w" in out and "Прочитай" in out
 
 
-def test_verify_missing_brief(tmp_path: Path, capsys) -> None:
-    root = _demo(tmp_path)
-    assert main(["verify", "--project", str(root), "nope"]) == 2
-    assert "ТЗ" in _capture(capsys) or "не найден" in _capture(capsys)
 
 
 def test_doctor_json_and_text(tmp_path: Path, capsys, monkeypatch) -> None:

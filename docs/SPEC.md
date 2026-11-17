@@ -2,8 +2,9 @@
 
 ## Что это
 
-Офлайн-инструмент для проектов на `fastbase` / `core-package` / `event-infra`.
-Сканер читает код по AST и строит граф:
+Студия «от идеи до работающего ПО» (конвейер `studio/pipeline/`, описан в
+[pipeline-v3/README.md](pipeline-v3/README.md)) и офлайн-карты кода для проектов на `fastbase` /
+`core-package` / `event-infra`. Этот документ — про карты кода. Сканер читает код по AST и строит граф:
 
 ```
 endpoint → scenario → io → model
@@ -20,68 +21,25 @@ endpoint → scenario → io → model
    endpoint/scenario/model, связи, тесты, nested-узлы, жёлтые пометки.
 3. **Хранилище метаданных** (`studio/metadata/`) — чтение/запись
    `.studio/metadata.json`; к коду проекта не обращается.
-4. **Создание** (`studio/creator/`) — один сценарий одной цепочкой слоёв:
-   проверка ввода, файлы-скелеты endpoint/scenario/test с TODO и запись плана
-   в метаданные. Всё или ничего.
-5. **ТЗ** (`studio/agent/brief.py`) — граф, исходники и правила → markdown.
-6. **Проверка ТЗ** (`studio/agent/verify.py`) — узел, связи, тест; только
-   факты.
-7. **UI** (`studio/ui/static/js/`) — карта, сценарий, инспектор, создание,
-   диагностика, ТЗ; состояние — в localStorage.
-8. **Сервер** (`studio/server/`) — stdlib HTTP, токен, live-обновление.
-9. **Фронтенд** (`studio/frontend/`) — сканер `frontend/` (слои, DAG, нарушения),
-   метаданные `.studio/frontend.json`, ТЗ, отчёт и синхронизация описаний.
-10. **Отчёт по бэкенду** (`studio/agent/report.py`) — сводка, структура,
-    покрытие, планы, модели и диагностика по графу; `studio report`, `/api/report`.
-11. **JSON-ответ синхронизации** (`studio/agent/sync_json.py`) — разбор и проверка
-    ответа агента; запись только по явному «Применить».
-12. **Доступ агента** (`studio/server/access.py`) — производные токены режимов
-    `plan` и `implement`, таблица разрешённых маршрутов, рукопожатие
-    `GET /api/agent` (режим, версия, корень проекта); агент не применяет ответы и не
-    пересобирает ТЗ. Сервер
-    ставит `created_by: agent` на всё, что создал агент; второй счётчик `aux`
-    (frontend.json, ideas.json) будит `/api/wait` для живого обновления. Входящие отчёты агента (`studio/agent/inbox.py`,
-    `.studio/agent-reports/`) — отправка `POST /api/agent/report`, решение за
-    пользователем. Руководство агента (`studio/agent/guide.md`) — единственный источник для
-    `instructions` MCP и для `studio skill` (`docs/agent-workflow.md`).
-13. **Связи фронтенд → бэкенд** (`studio/frontend/links.py`) — объявленные
-    `calls` у страниц и блоков, сверка с эндпоинтами графа бэкенда (префикс API и
-    параметры нормализуются); `links` в `/api/frontend/graph`, раздел ТЗ.
-15. **MCP-сервер** (`studio/mcp_server.py`, `studio/agent/client.py`) — единственный
-    интерфейс агента (`studio mcp`, extra `mcp`); инструменты вызывают HTTP API студии, права
-    остаются на её стороне; студия находится автоматически по `.studio/server.json`
-    (`studio/server/discovery.py`).
-16. **Дорожная карта** (`studio/server/workflow.py`, `studio/server/chain.py`,
-    `.studio/workflow.json`) — этапы цепочки «синхронизация → режим → идеи → валидация →
-    перенос → выбор → реализация → отчёт» и допустимые переходы; права записи агента зависят от
-    этапа. Карточки валидации — `studio/agent/cards.py` (сценарии и страницы на доске идей с
-    полем `decision`); перенос принятого создаёт планы со slug и плановые страницы фронтенда.
-    UI: `roadmapview.js`, `swipeview.js`, `roadmapmodel.js`.
-18. **Прогон тестов** (`studio/server/tester.py`, `studio/agent/testrun.py`, `studio test`) —
-    независимая проверка поведения: JUnit → результат по узлам и планам;
-    `studio migrate` (`studio/metadata/migrate.py`) убирает заглушки старой модели;
-    `W_ROUTE_SHADOW` (`studio/scanner/routes_check.py`) — статичный маршрут позади
-    параметрического.
-17. **Автозапуск агента** (`studio/server/runner.py`, `.studio/runner.json`) — студия сама
-    запускает команду агента при входе цепочки на этап «Идеи агента» / «Реализация»;
-    включается только человеком в интерфейсе; ТЗ агенту отдаётся по частям
-    (`studio/agent/brief_parts.py`).
-14. **Проверка ТЗ фронтенда** (`studio/frontend/verify.py`) — задачи ТЗ по маркеру
-    `studio-front-brief` сверяются с кодом; `studio verify --part frontend`,
-    `/api/frontend/verify`.
-19. **Сверка карточек с кодом** (`studio/server/reconcile.py`, `chain.transfer_card`) — перед
-    переносом на карту карточка сверяется с реальными (не плановыми) узлами: уже реализованное не
-    переносится, а помечается `inCode`; страница с частью блоков переносит только недостающие.
-20. **План → факт** (`studio/metadata/facts.py`) — выполненный в коде план закрывается сам:
-    описание и критерии переходят на реальные узлы, запись плана и заглушки убираются, журнал
-    `finished_plans` в `metadata.json`; отчёт агента по закрытому плану читается из журнала.
-21. **Окружение проекта** (`studio/agent/projectenv.py`) — `.venv`/`venv` для тестов и для агента,
-    который запускает студия (`PATH`, `VIRTUAL_ENV`).
-
-22. **Цепочка «Продукт → Фронтенд»** (`studio/productchain/`) — прототип новой цепочки в OpenCode:
-    агенты и скиллы ролей в `assets/opencode/` (`studio chain install`), механические проверки артефактов
-    `.studio/chain/*.json` и слияние черновиков исследования (`studio chain check | merge-research | summary`).
-    Спецификация — `docs/ai-agents/`.
+4. **Конвейер** (`studio/pipeline/`) — банк знаний, этапы 1–5, ворота, запросы на изменение, волны,
+   карты, агенты-роли; сервер конвейера — `studio/server/pipeline.py` (`/api/pipeline/*`).
+5. **UI** (`studio/ui/static/js/`) — три раздела: «Конвейер» (`pipeline/`), «Система» (карты кода:
+   обзор, бэкенд, фронтенд) и «Настройки»; состояние карт — в localStorage.
+6. **Сервер** (`studio/server/`) — stdlib HTTP, токен, live-обновление; `access.py` — доступ только
+   человеку по токену страницы.
+7. **Фронтенд** (`studio/frontend/`) — сканер `frontend/` (слои, DAG, нарушения), метаданные
+   `.studio/frontend.json`, связи с бэкендом (`links.py`: объявленные `calls`, сверка с эндпоинтами,
+   префикс API и параметры нормализуются).
+8. **Прогон тестов** (`studio/server/tester.py`, `studio/agent/testrun.py`, `studio test`) —
+   независимая проверка поведения: JUnit → результат по узлам и планам; `W_ROUTE_SHADOW`
+   (`studio/scanner/routes_check.py`) — статичный маршрут позади параметрического.
+9. **План → факт** (`studio/metadata/facts.py`) — выполненный в коде план закрывается сам: описание и
+   критерии переходят на реальные узлы, запись плана и заглушки убираются, журнал `finished_plans`
+   в `metadata.json`.
+10. **Окружение проекта** (`studio/agent/projectenv.py`) — `.venv`/`venv` для тестов и серверов проекта.
+11. **Агенты** (`studio/agent/adapters.py`, `studio/pipeline/llm.py`, `studio/pipeline/coder.py`) —
+    Claude Code и OpenCode запускает сама студия по ролям; текстовые роли не видят файлов, исполнитель
+    кода видит файлы проекта, но не опасные команды. Внешних агентов, MCP и прав по токенам нет.
 
 ## Граф
 

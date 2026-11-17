@@ -16,7 +16,6 @@ export const S = {
   byId: {},
   tab: "pipeline",
   sysTab: "overview",
-  settingsSection: "agents",
   selectedNode: null,
   mapMode: "fact",
   mapViewNodes: {},
@@ -44,20 +43,13 @@ export const S = {
   lastSearchQuery: "",
   editorId: "vscode",
   studioInfo: null,
-  briefReport: null,
-  briefLast: null,
-  briefStatusTimer: null,
-  briefPreview: null,
   studioAux: null,
 };
 
 export const hooks = {
   refreshAux() {},
   renderMap() {},
-  renderIdeas() {},
   renderInspector() {},
-  updateBriefBadge() {},
-  scheduleBriefStatus() {},
   updateDiagBadge() {},
 };
 
@@ -104,8 +96,6 @@ function applyGraph(g){
   S.G=g||{};S.byId={};(S.G.nodes||[]).forEach(n=>S.byId[n.id]=n);
   migrateTodoState(previous,S.G);
   if(S.selectedNode&&!S.byId[S.selectedNode]&&!String(S.selectedNode).startsWith("@")&&S.selectedNode!=="__new_domain__")S.selectedNode=null;
-  hooks.updateBriefBadge();
-  hooks.scheduleBriefStatus();
 }
 function methodOfEndpoint(n){const m=String((n.details||{}).http_method||"").toUpperCase();return m||NO_METHOD}
 function urlOfEndpoint(n){const d=n.details||{};return d.url_path||d.path||""}
@@ -123,14 +113,14 @@ function nodeMeta(n){
   return d.class_name||d.name||"";
 }
 /* ---------- вкладки ---------- */
-/* Разделы: «Идея», «План», «Система» (обзор, бэкенд, фронтенд) и «Настройки». Внутри кода остаются
-   прежние имена экранов (overview, map, frontend, ideas, idea, settings): меняется только то, как они
-   сгруппированы в шапке. Старые адреса (#agent) ведут в «Настройки → Агенты». */
+/* Разделы: «Конвейер», «Система» (обзор, бэкенд, фронтенд) и «Настройки». Внутри кода остаются
+   имена экранов (pipeline, overview, map, frontend, settings): меняется только то, как они
+   сгруппированы в шапке. Старые адреса (#idea, #ideas, #agent) ведут в «Конвейер». */
 const SYSTEM_TABS=["overview","map","frontend"];
 async function setTab(name){
   if(name==="create"||name==="scenario")name="map";
   if(name==="system")name=SYSTEM_TABS.includes(S.sysTab)?S.sysTab:"overview";
-  if(name==="agent"){S.settingsSection="agents";name="settings"}
+  if(["agent","idea","ideas"].includes(name))name="pipeline";
   if(!(await flushPending()))return;
   S.tab=name;
   const group=SYSTEM_TABS.includes(name)?"system":name;
@@ -143,11 +133,9 @@ async function setTab(name){
   document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="tab-"+name));
   if(name==="overview"){hooks.renderOverview&&hooks.renderOverview()}
   else if(name==="map"){hooks.renderMap();hooks.renderInspector()}
-  else if(name==="settings"){hooks.renderSettingsHub&&hooks.renderSettingsHub()}
+  else if(name==="settings"){hooks.renderSettings&&hooks.renderSettings()}
   else if(name==="frontend"){hooks.renderFrontend&&hooks.renderFrontend()}
-  else if(name==="idea"){hooks.renderIdea&&hooks.renderIdea()}
   else if(name==="pipeline"){hooks.renderPipeline&&hooks.renderPipeline()}
-  else hooks.renderIdeas();
   schedulePersist();
   return true;
 }
@@ -214,7 +202,7 @@ function schedulePersist(){
 }
 function restoreUiState(saved){
   if(!saved)return;
-  S.tab=["pipeline","overview","map","ideas","frontend","idea","settings"].includes(saved.tab)?saved.tab:"pipeline";
+  S.tab=["pipeline","overview","map","frontend","settings"].includes(saved.tab)?saved.tab:"pipeline";
   if(["overview","map","frontend"].includes(S.tab))S.sysTab=S.tab;
   if(saved.mapMode==="fact"||saved.mapMode==="plan")S.mapMode=saved.mapMode;
   if(typeof saved.inspectorOpen==="boolean")S.inspectorOpen=saved.inspectorOpen;
@@ -283,7 +271,6 @@ function rerenderActive(){
   if(S.tab==="map"){hooks.renderMap();hooks.renderInspector()}
   else if(S.tab==="frontend"){hooks.renderFrontend&&hooks.renderFrontend()}
   else if(S.tab==="overview"){hooks.renderOverview&&hooks.renderOverview()}
-  else if(S.tab==="ideas")hooks.renderIdeas();
   hooks.updateDiagBadge();
 }
 async function refreshLiveGraph(){

@@ -174,6 +174,18 @@ class PipelineService:
             ],
         }
 
+    def overview(self) -> dict:
+        """Для обзора «Система»: начат ли конвейер, идея проекта и сколько принятых сценариев."""
+        if not self.started():
+            return {"started": False, "title": "", "scenarios": 0}
+        bank = self.pl().bank
+        areas = bank.records("area")
+        return {
+            "started": True,
+            "title": areas[0]["title"] if areas else "",
+            "scenarios": len(bank.records("scenario", status="accepted")),
+        }
+
     def job_view(self) -> dict | None:
         job = self.job
         if job is None:

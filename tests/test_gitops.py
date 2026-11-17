@@ -8,9 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from studio.metadata import MetadataError
 from studio.server import gitops
-from studio.server.settings import Settings
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="нужен git")
 
@@ -81,27 +79,3 @@ def test_пуш_без_remote_сообщает_ошибку_но_коммит_о
     assert result["committed"] is True and "пуш не удался" in result["reason"]
 
 
-def test_настройки_по_умолчанию_и_проверка(tmp_path: Path) -> None:
-    settings = Settings(tmp_path)
-    assert settings.get() == {
-        "ui": {"mode": "agent"},
-        "git": {"checkpoints": True, "push": False, "remote": "origin"},
-    }
-    saved = settings.save({"ui": {"mode": "manual"}, "git": {"push": True, "remote": "gh"}})
-    assert saved["ui"]["mode"] == "manual" and saved["git"] == {
-        "checkpoints": True, "push": True, "remote": "gh"
-    }
-    assert Settings(tmp_path).get() == saved  # переживает перезапуск
-    for bad in (
-        {"ui": {"mode": "x"}},
-        {"git": {"push": "да"}},
-        {"git": {"remote": "a b"}},
-        {"git": {"remote": "x;rm"}},
-        {"ui": []},
-        [],
-    ):
-        with pytest.raises(MetadataError):
-            settings.save(bad)
-    assert settings.get() == saved
-    settings.path.write_text("не json", encoding="utf-8")
-    assert settings.get()["ui"]["mode"] == "agent"

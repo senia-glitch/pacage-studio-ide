@@ -4,43 +4,27 @@ import {
   initUiStorage, modal, openEditorForNode, openPalette, persistNow, schedulePersist, setTab, showAbout,
   setLive, startLive, toast,
 } from "./core.js";
-import {refreshBriefStatus, scheduleBriefStatus, updateBriefBadge, initTodoChip} from "./briefview.js";
 import {openDiagnostics, updateDiagBadge} from "./diagnosticsview.js";
 import {renderInspector} from "./inspectorview.js";
 import {renderMap} from "./mapview.js";
-import {initIdeas, renderIdeas, refreshIdeas, markImplemented} from "./ideaview.js";
-import {initSync} from "./syncview.js";
-import {initReport} from "./reportview.js";
-import {initAgent, openReport, refreshAgentReports} from "./agentview.js";
-import {initRoadmap, refreshRoadmap} from "./roadmapview.js";
-import {renderSettings} from "./settingsview.js";
-import {renderSettingsHub} from "./settingshub.js";
+import {renderProject} from "./projectview.js";
 import {renderOverview} from "./systemview.js";
-import {initUiMode} from "./uimode.js";
 import {bindViewport, fitView} from "./viewport.js";
 import {initTree, renderTree} from "./treeview.js";
 import {initFrontend, renderFrontend} from "./frontendview.js";
 
 hooks.renderMap = renderMap;
 hooks.renderTree = renderTree;
-hooks.renderIdeas = renderIdeas;
-hooks.renderSettings = renderSettings;
-hooks.renderSettingsHub = renderSettingsHub;
+hooks.renderSettings = renderProject;
 hooks.renderOverview = renderOverview;
 hooks.renderInspector = renderInspector;
 hooks.renderFrontend = renderFrontend;
-// Этап «Идея» подключается при первом открытии вкладки: остальным вкладкам он не мешает.
+// Конвейер подключается при первом открытии вкладки: остальным вкладкам он не мешает.
 hooks.renderPipeline = async () => { const pipeline = await import("./pipeline/main.js"); await pipeline.renderPipeline($("pipelineHost")); };
-hooks.renderIdea = async () => { const idea = await import("./idea/main.js"); await idea.renderIdea($("ideaHost")); };
 hooks.refreshAux = () => {
-  void refreshAgentReports();
-  void refreshRoadmap();
-  // frontend.json или ideas.json изменили снаружи (агент, другая вкладка)
+  // frontend.json изменили снаружи (редактор, другая вкладка)
   if (S.tab === "frontend") void renderFrontend({soft: true});
-  else if (S.tab === "ideas") refreshIdeas();
 };
-hooks.updateBriefBadge = updateBriefBadge;
-hooks.scheduleBriefStatus = scheduleBriefStatus;
 hooks.updateDiagBadge = updateDiagBadge;
 
 function activeView(){
@@ -56,12 +40,6 @@ async function boot(){
     document.title="studio · "+String(S.studioInfo.project_root||"").replace(/[\\/]+$/,"").split(/[\\/]/).pop();
   }catch(_){ }
   initUiStorage();
-  initIdeas();
-  initSync();
-  initReport();
-  initAgent();
-  initRoadmap({openReport, onAccepted: markImplemented});
-  void initUiMode();
   initTree();
   initFrontend();
   document.querySelectorAll(".tabbtn,.subtab").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
@@ -77,8 +55,7 @@ async function boot(){
     if(ev.key==="Escape"&&S.tab==="map"&&S.selectedNode!==null&&!typing){S.selectedNode=null;hooks.renderInspector();renderMap()}
     if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==="k"){ev.preventDefault();openPalette();return}
     if(typing)return;
-    if(S.tab==="ideas"&&["f","+","=","-","h"].includes(ev.key.toLowerCase()))return;
-    if(ev.key==="/") {ev.preventDefault();const box=$(S.tab==="frontend"?"frontSearch":S.tab==="ideas"?"ideaSearch":"searchBox");if(box){box.focus();box.select()}}
+    if(ev.key==="/") {ev.preventDefault();const box=$(S.tab==="frontend"?"frontSearch":"searchBox");if(box){box.focus();box.select()}}
     if(ev.key.toLowerCase()==="o"&&S.selectedNode){ev.preventDefault();openEditorForNode(S.byId[S.selectedNode])}
     if(ev.key.toLowerCase()==="f"&&!ev.ctrlKey&&!ev.metaKey){ev.preventDefault();const a=activeView();fitView(a.canvas,a.view,()=>applyTransform(a.id,a.view))}
     if(ev.key==="+"||ev.key==="=") {ev.preventDefault();const a=activeView();a.view.k=Math.min(2.5,a.view.k*1.15);applyTransform(a.id,a.view)}
@@ -106,24 +83,21 @@ async function boot(){
     await flushPending();
     try{
       applyGraph(await api("/api/rescan","POST",{}));
-      if(S.tab==="map"){renderMap();hooks.renderInspector()}else renderIdeas();
+      if(S.tab==="map"){renderMap();hooks.renderInspector()}
       updateDiagBadge();toast("карта обновлена");schedulePersist();
     }catch(e){toast("ошибка скана: "+e.message)}
   };
   $("diagBtn").onclick=openDiagnostics;
-  initTodoChip();
   if($("logoBtn"))$("logoBtn").onclick=showAbout;
   initSearch();
   updateDiagBadge();
-  updateBriefBadge();
-  refreshBriefStatus();
   setLive(true); // граф только что загружен — студия на связи; обрыв покажет startLive()
   startLive();
   window.addEventListener("beforeunload",()=>persistNow());
   document.addEventListener("click",schedulePersist);
   document.addEventListener("change",schedulePersist);
   const initial=location.hash.replace(/^#/,"");
-  setTab(["idea","overview","map","ideas","frontend","settings","agent","system"].includes(initial)?initial:S.tab);
+  setTab(["pipeline","overview","map","frontend","settings","system","idea","ideas","agent"].includes(initial)?initial:S.tab);
 }
 boot();
 

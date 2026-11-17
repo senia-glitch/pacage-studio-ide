@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from studio.frontend.brief import _link_lines
 from studio.frontend.contract import describe, endpoint_contract
-from studio.frontend.links import check_links
 from studio.metamodel import Edge, Graph, Node
 
 ROUTE = '''from fastapi import APIRouter, Depends, Request
@@ -104,16 +102,3 @@ def test_сигнатура_с_kwonly_и_без_аннотаций(tmp_path: Pat
     assert describe(contract).startswith("запрос: x; y: str = 'k'")
 
 
-def test_контракт_в_сверке_и_в_тз(tmp_path: Path) -> None:
-    graph = _graph(tmp_path)
-    front = {"pages": [{"id": "page:p", "name": "p", "calls": ["POST /leads"], "blocks": []}]}
-    links = check_links(front, graph, "")
-    assert links["rows"][0]["status"] == "ok" and "запрос: req: LeadIn" in links["rows"][0]["contract"]
-    lines = _link_lines(front["pages"], links)
-    assert lines[0].endswith("эндпоинт в бэкенде есть")
-    assert lines[1].startswith("  - контракт эндпоинта (по коду бэкенда): запрос: req")
-    missing = check_links({"pages": [{"id": "page:q", "name": "q", "calls": ["GET /ghost"],
-                                       "blocks": []}]}, graph, "")
-    assert missing["rows"][0]["contract"] == ""
-    assert len(_link_lines([{"id": "page:q", "name": "q", "calls": ["GET /ghost"],
-                              "blocks": []}], missing)) == 1

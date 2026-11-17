@@ -115,42 +115,6 @@ def test_неэндпоинт_без_домена(demo: Path):
     assert record["domain"] == ""
 
 
-def test_планируемая_запись_хранит_target_file_и_details(demo: Path):
-    from studio.creator.plan import create_plan
-    from studio.env import read_env
-
-    create_plan(
-        {
-            "title": "Возврат заказа",
-            "slug": "refund_order",
-            "description": "Возврат.",
-            "acceptance": ["Возврат сохранён"],
-            "domain": "refunds",
-            "http_method": "post",
-            "path": "/refund",
-            "uses_db": False,
-            "with_test": False,
-        },
-        read_env(demo),
-    )
-    graph = scan(demo)
-    node = graph.by_id()["endpoint:app/api/v1/routes/refund_order.py:refund_order"]
-    assert node.planned is True
-    save_node_metadata(demo, node, "Возврат заказа.", ["Возврат сохранён"], "refunds")
-    record = _read_raw(demo)["nodes"][node.id]
-    assert set(record) == {
-        "kind",
-        "name",
-        "description",
-        "acceptance",
-        "domain",
-        "planned",
-        "target_file",
-        "details",
-    }
-    assert record["planned"] is True
-    assert record["target_file"] == "app/api/v1/routes/refund_order.py"
-    assert record["details"] == {"http_method": "post", "path": "/refund"}
 
 
 # --------------------------------------------------------- D3: живое обновление

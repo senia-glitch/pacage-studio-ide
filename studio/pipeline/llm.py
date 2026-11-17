@@ -368,7 +368,7 @@ class Llm:
             raise PipelineError(
                 "no_agent",
                 "Агент не найден. Установите Claude Code Pro или OpenCode Go Plus и выберите "
-                f"агента для роли «{ROLES[role_key].title}» в Настройках → Агенты",
+                f"агента для роли «{ROLES[role_key].title}» в «Конвейер → Настройки»",
             )
         model = chosen["model"]
         if not model and agent.name == "claude":

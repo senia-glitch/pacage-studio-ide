@@ -448,84 +448,8 @@ def save_domain(root: Path, data: dict) -> dict:
     return {"meta": meta}
 
 
-def agent_violation(meta: dict, action: str, payload: dict) -> str:
-    """Причина отказа агенту для операции с метаданными фронтенда или пустая строка.
-
-    Агент добавляет и правит только своё: свои плановые страницы и блоки (метка
-    ``created_by: agent``). К страницам человека он может добавлять блоки и правила, но не
-    менять и не удалять их; домены только создаёт.
-    """
-    pages = meta["pages"]
-    if action == "save_page":
-        page_id = str(payload.get("id") or "")
-        if not page_id.startswith("page-plan:"):
-            return (
-                "Агент правит только плановые страницы (page-plan:…); описания существующих "
-                "страниц принимает пользователь"
-            )
-        page = pages.get(page_id)
-        if page is not None and page.get("created_by") != "agent":
-            return "Страница создана человеком: агент может добавлять в неё блоки, но не менять её"
-    elif action == "save_block":
-        block_id = str(payload.get("id") or "")
-        if not block_id.startswith("block-plan:"):
-            return (
-                "Агент правит только плановые блоки (block-plan:…); описания существующих "
-                "блоков принимает пользователь"
-            )
-        page = pages.get(str(payload.get("pageId") or ""))
-        block = ((page or {}).get("blocks") or {}).get(block_id)
-        if block is not None and block.get("created_by") != "agent":
-            return "Блок создан человеком: агент не может его менять"
-    elif action == "save_rule":
-        if payload.get("id"):
-            return "Агент создаёт новые правила; существующие правит человек"
-    elif action == "save_domain":
-        if str(payload.get("op") or "create") != "create":
-            return "Агент может только создавать домены"
-    elif action == "delete_planned":
-        page = pages.get(str(payload.get("pageId") or ""))
-        kind = str(payload.get("kind") or "")
-        if kind == "page" and (page or {}).get("created_by") == "agent":
-            return ""
-        block = ((page or {}).get("blocks") or {}).get(str(payload.get("blockId") or ""))
-        if kind == "block" and (block or {}).get("created_by") == "agent":
-            return ""
-        return "Агент удаляет только страницы и блоки, которые создал сам"
-    else:
-        return f"Действие «{action}» агенту недоступно"
-    return ""
-
-
-@_locked
-def stamp_agent(root: Path, before: dict, action: str, payload: dict) -> None:
-    """Пометить созданные агентом плановые страницу или блок: ``created_by: agent``.
-
-    ``before`` — метаданные до операции: помечается только то, чего в них не было.
-    """
-    meta = load_meta(root)
-    page_id = str(payload.get("id") if action == "save_page" else payload.get("pageId") or "")
-    changed = False
-    if action in ("save_page", "save_block") and page_id in meta["pages"]:
-        page = meta["pages"][page_id]
-        if page_id not in before["pages"] and not page.get("created_by"):
-            page["created_by"] = "agent"
-            changed = True
-        if action == "save_block":
-            block_id = str(payload.get("id") or "")
-            block = (page.get("blocks") or {}).get(block_id)
-            old_blocks = (before["pages"].get(page_id) or {}).get("blocks") or {}
-            if block is not None and block_id not in old_blocks and not block.get("created_by"):
-                block["created_by"] = "agent"
-                changed = True
-    if changed:
-        save_meta(root, meta)
-
-
 __all__ = [
     "META_LOCK",
-    "agent_violation",
-    "stamp_agent",
     "FRONTEND_META",
     "delete_planned",
     "empty_meta",

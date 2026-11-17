@@ -1,6 +1,5 @@
 import {api} from "./api.js";
 import {$,S,applyGraph,esc,KIND_NAMES,hooks,openEditorForNode,toast,schedulePersist} from "./core.js";
-import {openBriefDialog} from "./briefview.js";
 import {CHILD_KINDS,relationFor} from "./relations.js";
 
 const graphOwned=n=>!!n?.planned&&n.id.startsWith("studio:");
@@ -37,15 +36,14 @@ function renderInspector(){
   if(S.selectedNode==="__new_domain__")return;
   const factual=!n.planned&&!n.synthetic;
   let h=`<div class="node-origin ${factual?"code-origin":"plan-origin"}"><b>${factual?"Узел из кода":"Плановый узел"}</b><span>${factual?`Источник: ${esc(n.file_path)}${n.line?":"+n.line:""}. Факты не редактируются здесь.`:"Узел и его связи сохранены в плане; код не меняется."}</span></div>`;
-  if(factual){h+=`<div class="insp-actions">${n.file_path?'<button id="openNodeEditor">Открыть в редакторе</button>':""}<button id="nodeBrief" title="Собрать ТЗ для этого узла и всех его потомков">ТЗ узла и потомков</button></div>`}
+  if(factual){h+=`<div class="insp-actions">${n.file_path?'<button id="openNodeEditor">Открыть в редакторе</button>':""}</div>`}
   if(factual){h+=`<div class="field"><label>Плановая правка</label><textarea id="changeNote" rows="5" placeholder="Что предлагается изменить в этом узле">${esc(n.planned_change?.note||"")}</textarea></div><div class="field"><label>Критерии приёмки</label><textarea id="changeAcceptance" rows="4" placeholder="По одному критерию на строку">${esc(acceptanceText(n.planned_change?.acceptance))}</textarea></div><button id="saveChange" class="primary">Сохранить плановую правку</button>${n.planned_change&&Object.keys(n.planned_change).length?'<button id="clearChange" class="danger">Удалить пометку правки</button>':""}`}
   else{
-    h+=`<label class="field">Название<input id="nodeName" maxlength="180" value="${esc((n.details||{}).function_name||(n.details||{}).class_name||(n.details||{}).method||(n.details||{}).name||n.label)}"></label><label class="field">Описание<textarea id="nodeDescription" rows="4">${esc(n.description||"")}</textarea></label><label class="field">Критерии приёмки<textarea id="nodeAcceptance" rows="4">${esc(acceptanceText(n.acceptance))}</textarea></label><div class="insp-actions"><button id="savePlanNode" class="primary">Сохранить узел</button><button id="nodeBrief" title="Собрать ТЗ для этого узла и всех его потомков">ТЗ узла и потомков</button>${graphOwned(n)?'<button id="deletePlanNode" class="danger">Удалить узел и плановых потомков</button>':""}</div>`;
+    h+=`<label class="field">Название<input id="nodeName" maxlength="180" value="${esc((n.details||{}).function_name||(n.details||{}).class_name||(n.details||{}).method||(n.details||{}).name||n.label)}"></label><label class="field">Описание<textarea id="nodeDescription" rows="4">${esc(n.description||"")}</textarea></label><label class="field">Критерии приёмки<textarea id="nodeAcceptance" rows="4">${esc(acceptanceText(n.acceptance))}</textarea></label><div class="insp-actions"><button id="savePlanNode" class="primary">Сохранить узел</button>${graphOwned(n)?'<button id="deletePlanNode" class="danger">Удалить узел и плановых потомков</button>':""}</div>`;
     if(graphOwned(n)&&n.kind==="endpoint")h=h.replace('<label class="field">Описание',`<label class="field">HTTP-метод<input id="nodeHttpMethod" value="${esc((n.details||{}).http_method||"")}"></label><label class="field">Путь<input id="nodePath" value="${esc((n.details||{}).path||"")}"></label><label class="field">Домен<input id="nodeDomain" value="${esc(n.domain||"")}"></label><label class="field">Описание`);
   }
   body.innerHTML=h;
   $("openNodeEditor")?.addEventListener("click",()=>openEditorForNode(S.byId[n.id]));
-  $("nodeBrief")?.addEventListener("click",()=>openBriefDialog({subtreeRoot:n.id}));
   $("saveChange")?.addEventListener("click",()=>saveChange(n,false));$("clearChange")?.addEventListener("click",()=>saveChange(n,true));
   $("savePlanNode")?.addEventListener("click",()=>saveNode(n));$("deletePlanNode")?.addEventListener("click",()=>deleteNode(n));
   foot.textContent="Изменения сохраняются в .studio/metadata.json. Код проекта не меняется.";

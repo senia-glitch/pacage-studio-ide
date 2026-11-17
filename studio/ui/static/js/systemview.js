@@ -51,14 +51,14 @@ function summary(s) {
     ${s.missing_calls ? stat("вызовов без эндпоинта", s.missing_calls, true) : ""}</div>`;
 }
 
-function ideaBar(idea) {
-  if (idea.started) {
-    return `<div class="sys-idea"><div><b>Идея: ${esc(idea.title || "без названия")}</b>
-      <small>сценариев в документации: ${idea.scenarios}</small></div><button type="button" data-goto="idea">Открыть этап «Идея»</button></div>`;
+function pipelineBar(pipeline) {
+  if (pipeline.started) {
+    return `<div class="sys-idea"><div><b>Конвейер: ${esc(pipeline.title || "без названия")}</b>
+      <small>принятых сценариев: ${pipeline.scenarios}</small></div><button type="button" data-goto="pipeline">Открыть конвейер</button></div>`;
   }
-  return `<div class="sys-idea muted"><div><b>Этап «Идея» не начат</b>
-    <small>Он превращает сырую идею в проверенную документацию: границы, роли, сценарии, решения. От неё отталкиваются план и ТЗ.</small></div>
-    <button type="button" class="primary" data-goto="idea">Начать</button></div>`;
+  return `<div class="sys-idea muted"><div><b>Конвейер не начат</b>
+    <small>Конвейер ведёт от идеи до работающего ПО: пять этапов, ворота качества и банк знаний. Эта карта показывает то, что уже есть в коде.</small></div>
+    <button type="button" class="primary" data-goto="pipeline">Начать</button></div>`;
 }
 
 function domainHtml(domain) {
@@ -84,12 +84,12 @@ function leftovers(data) {
 
 function view(data) {
   if (data.empty) {
-    return `${ideaBar(data.idea)}<div class="sys-empty"><h3>В проекте пока нет кода и страниц</h3>
+    return `${pipelineBar(data.pipeline)}<div class="sys-empty"><h3>В проекте пока нет кода и страниц</h3>
       <p class="hint">Карта системы появится, когда в проекте будут эндпоинты fastbase или страницы фронтенда. Начать можно с идеи: этап «Идея» подготовит документацию, а «План» превратит её в задачи для агента.</p></div>`;
   }
   const filters = `<div class="sys-filters" role="group" aria-label="Фильтр">${FILTERS.map(([id, name]) => `<button type="button" class="subtab${filter === id ? " on" : ""}" data-filter="${id}">${name}</button>`).join("")}</div>`;
   const domains = data.domains.map(domainHtml).join("");
-  return `${summary(data.summary)}${ideaBar(data.idea)}${filters}${domains || '<p class="hint">Под этот фильтр ничего не подходит.</p>'}${leftovers(data)}`;
+  return `${summary(data.summary)}${pipelineBar(data.pipeline)}${filters}${domains || '<p class="hint">Под этот фильтр ничего не подходит.</p>'}${leftovers(data)}`;
 }
 
 function bind(root) {

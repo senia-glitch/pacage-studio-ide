@@ -1,7 +1,5 @@
-"""Ядро графа идеи: карточки, связи, операции, журнал. Без интерфейса и без моделей."""
+"""Ядро банка знаний: карточки, связи, операции, журнал. Без интерфейса и без моделей."""
 
-from . import views
-from .bank import Bank, normalize_url
 from .errors import ConflictError, GraphError
 from .model import (
     ACCEPTED,
@@ -29,12 +27,9 @@ __all__ = [
     "STALE",
     "STATUSES",
     "STATUS_NAMES",
-    "Bank",
     "ConflictError",
     "GraphError",
     "Store",
-    "normalize_url",
     "author_name",
     "is_human",
-    "views",
 ]

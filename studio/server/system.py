@@ -1,8 +1,9 @@
 """Обзор системы: сквозные срезы «страница → эндпоинт → сценарий → данные → тесты» по доменам.
 
 Собирается из того, что студия уже знает (граф бэкенда, граф фронтенда, сверка вызовов страниц с
-эндпоинтами и этап «Идея»), и ничего не меняет и не сохраняет. Подробности каждого узла остаются в
-детальных картах бэкенда и фронтенда: обзор только показывает всю систему целиком и ведёт туда.
+эндпоинтами, идея и принятые сценарии конвейера), и ничего не меняет и не сохраняет. Подробности
+каждого узла остаются в детальных картах бэкенда и фронтенда: обзор только показывает всю систему
+целиком и ведёт туда.
 """
 
 from __future__ import annotations
@@ -106,20 +107,7 @@ def _pages_without_backend(front: dict, links: dict) -> list[dict]:
     return lonely
 
 
-def _idea_summary(idea) -> dict:
-    """Что известно об этапе «Идея»: начат ли он и сколько в нём сценариев."""
-    if idea is None or not idea.exists():
-        return {"started": False, "title": "", "scenarios": 0}
-    try:
-        project = idea.project()
-        state = project.state()
-        scenarios = len(project.cards("сценарий"))
-    except Exception:  # noqa: BLE001 — обзор не должен падать из-за этапа «Идея»
-        return {"started": True, "title": "", "scenarios": 0}
-    return {"started": True, "title": state.get("title") or "", "scenarios": scenarios}
-
-
-def build_system(graph: Graph, front: dict, links: dict, idea=None) -> dict:
+def build_system(graph: Graph, front: dict, links: dict, pipeline: dict | None = None) -> dict:
     """Единая карта системы: сводка, домены со сквозными срезами и то, что осталось без пары."""
     index = graph.index()
     callers, missing_calls = _callers(links)
@@ -173,7 +161,7 @@ def build_system(graph: Graph, front: dict, links: dict, idea=None) -> dict:
         ],
         "pages_without_backend": _pages_without_backend(front, links),
         "missing_calls": missing_calls,
-        "idea": _idea_summary(idea),
+        "pipeline": pipeline or {"started": False, "title": "", "scenarios": 0},
         "empty": not graph.nodes and not pages,
     }
 

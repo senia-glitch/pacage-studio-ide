@@ -1,4 +1,4 @@
-"""pacage-studio — офлайн-карта пути HTTP-запроса по AST.
+"""pacage-studio — студия «от идеи до работающего ПО» и офлайн-карта пути HTTP-запроса по AST.
 
 Строит карту:
 
@@ -30,5 +30,5 @@ def require_python(version_info=None) -> None:
 
 require_python()
 
-__version__ = "7.5.0"
+__version__ = "8.0.0"
 __all__ = ["MIN_PYTHON", "__version__", "require_python"]

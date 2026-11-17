@@ -148,3 +148,15 @@ input.pl-num{width:64px}
 .pl-wave.current{border-color:var(--acc);color:var(--text)}
 .pl-wave.done{border-color:#4f9a5a;color:#7fc88a}
 .pl-actions{display:flex;gap:8px;margin-top:8px}
+
+.pj-wrap{max-width:760px;margin:0 auto;padding:18px 16px}
+.pj-wrap h2{color:var(--acc);margin:0 0 12px}
+.pj-card{background:var(--panel,#25262b);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:12px}
+.pj-card h3{margin:0 0 6px;font-size:15px}
+.pj-card p{margin:4px 0;color:var(--dim)}
+.pj-row{display:flex;gap:8px;margin-top:10px}
+.pj-srv{margin:10px 0}
+.pj-srv textarea{width:100%;box-sizing:border-box}
+.pj-srv label{display:block;margin-top:6px;font-size:12px;color:var(--dim)}
+.pj-check{display:flex;gap:8px;align-items:flex-start}
+.pj-check small{display:block;color:var(--dim)}

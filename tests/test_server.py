@@ -17,19 +17,10 @@ pytestmark = pytest.mark.integration
 
 
 class _Server:
-    def __init__(self, root: Path, stage: str = ""):
+    def __init__(self, root: Path):
         self.ctx = Ctx(root)
-        if stage:
-            self.open_stage(stage)
         self.http = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(self.ctx))
         self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
-
-    def open_stage(self, stage: str, mode: str = "plan") -> None:
-        """Перевести дорожную карту на этап, где агенту разрешена нужная запись."""
-        workflow = self.ctx.state.workflow
-        with workflow.lock:
-            workflow.data.update({"stage": stage, "mode": mode})
-            workflow._save()
 
     @property
     def url(self) -> str:

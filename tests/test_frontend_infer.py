@@ -5,11 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from studio.frontend import infer
-from studio.frontend.brief import _found_line
-from studio.frontend.graph import build_front_graph
-from studio.frontend.links import check_links
-from studio.frontend.verify import verify_front_task
-from studio.metamodel import Node
 
 FILES = {
     "src/logic/api/endpoints.js": """import { api } from './http.js'
@@ -120,40 +115,3 @@ def test_цепочка_блок_composable_действие_api(tmp_path: Path)
 # ------------------------------------------------------------- интеграция
 
 
-def test_граф_ТЗ_сверка_и_verify(tmp_path: Path) -> None:
-    root = _project(tmp_path)
-    graph = build_front_graph(root)
-    page = next(p for p in graph["pages"] if p["name"] == "lessons")
-    blocks = {b["name"]: b for b in page["blocks"]}
-    assert page["inferred_calls"] == ["DELETE /lessons/{param}"]
-    assert blocks["LessonForm"]["inferred_calls"] == ["GET /lessons", "POST /lessons"]
-    assert next(p for p in graph["pages"] if p["name"] == "about")["inferred_calls"] == []
-
-    def endpoint(method: str, path: str) -> Node:
-        return Node(id=f"e:{method}{path}", kind="endpoint", label=path, file_path="a.py",
-                    details={"http_method": method, "url_path": path})
-
-    backend = type("G", (), {"nodes": [endpoint("GET", "/lessons"), endpoint("POST", "/lessons")]})
-    blocks["LessonForm"]["calls"] = ["POST /lessons"]  # объявлено: в «в коде» не дублируется
-    links = check_links(graph, backend, "")
-    seen = {(r["name"], r["call"]): r["status"] for r in links["in_code"]}
-    assert ("LessonForm", "POST /lessons") not in seen
-    assert seen[("LessonForm", "GET /lessons")] == "ok"
-    assert seen[("lessons", "DELETE /lessons/{param}")] == "missing"
-    assert links["in_code_missing"] == 1 and links["missing"] == 0 and links["rows"][0]["call"]
-
-    assert _found_line(blocks["LessonForm"], "- ").endswith("GET /lessons")
-    assert _found_line(blocks["LessonList"]).endswith("GET /lessons")
-    assert _found_line({"calls": ["GET /lessons"], "inferred_calls": ["GET /lessons"]}) == ""
-
-    front = {"pages": [page]}
-    task = {"kind": "block", "id": "x", "name": "LessonForm", "page_id": page["id"],
-            "calls": ["POST /lessons", "PUT /lessons/{param}"]}
-    result = verify_front_task(task, front)
-    assert result["status"] == "выполнено"
-    assert "PUT /lessons/{param} в коде не найден" in result["message"]
-    assert "POST /lessons в коде" not in result["message"]
-    quiet = verify_front_task({**task, "calls": ["POST /lessons"]}, front)
-    assert quiet["message"] == "блок есть на странице"
-    page_task = {"kind": "page", "name": "lessons", "calls": ["GET /nope"]}
-    assert "GET /nope в коде не найден" in verify_front_task(page_task, front)["message"]

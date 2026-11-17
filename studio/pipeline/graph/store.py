@@ -106,12 +106,6 @@ class Store:
         }
         return store
 
-    def bank(self, name: str):
-        """Банк проекта: общие записи, которые пишет один этап и читают другие (см. ``bank.py``)."""
-        from .bank import Bank
-
-        return Bank(self, name)
-
     # ------------------------------------------------------------------ чтение
 
     @property

@@ -311,24 +311,16 @@ def test_cli_test_печатает_итог_и_код_выхода(tmp_path: Pat
 
 
 @pytest.mark.integration
-def test_маршруты_тестов_агент_читает_но_не_запускает(demo: Path) -> None:
+def test_маршруты_тестов_настройки_и_чтение(demo: Path) -> None:
     from test_server import _Server
 
-    from studio.server import access
-
     with _Server(demo) as srv:
-        agent = {"X-Studio-Token": access.derive_token(srv.token, "plan")}
-        with srv.get("/api/tests", agent) as response:
+        with srv.get("/api/tests", {"X-Studio-Token": srv.token}) as response:
             data = json.loads(response.read())
-        assert data["state"] == "none" and "config" not in data  # настройки только человеку
-        for path in ("/api/tests/run", "/api/tests/config"):
-            status, body = srv.post(path, {}, agent)
-            assert status == 403 and body["error"]["code"] == "mode_forbidden", path
+        assert data["state"] == "none" and "config" in data
         status, body = srv.post("/api/tests/config", {"enabled": True,
                                                        "command": ["x", "{junit}"]})
         assert status == 200 and body["config"]["enabled"] is True
         assert srv.post("/api/tests/config", {"timeout_seconds": 1})[0] == 400
         with srv.get("/api/tests", {"X-Studio-Token": srv.token}) as response:
             assert json.loads(response.read())["config"]["command"] == ["x", "{junit}"]
-        status, flow = srv.post("/api/workflow/stage", {"to": "mode"})
-        assert status == 200 and flow["tests"]["enabled"] is True

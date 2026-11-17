@@ -7,8 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from studio.creator import CreateError
-from studio.creator.plan import create_plan
 from studio.env import read_env
 from studio.metadata import save_node_metadata
 from studio.scanner import scan
@@ -546,59 +544,8 @@ def test_многострочное_описание_в_json(tmp_path: Path):
     assert node.acceptance == ["studio: description end"]
 
 
-def test_план_создаёт_скелеты_и_проверяет_занятое_имя(tmp_path: Path):
-    _base_project(tmp_path)
-    result = create_plan(
-        {
-            "title": "HTTPServer",
-            "slug": "httpserver",
-            "description": "Поднимает сервер.",
-            "uses_db": False,
-            "with_test": False,
-        },
-        read_env(tmp_path),
-    )
-    assert result.created[0].path == "app/api/v1/routes/httpserver.py"
-    with pytest.raises(CreateError, match="занято"):
-        create_plan(
-            {
-                "title": "Создать заказ",
-                "slug": "create_order",
-                "description": "Создаёт.",
-                "uses_db": False,
-                "with_test": False,
-            },
-            read_env(tmp_path),
-        )
 
 
-def test_план_откатывает_файлы(tmp_path: Path, monkeypatch):
-    _base_project(tmp_path)
-    calls = {"count": 0}
-    import studio.creator.plan as plan_module
-
-    original = plan_module.atomic_write
-
-    def failing(path, text):
-        calls["count"] += 1
-        if calls["count"] == 2:
-            return False
-        return original(path, text)
-
-    monkeypatch.setattr(plan_module, "atomic_write", failing)
-    with pytest.raises(CreateError):
-        create_plan(
-            {
-                "title": "Новый сценарий",
-                "slug": "new_one",
-                "description": "Описание.",
-                "uses_db": False,
-                "with_test": True,
-            },
-            read_env(tmp_path),
-        )
-    assert not (tmp_path / "app/api/v1/routes/new_one.py").exists()
-    assert not (tmp_path / "app/scenarios/new_one.py").exists()
 
 
 # --------------------------------------------------------------------- WP6

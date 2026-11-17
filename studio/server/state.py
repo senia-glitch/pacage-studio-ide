@@ -2,52 +2,16 @@
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
-import json
 import secrets
 import threading
 import time
 import uuid
-from dataclasses import replace
 from pathlib import Path
 
 from studio import log as slog
 from studio import store
-from studio.agent import (
-    BriefNotFound,
-    BriefOptions,
-    build_brief,
-    build_decompose_prompt,
-    inbox,
-    load_brief,
-    save_brief_sidecars,
-)
-from studio.agent import (
-    save_brief as save_brief_file,
-)
-from studio.agent import (
-    verify_brief as verify_brief_data,
-)
-from studio.agent.brief import load_rules, rules_override_path, standard_rules
-from studio.agent.decompose import (
-    decompose_override_path,
-    load_decompose_template,
-    parse_decompose_answer,
-    standard_decompose_template,
-)
-from studio.agent.report import build_report, save_report
-from studio.agent.sync import build_sync_prompt, check_sync_response
-from studio.agent.sync_json import (
-    SyncJsonError,
-    check_undo_entries,
-    extract_json,
-    same_state,
-)
-from studio.creator import CreateError
-from studio.creator.plan import create_plan, delete_plan, preview_plan, update_plan
 from studio.env import read_env
-from studio.frontend.brief import FRONT_BRIEF_FILENAME, front_prompt_state, load_front_brief
 from studio.frontend.links import check_links
 from studio.metadata import (
     MetadataError,
@@ -62,20 +26,14 @@ from studio.metadata import (
     save_planned_change,
 )
 from studio.metadata.facts import finish_plans
-from studio.metadata.facts import journal as plan_journal
 from studio.metadata.plans import PlanError, build_plan, layer_file, layer_name
 from studio.metamodel import EDGE_KINDS, NODE_KINDS, Graph, Node
 from studio.scanner import scan
 from studio.scanner.anchors import AnchorResolver
-from studio.server import access, autopilot
 from studio.server.devservers import DevServers
-from studio.server.idea import IdeaService
 from studio.server.pipeline import PipelineService
-from studio.server.runner import Runner
-from studio.server.settings import Settings
 from studio.server.tester import TestRunner
-from studio.server.workflow import Workflow
-from studio.source import load_sources, stat_fingerprint
+from studio.source import stat_fingerprint
 
 DEFAULT_POLL = 1.0
 DEBOUNCE = 0.3
@@ -113,25 +71,14 @@ class ProjectState:
         self._watcher: threading.Thread | None = None
         self._watch_last: tuple | None = None
         self._signature: tuple | None = None
-        # Второй счётчик: правки frontend.json и ideas.json (их пишет и агент). Скан кода
+        # Второй счётчик: правки frontend.json (их пишут и снаружи). Скан кода
         # они не требуют, но интерфейс должен увидеть их без перезагрузки вкладки.
         self.aux = 0
         self._aux_stamp: str | None = None
-        # Дорожная карта цепочки «агент ↔ человек»: этап, режим, отчёт.
-        self.workflow = Workflow(self.root, self.lock, self._cond)
-        # Автозапуск агента на его этапах: включается человеком в интерфейсе.
-        self.settings = Settings(self.root)
-        self.runner = Runner(self.root, self.workflow, self.settings)
-        self.workflow.listeners.append(self.runner.on_stage)
-        self.runner.planner = lambda stage: autopilot.job_for(self, stage)
-        self.runner.after = lambda job: autopilot.after_job(self, job)
         # Независимая проверка тестами проекта (кнопка или этап «Отчёт»).
         self.tester = TestRunner(self.root, lambda: self.graph)
-        self.workflow.listeners.append(self.tester.on_stage)
         # Серверы самого проекта (бэкенд, фронтенд) по кнопке; останавливаются вместе со студией.
         self.devservers = DevServers(self.root)
-        # Этап «Идея»: граф идеи, исследователи и помощники (граф и настройки — в .studio).
-        self.idea = IdeaService(self.root)
         # Конвейер v3: банк знаний, этапы, ворота (маршруты /api/pipeline/*, только человек).
         self.pipeline = PipelineService(self.root)
 
@@ -544,79 +491,14 @@ class ProjectState:
 
     # ----------------------------------------------------------------- plans
 
-    @staticmethod
-    def _plan_state(graph, slug: str):
-        for item in graph.plans:
-            if item.slug == slug:
-                return item
-        return None
 
-    def plan_preview(self, data: dict) -> dict:
-        with self.lock:
-            return preview_plan(data, read_env(self.root))
 
-    def plan_create(self, data: dict) -> dict:
-        with self.lock:
-            env = read_env(self.root)
-            result = create_plan(data, env)
-            graph = self.rescan("plan")
-            state = self._plan_state(graph, result.plan.slug)
-            return {
-                "created": [
-                    {"path": item.path, "kind": item.kind, "name": item.name}
-                    for item in result.created
-                ],
-                "plan": state.model_dump() if state is not None else None,
-                "graph": graph.model_dump(),
-            }
 
-    def plan_update(self, data: dict) -> dict:
-        with self.lock:
-            env = read_env(self.root)
-            plan = update_plan(data, env)
-            graph = self.rescan("plan")
-            state = self._plan_state(graph, plan.slug)
-            return {
-                "plan": state.model_dump() if state is not None else None,
-                "graph": graph.model_dump(),
-            }
 
-    def plan_delete(self, data: dict) -> dict:
-        with self.lock:
-            env = read_env(self.root)
-            result = delete_plan(data, env)
-            graph = self.rescan("plan")
-            return {
-                "slug": result.slug,
-                "deleted_files": result.deleted_files,
-                "kept_files": result.kept_files,
-                "removed_nodes": result.removed_nodes,
-                "removed_edges": result.removed_edges,
-                "graph": graph.model_dump(),
-            }
 
     # ------------------------------------------------------------ decompose
 
-    def decompose_prompt(self, data: dict) -> dict:
-        with self.lock:
-            raw = data.get("task")
-            task = raw.strip() if isinstance(raw, str) else ""
-            if not task:
-                raise MetadataError("invalid_input", "Нужен текст задачи")
-            mode = "improve" if data.get("mode") == "improve" else "new"
-            env = read_env(self.root)
-            self.ensure_graph()
-            return {"prompt": build_decompose_prompt(self.graph, env, task, mode)}
 
-    def decompose_parse(self, data: dict) -> dict:
-        """Разобрать ответ LLM по идее: сценарии бэкенда и страницы фронтенда."""
-        text = data.get("text")
-        if not isinstance(text, str) or not text.strip():
-            raise MetadataError("invalid_input", "Вставьте ответ LLM")
-        try:
-            return parse_decompose_answer(text)
-        except SyncJsonError as exc:
-            raise MetadataError("invalid_input", str(exc)) from exc
 
     # -------------------------------------------------- шаблонные промпты
 
@@ -630,434 +512,43 @@ class ProjectState:
 
     # ------------------------------------------------------------- идеи
 
-    def _ideas_path(self) -> Path:
-        return Path(self.root) / ".studio" / "ideas.json"
 
-    def load_ideas(self) -> dict:
-        """Доска идей проекта; файл может не существовать — доска пустая."""
-        try:
-            data = json.loads(self._ideas_path().read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {"version": 1, "activeId": "", "ideas": []}
-        if not isinstance(data, dict) or not isinstance(data.get("ideas"), list):
-            return {"version": 1, "activeId": "", "ideas": []}
-        return data
 
-    @staticmethod
-    def _board_revision(board: dict) -> int:
-        value = board.get("revision") if isinstance(board, dict) else 0
-        return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
-    def save_ideas(self, data: dict) -> dict:
-        """Сохранить доску. Если передан revision, он должен совпадать с серверным.
 
-        Так UI и агент не затирают друг другу записи: проигравший получает 409
-        ideas_conflict с актуальной доской в details.board и перечитывает её.
-        Без revision запись принимается (совместимость со старыми клиентами).
-        """
-        if not isinstance(data, dict) or not isinstance(data.get("ideas"), list):
-            raise MetadataError("invalid_input", "Ожидалась доска идей с массивом ideas")
-        actor = str(data.pop("_actor", "") or "")
-        if len(data["ideas"]) > 500:
-            raise MetadataError("invalid_input", "Слишком много идей в доске (максимум 500)")
-        with self.lock:
-            current = self.load_ideas()
-            current_revision = self._board_revision(current)
-            if "revision" in data and self._board_revision(data) != current_revision:
-                error = MetadataError(
-                    "ideas_conflict",
-                    "Доска идей изменилась с момента загрузки (её правил агент или другая "
-                    "вкладка). Перечитайте её: GET /api/ideas",
-                )
-                error.details = {"board": current}
-                raise error
-            if actor == "agent":
-                incoming = {
-                    str(item.get("id")): item for item in data["ideas"] if isinstance(item, dict)
-                }
-                for old in current.get("ideas") or []:
-                    if not isinstance(old, dict) or old.get("created_by"):
-                        continue
-                    new = incoming.get(str(old.get("id")))
-                    same = new is not None and {
-                        k: v for k, v in new.items() if k != "created_by"
-                    } == {k: v for k, v in old.items() if k != "created_by"}
-                    if not same:
-                        raise MetadataError(
-                            "mode_forbidden",
-                            f"Идея «{old.get('title') or old.get('id')}» создана человеком: агент "
-                            "не может её удалить или изменить — отправьте её без изменений",
-                        )
-            known = {
-                str(item.get("id")): item
-                for item in current.get("ideas") or []
-                if isinstance(item, dict)
-            }
-            ideas = []
-            for item in data["ideas"]:
-                if isinstance(item, dict):
-                    item = dict(item)
-                    item.pop("created_by", None)  # метку ставит только сервер
-                    old = known.get(str(item.get("id")))
-                    if old is not None and old.get("created_by"):
-                        item["created_by"] = old["created_by"]
-                    elif old is None and actor == "agent":
-                        item["created_by"] = "agent"
-                ideas.append(item)
-            board = {**data, "ideas": ideas, "revision": current_revision + 1}
-            self._write_ideas(board)
-            return {"ok": True, "count": len(data["ideas"]), "revision": board["revision"]}
 
-    def _write_ideas(self, board: dict) -> None:
-        path = self._ideas_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(
-            json.dumps(board, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-            newline="\n",
-        )
-        tmp.replace(path)
-
-    def mutate_ideas(self, mutator):
-        """Прочитать доску, изменить её ``mutator(board)`` и записать с новой ревизией.
-
-        Весь цикл идёт под замком состояния: параллельные записи UI и агента не теряются.
-        Возвращает то, что вернул ``mutator``; если он вернул ``False`` — записи нет.
-        """
-        with self.lock:
-            board = self.load_ideas()
-            result = mutator(board)
-            if result is False:
-                return result
-            board["revision"] = self._board_revision(board) + 1
-            self._write_ideas(board)
-            return result
 
     # ------------------------------------------------------------- агент
 
-    def saved_brief(self) -> dict:
-        """ТЗ, которое пользователь сохранил в проект: его и должен реализовать агент."""
-        from studio.agent.brief import BRIEF_FILENAME
-
-        with self.lock:
-            path = Path(self.root) / ".studio" / BRIEF_FILENAME
-            if not path.is_file():
-                raise BriefNotFound(
-                    "Сохранённого ТЗ нет: пользователь должен сохранить его в окне «ТЗ» студии"
-                )
-            try:
-                markdown = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError) as exc:
-                raise BriefNotFound(f"Файл ТЗ не читается: {exc}") from exc
-            data = load_brief(self.root, path)
-            return {
-                "markdown": markdown,
-                "brief_id": str(data.get("brief_id") or ""),
-                "fingerprint": str(data.get("fingerprint") or ""),
-                "path": f".studio/{BRIEF_FILENAME}",
-                "tasks": data.get("tasks") or [],
-            }
 
     def check_front_links(self, front: dict) -> dict:
         """Сверить объявленные вызовы фронтенда (calls) с эндпоинтами бэкенда."""
         return check_links(front, self.ensure_graph(), read_env(self.root).api_prefix)
 
-    def _briefs_status(self) -> dict:
-        """Сколько задач в сохранённых ТЗ бэкенда и фронтенда (None — ТЗ нет)."""
-        status: dict = {"backend": None, "frontend": None}
-        with contextlib.suppress(BriefNotFound):
-            status["backend"] = len(self.saved_brief().get("tasks") or [])
-        path = Path(self.root) / ".studio" / FRONT_BRIEF_FILENAME
-        if path.is_file():
-            with contextlib.suppress(FileNotFoundError):
-                brief = load_front_brief(self.root, path.as_posix())
-                status["frontend"] = len(brief.get("tasks") or [])
-        return status
 
-    def mode_token(self, mode: str) -> str:
-        return access.derive_token(self.token, mode)
 
-    def agent_info(self, mode: str) -> dict:
-        """Рукопожатие для MCP-сервера и окна «AI-агент»: режим, версия, корень проекта.
-
-        Токены режимов и состояние ТЗ отдаются только интерфейсу (полный доступ).
-        """
-        from studio import __version__
-
-        info: dict = {
-            "studio_version": __version__,
-            "mode": mode,
-            "project_root": str(self.root),
-            "revision": self.revision,
-        }
-        if mode == access.FULL:
-            info["tokens"] = {m: self.mode_token(m) for m in access.AGENT_MODES}
-            info["briefs"] = self._briefs_status()
-        return info
 
     # ------------------------------------------------- синхронизация описаний
 
-    def sync_prompt(self, data: dict) -> dict:
-        with self.lock:
-            graph = self.ensure_graph()
-            scope = str(data.get("scope") or "all")
-            domain = str(data.get("domain") or "")
-            markdown = build_sync_prompt(graph, scope, domain)
-            return {"markdown": markdown}
 
-    def report(self, data: dict) -> dict:
-        """Отчёт по бэкенду по выбранным разделам; markdown сохраняется в .studio/report.md."""
-        with self.lock:
-            graph = self.ensure_graph()
-            try:
-                result = build_report(graph, data.get("sections"))
-            except ValueError as exc:
-                raise MetadataError("invalid_input", str(exc)) from exc
-            try:
-                result["path"] = save_report(self.root, result["markdown"])
-            except OSError as exc:
-                raise MetadataError("not_writable", str(exc)) from exc
-            return result
 
-    def sync_apply(self, data: dict) -> dict:
-        """Принять JSON-ответ агента: проверка + отличия; запись только при apply=true."""
-        with self.lock:
-            graph = self.ensure_graph()
-            try:
-                report = check_sync_response(
-                    graph, extract_json(data.get("json")), plan_journal(self.root)
-                )
-            except SyncJsonError as exc:
-                raise MetadataError("invalid_input", str(exc)) from exc
-            report["applied"] = 0
-            report["undo"] = []
-            if data.get("apply") is not True:
-                return report
-            chosen = data.get("ids")
-            allowed = {str(item) for item in chosen} if isinstance(chosen, list) else None
-            by_id = graph.by_id()
-            for row in report["rows"]:
-                if row["status"] != "change" or (allowed is not None and row["id"] not in allowed):
-                    continue
-                node = by_id[row["id"]]
-                save_node_metadata(
-                    self.root,
-                    node,
-                    row["after"]["description"],
-                    row["after"]["acceptance"],
-                    node.domain or "",
-                )
-                row["status"] = "applied"
-                report["applied"] += 1
-                report["undo"].append(
-                    {"id": row["id"], "before": row["before"], "after": row["after"]}
-                )
-            if report["applied"]:
-                report["graph"] = self.rescan("sync").model_dump()
-            return report
 
-    def sync_undo(self, data: dict) -> dict:
-        """Вернуть описания, записанные «Применить». Узел, который успели
-        изменить после применения, не трогается — он попадает в skipped."""
-        with self.lock:
-            graph = self.ensure_graph()
-            try:
-                entries = check_undo_entries(data.get("undo"))
-            except SyncJsonError as exc:
-                raise MetadataError("invalid_input", str(exc)) from exc
-            by_id = graph.by_id()
-            restored, skipped = 0, []
-            for entry in entries:
-                node = by_id.get(entry["id"])
-                if node is None or node.planned:
-                    skipped.append(entry["id"])
-                    continue
-                current = {"description": node.description, "acceptance": node.acceptance}
-                if not same_state(current, entry["after"]):
-                    skipped.append(entry["id"])
-                    continue
-                save_node_metadata(
-                    self.root,
-                    node,
-                    entry["before"]["description"],
-                    entry["before"]["acceptance"],
-                    node.domain or "",
-                )
-                restored += 1
-            result = {"restored": restored, "skipped": skipped}
-            if restored:
-                result["graph"] = self.rescan("sync-undo").model_dump()
-            return result
 
-    def prompts_state(self) -> dict:
-        root = Path(self.root)
-        states = {
-            "rules": (load_rules(root), standard_rules(), rules_override_path(root)),
-            "decompose": (
-                load_decompose_template(root, "new"),
-                standard_decompose_template("new"),
-                decompose_override_path(root, "new"),
-            ),
-            "decompose-improve": (
-                load_decompose_template(root, "improve"),
-                standard_decompose_template("improve"),
-                decompose_override_path(root, "improve"),
-            ),
-            "frontend-brief": front_prompt_state(root, "frontend-brief"),
-            "frontend-report": front_prompt_state(root, "frontend-report"),
-        }
-        return {
-            kind: {
-                "current": current,
-                "standard": standard,
-                "overridden": bool(override and override.is_file()),
-            }
-            for kind, (current, standard, override) in states.items()
-        }
 
-    def save_prompt(self, data: dict) -> dict:
-        kind = str(data.get("kind") or "")
-        if kind not in self._PROMPT_PATHS:
-            raise MetadataError("invalid_input", "Неизвестный шаблон промпта")
-        target = Path(self.root) / self._PROMPT_PATHS[kind]
-        if data.get("reset"):
-            target.unlink(missing_ok=True)
-        else:
-            text = str(data.get("text") or "")
-            if not text.strip():
-                raise MetadataError("invalid_input", "Текст шаблона пуст")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(text, encoding="utf-8", newline="\n")
-        return self.prompts_state()
 
-    def decompose_apply(self, data: dict) -> dict:
-        with self.lock:
-            scenarios = data.get("scenarios")
-            if not isinstance(scenarios, list):
-                raise MetadataError("invalid_input", "Нужен массив scenarios")
-            if not scenarios:
-                raise MetadataError("invalid_input", "Пустой список сценариев")
-            env = read_env(self.root)
-            created = []
-            plan_slugs = []
-            for index, item in enumerate(scenarios):
-                if not isinstance(item, dict):
-                    raise CreateError(
-                        f"scenarios[{index}] должен быть объектом", "W_PLAN_INVALID"
-                    )
-                try:
-                    result = create_plan(item, env)
-                except CreateError as exc:
-                    self.rescan("decompose")
-                    suffix = ""
-                    if plan_slugs:
-                        created_count = len(plan_slugs)
-                        total = len(scenarios)
-                        slugs = ", ".join(plan_slugs)
-                        suffix = f"; создано {created_count} из {total} ({slugs})"
-                    raise CreateError(str(exc) + suffix, exc.code) from exc
-                created.extend(
-                    {"path": entry.path, "kind": entry.kind, "name": entry.name}
-                    for entry in result.created
-                )
-                plan_slugs.append(result.plan.slug)
-            graph = self.rescan("decompose")
-            return {"created": created, "plans": plan_slugs, "graph": graph.model_dump()}
 
     # -------------------------------------------------------------- agent
 
-    @staticmethod
-    def _brief_options(data: dict) -> BriefOptions:
-        scope = str(data.get("scope") or "")
-        only = None
-        if scope not in ("all", "scenario") and "only" in data:
-            raw_only = data.get("only") or []
-            if isinstance(raw_only, str):
-                raw_only = [raw_only]
-            only = tuple(str(item) for item in raw_only if str(item).strip())
-        raw_plans = data.get("plans")
-        if raw_plans is None:
-            plans = None
-        else:
-            if isinstance(raw_plans, str):
-                raw_plans = [raw_plans]
-            plans = tuple(str(item) for item in raw_plans if str(item).strip())
-        raw_sections = data.get("sections")
-        if raw_sections is not None and not isinstance(raw_sections, (list, tuple)):
-            raise MetadataError("invalid_input", "Разделы нужно передать списком")
-        return BriefOptions(
-            map_mode=str(data.get("map") or ""),
-            only=only,
-            plans=plans,
-            scenario=str(data.get("scenario") or ""),
-            include_empty=bool(data.get("include_empty")),
-            sections=None if raw_sections is None else tuple(str(i) for i in raw_sections),
-        )
 
-    def _collect_brief(self, data: dict):
-        sources = load_sources(read_env(self.root))
-        return build_brief(self.ensure_graph(), sources, self._brief_options(data))
 
-    def brief(self, data: dict) -> dict:
-        with self.lock:
-            brief = self._collect_brief(data)
-            save_brief_sidecars(self.root, brief)
-            return {
-                "markdown": brief.markdown,
-                "brief_id": brief.brief_id,
-                "fingerprint": brief.fingerprint,
-                "stats": brief.stats,
-                "warnings": brief.warnings,
-                "tasks": [
-                    {
-                        "number": item["number"],
-                        "kind": item.get("kind") or item.get("type", ""),
-                        "anchor": item.get("anchor")
-                        or item.get("slug")
-                        or item.get("title", ""),
-                        "target_file": item.get("target_file", ""),
-                    }
-                    for item in brief.tasks
-                ],
-                "unready": brief.unready,
-            }
 
-    def save_brief(self, data: dict) -> dict:
-        with self.lock:
-            brief = self._collect_brief(data)
-            edited = data.get("markdown")
-            if edited is not None:
-                brief = self._with_edited_markdown(brief, edited)
-            path = save_brief_file(self.root, brief)
-            return {
-                "path": path.as_posix(),
-                "brief_id": brief.brief_id,
-                "stats": brief.stats,
-            }
 
-    @staticmethod
-    def _with_edited_markdown(brief, edited):
-        """Текст ТЗ с правками пользователя; служебный маркер должен остаться на месте."""
-        if not isinstance(edited, str) or not edited.strip():
-            raise MetadataError("invalid_input", "Текст ТЗ пуст")
-        if "<!-- studio-brief:" not in edited or brief.brief_id not in edited:
-            raise MetadataError(
-                "invalid_input",
-                "В тексте пропал служебный маркер ТЗ (<!-- studio-brief: … -->) — без него "
-                "studio verify не найдёт задачи. Верните маркер или сохраните без правок.",
-            )
-        return replace(brief, markdown=edited.rstrip() + "\n")
 
-    def verify_brief(self, target: str | None) -> dict:
-        with self.lock:
-            data = load_brief(self.root, target)
-            return verify_brief_data(self.ensure_graph(), data)
 
     # -------------------------------------------------------------- long-poll
 
     def wait_for_change(self, rev: int, timeout: float = 25, aux: int | None = None) -> int:
-        """Ждать смены ревизии (а если передан aux — и счётчика frontend/идей)."""
+        """Ждать смены ревизии (а если передан aux — и счётчика frontend)."""
         with self.lock:
 
             def changed() -> bool:
@@ -1069,22 +560,14 @@ class ProjectState:
 
     def _aux_stamp_now(self) -> str:
         digest = hashlib.sha1()
-        for name in ("frontend.json", "ideas.json", "workflow.json"):
-            try:
-                digest.update((self.root / ".studio" / name).read_bytes())
-            except OSError:
-                digest.update(b"-")
-            digest.update(b"|")
-        try:  # входящие отчёты агента: появился, принят или отклонён
-            for path in sorted(inbox.reports_dir(self.root).glob("r-*.json")):
-                info = path.stat()
-                digest.update(f"{path.name}:{info.st_mtime_ns}:{info.st_size}|".encode())
+        try:
+            digest.update((self.root / ".studio" / "frontend.json").read_bytes())
         except OSError:
             digest.update(b"-")
         return digest.hexdigest()
 
     def check_aux(self) -> bool:
-        """Сравнить подпись frontend.json и ideas.json; при изменении поднять aux."""
+        """Сравнить подпись frontend.json; при изменении поднять aux."""
         stamp = self._aux_stamp_now()
         with self.lock:
             first = self._aux_stamp is None
@@ -1180,6 +663,5 @@ __all__ = [
     "DEFAULT_POLL",
     "NodeNotFound",
     "ProjectState",
-    "CreateError",
 ]
 

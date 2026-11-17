@@ -9,7 +9,6 @@
 <meta name="studio-token" content="">
 <link rel="stylesheet" href="/static/app.css">
 <link rel="stylesheet" href="/static/workspace.css">
-<link rel="stylesheet" href="/static/roadmap.css">
 <link rel="stylesheet" href="/static/pipeline.css">
 </head>
 <body>
@@ -18,25 +17,13 @@
     <span class="logo" id="logoBtn" title="О проекте"><span class="logo-mark">⬢</span> studio</span>
     <span class="tabs" role="tablist" aria-label="Разделы">
       <button class="tabbtn on" id="tab-pipeline-button" data-tab="pipeline" role="tab" aria-selected="true" aria-controls="tab-pipeline" title="От идеи до работающего ПО: пять этапов, ворота качества и банк знаний"><span class="tab-index">0</span> Конвейер</button>
-      <button class="tabbtn" id="tab-idea-button" data-tab="idea" role="tab" aria-selected="false" aria-controls="tab-idea" title="Из сырой идеи получается проверенная документация"><span class="tab-index">1</span> Идея</button>
-      <button class="tabbtn" id="tab-ideas-button" data-tab="ideas" role="tab" aria-selected="false" aria-controls="tab-ideas" title="Что строить дальше: идеи, разбор и выбор задач"><span class="tab-index">2</span> План</button>
-      <button class="tabbtn" id="tab-system-button" data-tab="system" role="tab" aria-selected="false" aria-controls="tab-overview" title="Вся система: обзор, бэкенд и фронтенд"><span class="tab-index">3</span> Система</button>
-      <button class="tabbtn" id="tab-settings-button" data-tab="settings" role="tab" aria-selected="false" aria-controls="tab-settings" title="Агенты и модели, проект, промпты, режим работы"><span class="tab-index">4</span> Настройки</button>
+      <button class="tabbtn" id="tab-system-button" data-tab="system" role="tab" aria-selected="false" aria-controls="tab-overview" title="Вся система: обзор, бэкенд и фронтенд"><span class="tab-index">1</span> Система</button>
+      <button class="tabbtn" id="tab-settings-button" data-tab="settings" role="tab" aria-selected="false" aria-controls="tab-settings" title="Настройки конвейера и проекта: серверы, тесты, откат"><span class="tab-index">2</span> Настройки</button>
     </span>
   </div>
   <div class="header-global">
     <span id="liveDot" class="live off" title="нет связи со студией">●</span>
-    <span class="todo-chip-wrap">
-      <button id="briefBtn" type="button" title="Планируемые узлы и статус ТЗ">К реализации: 0</button>
-      <button id="todoMenuBtn" type="button" class="todo-menu-btn" title="Меню TODO" aria-label="Меню TODO">▾</button>
-      <span id="todoMenuPanel" class="todo-menu-panel" hidden>
-        <button id="todoBriefAction" type="button">Сформировать ТЗ для AI-агента</button>
-        <button id="todoStatusAction" type="button">Проверить выполнение ТЗ</button>
-      </span>
-    </span>
     <button id="diagBtn" type="button" title="Диагностика и жёлтые пометки">⚠ 0</button>
-    <button id="agentBtn" type="button" hidden title="Запасной способ подключения агента: строка с адресом и токеном (обычно не нужна — агент находит студию сам)">AI-агент</button>
-    <button id="agentReportsBtn" type="button" class="inbox-btn" hidden title="Отчёты агента, ждущие вашего решения: откройте, проверьте и примите нужное" aria-label="Отчёты агента">✉ <b id="agentReportsCount">0</b></button>
   </div>
   <div class="header-canvas">
     <div class="map-mode" role="group" aria-label="Режим карты"><button type="button" class="on" data-map-mode="fact">Факт</button><button type="button" data-map-mode="plan">План</button></div>
@@ -50,7 +37,6 @@
     </span>
   </div>
 </header>
-<nav id="roadmap" class="roadmap" aria-label="Дорожная карта" hidden></nav>
 <div id="offlineBanner" class="offline-banner" role="alert" hidden>Нет связи со студией: правки не сохраняются. Перезапустите <b>studio</b> и обновите страницу.</div>
 <main>
   <nav class="sysbar" id="sysbar" role="tablist" aria-label="Система" hidden>
@@ -64,46 +50,20 @@
   <section class="tab on" id="tab-pipeline" role="tabpanel" aria-labelledby="tab-pipeline-button">
     <div id="pipelineHost" class="pl-host"></div>
   </section>
-  <section class="tab" id="tab-idea" role="tabpanel" aria-labelledby="tab-idea-button">
-    <div id="ideaHost"></div>
-  </section>
   <section class="tab" id="tab-map" role="tabpanel" aria-labelledby="tab-map-button">
     <div id="mapPane">
-      <div class="mapbar"><span class="map-mode-caption" id="mapModeCaption">Фактическая структура проекта</span><span class="hint" id="mapSelectionHint">Выберите узел на карте · наведите курсор на узел, чтобы добавить потомка</span><span class="spacer"></span><button type="button" id="syncPromptsBtn" title="Промпт для AI-агента: синхронизировать описания узлов с реальным кодом">⇄ Синхр. описаний</button><button type="button" id="reportBtn" title="Отчёт по проекту: сводка, структура, покрытие, планы, модели, диагностика">Отчёт</button><button type="button" id="addDomainBtn">＋ Домен</button><button type="button" id="inspectorToggle" aria-label="Скрыть свойства" title="Скрыть свойства">Скрыть свойства</button></div>
+      <div class="mapbar"><span class="map-mode-caption" id="mapModeCaption">Фактическая структура проекта</span><span class="hint" id="mapSelectionHint">Выберите узел на карте · наведите курсор на узел, чтобы добавить потомка</span><span class="spacer"></span><button type="button" id="addDomainBtn">＋ Домен</button><button type="button" id="inspectorToggle" aria-label="Скрыть свойства" title="Скрыть свойства">Скрыть свойства</button></div>
       <div class="map-workspace"><div class="map-center"><aside id="treePanel" aria-label="Структура проекта"><div id="treeHead"><b>Структура</b><button type="button" id="treeFoldAll" title="Свернуть все ветки">Свернуть всё</button><button type="button" id="treeCollapse" aria-label="Скрыть дерево" title="Скрыть дерево">‹</button></div><label class="search-box-left"><input id="searchBox" type="search" placeholder="Поиск: метод, URL, имя, домен" aria-label="Поиск узлов карты"><span class="hint" id="searchCount"></span></label><div id="treeModes" class="tree-modes" role="group" aria-label="Режим дерева"><button type="button" data-tree-mode="all" class="on">всё</button><button type="button" data-tree-mode="fact">факт</button><button type="button" data-tree-mode="plan">план</button></div><div id="treeBody" role="tree" aria-label="Иерархия узлов проекта" tabindex="0"></div><div id="treeFoot">Клик по узлу — камера центрируется на карте</div></aside><div class="tree-resize" id="treeResize" role="separator" aria-orientation="vertical" aria-label="Изменить ширину дерева"></div><div class="canvas" id="mapCanvas"><div class="view" id="mapView"><div class="stage" id="mapStage"><svg class="edges" id="mapEdges"></svg></div></div></div><button type="button" id="treeTab" title="Показать дерево">☰ Структура</button></div><div class="inspector-resize" id="inspectorResize" role="separator" aria-orientation="vertical" aria-label="Изменить ширину панели свойств"></div><aside id="inspector"><div id="inspHead"><div class="insp-head-row"><h3>Свойства узла</h3><button type="button" id="collapseInspector" aria-label="Скрыть панель">›</button></div><div id="inspChips" class="chips"></div></div><div id="inspBody"><p class="hint">Выберите узел на карте.</p></div><div id="inspFoot">Плановые данные сохраняются в .studio/metadata.json.</div></aside></div>
-    </div>
-  </section>
-  <section class="tab" id="tab-ideas" role="tabpanel" aria-labelledby="tab-ideas-button">
-    <div id="ideasPane">
-      <div class="ideas-toolbar"><div><div class="eyebrow">ПРОЕКТИРОВАНИЕ</div><h2>План: идеи и сценарии</h2><p>Выберите идею слева: её узел и связанные сценарии займут весь канвас.</p></div><div class="ideas-actions"><span class="save-indicator" id="ideasSaveState" role="status" aria-live="polite">Все изменения сохранены</span><button type="button" id="ideasUndoBtn" title="Отменить последнее действие доски (Ctrl+Z)" hidden>↩ Отменить</button><button type="button" id="ideasExportBtn" title="Скачать доску идей в JSON">Экспорт</button><button type="button" id="ideasImportBtn" title="Загрузить доску идей из JSON">Импорт</button><input type="file" id="ideasImportFile" accept="application/json,.json" hidden><button type="button" id="addIdeaBtn" class="primary">＋ Новая идея</button></div></div>
-      <div class="ideas-workspace">
-        <aside class="ideas-rail"><div class="rail-title">ИДЕИ ПРОЕКТА</div><label class="search-box-left"><input id="ideaSearch" type="search" placeholder="Поиск по идеям и сценариям" aria-label="Поиск по идеям"><span class="hint" id="ideaSearchCount"></span></label><div id="ideaList"></div><div class="rail-note manual-only"><b>Рабочий процесс</b><span>Идея → промпт → ответ LLM → сценарии</span></div><div class="rail-note agent-only"><b>Рабочий процесс</b><span>Идеи приносит агент. Карточку свайпом вверх — на карту, вниз — удалить.</span></div></aside>
-        <div class="ideas-scroll"><div class="ideas-canvas" id="ideasCanvas"><div id="ideasBoard"></div></div></div>
-      </div>
     </div>
   </section>
   <section class="tab" id="tab-frontend" role="tabpanel" aria-labelledby="tab-frontend-button">
     <div id="frontPane">
-      <div class="mapbar"><div><span class="map-mode-caption" id="frontHeading">Фронтенд</span><span class="hint" id="frontCaption">frontend/</span></div><span class="spacer"></span><div id="frontStats" class="front-stats"></div><div class="map-mode" role="group" aria-label="Режим фронтенда"><button type="button" class="on" data-front-mode="fact">Факт</button><button type="button" data-front-mode="plan">План</button></div><button type="button" id="frontDomainBtn" title="Добавить домен (роль)">＋ Домен</button><button type="button" id="frontSyncBtn" title="Синхронизировать описания фронтенда с кодом">⇄ Синхр. описаний</button><button type="button" id="frontBriefBtn" title="Сформировать ТЗ по фронтенду">⇄ ТЗ…</button><button type="button" id="frontVerifyBtn" title="Проверить по коду, выполнено ли последнее ТЗ фронтенда">Проверить ТЗ</button><button type="button" id="frontFitBtn" title="Вписать карту фронтенда (F)">⟲ Вписать</button><button type="button" id="frontReportBtn" title="Отчёт о существующем фронтенде">Отчёт</button><button type="button" id="frontRescan" title="Перечитать frontend/">⟳ Пересканировать</button></div>
+      <div class="mapbar"><div><span class="map-mode-caption" id="frontHeading">Фронтенд</span><span class="hint" id="frontCaption">frontend/</span></div><span class="spacer"></span><div id="frontStats" class="front-stats"></div><div class="map-mode" role="group" aria-label="Режим фронтенда"><button type="button" class="on" data-front-mode="fact">Факт</button><button type="button" data-front-mode="plan">План</button></div><button type="button" id="frontDomainBtn" title="Добавить домен (роль)">＋ Домен</button><button type="button" id="frontFitBtn" title="Вписать карту фронтенда (F)">⟲ Вписать</button><button type="button" id="frontRescan" title="Перечитать frontend/">⟳ Пересканировать</button></div>
       <div class="front-workspace"><aside class="front-tree"><div class="rail-title">СТРУКТУРА FRONTEND/</div><label class="search-box-left"><input id="frontSearch" type="search" placeholder="Поиск: страница, блок, домен" aria-label="Поиск узлов фронтенда"><span class="hint" id="frontSearchCount"></span></label><div class="front-tree-tools"><div class="front-tree-modes" role="group" aria-label="Режим дерева"><button type="button" data-tree-mode="all" class="on">всё</button><button type="button" data-tree-mode="fact">факт</button><button type="button" data-tree-mode="plan">план</button></div><button type="button" id="frontTreeFold" title="Свернуть все ветки">Свернуть всё</button></div><div id="frontTreeBody"><p class="hint">Откройте вкладку — структура придёт.</p></div></aside><main class="front-canvas canvas" id="frontCanvas"><div class="view" id="frontView"><div class="stage" id="frontStage"><svg class="edges" id="frontEdges"></svg></div></div><div id="frontEmpty"></div><div id="frontUndo" hidden><button type="button" id="frontUndoBtn">↩ Вернуть удалённое (Ctrl+Z)</button></div></main><aside class="front-violations front-right" id="frontViolations"><div class="front-tabs-bar"><button type="button" class="on" id="frontTabProps">Свойства</button><button type="button" id="frontTabViol">Нарушения<span id="frontViolCount" class="chip"></span></button></div><div id="frontProps"><p class="hint">Выберите узел на канвасе.</p></div><div id="frontViolWrap" hidden><div id="frontViolBody"><p class="hint">Загрузка по открытии вкладки.</p></div></div></aside></div>
     </div>
   </section>
   <section class="tab" id="tab-settings" role="tabpanel" aria-labelledby="tab-settings-button">
-    <div class="settings-shell">
-      <nav class="settings-nav" id="settingsNav" aria-label="Разделы настроек">
-        <button type="button" data-sec="agents" class="on">Агенты</button>
-        <button type="button" data-sec="project">Проект</button>
-        <button type="button" data-sec="prompts">Промпты</button>
-        <button type="button" data-sec="mode">Режим работы</button>
-      </nav>
-      <div class="settings-pane">
-        <div data-sec-body="prompts" hidden>
-          <div class="settings-head"><div class="eyebrow">ПРОМПТЫ</div><h2>Промпты и правила</h2><p>Шаблонные промпты пакета для этого проекта. Переопределения хранятся в <code>.studio/prompts/</code>; кнопка «Вернуть стандарт» удаляет переопределение.</p></div>
-          <div id="settingsBody"><p class="hint">Загрузка…</p></div>
-        </div>
-        <div id="agentBody" class="agent-body"><p class="hint">Загрузка…</p></div>
-      </div>
-    </div>
+    <div id="projectBody" class="pl-host"><p class="hint">Загрузка…</p></div>
   </section>
 </main>
 <div id="toast"></div>

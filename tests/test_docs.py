@@ -64,16 +64,6 @@ def test_spec_описывает_новую_реальность():
     assert "# studio:" not in spec
 
 
-def test_правила_и_документация_агента():
-    rules = (ROOT / "studio/agent/rules.md").read_text(encoding="utf-8")
-    assert rules.count("\n1. ") == 1
-    assert "14. Итоговый отчёт" in rules
-    assert "## Работа по цепочке" in rules
-    assert "19. В `updates`" in rules
-    assert "ОДИН JSON-блок" in rules
-    docs = (ROOT / "docs/agent-brief.md").read_text(encoding="utf-8")
-    assert "studio brief" in docs
-    assert "studio verify" in docs
 
 
 def test_changelog_и_license():

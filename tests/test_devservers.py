@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from studio.metadata import MetadataError
-from studio.server import access, devservers
+from studio.server import devservers
 from studio.server.devservers import DevServers
 
 # Крошечный «сервер проекта»: печатает адрес в стиле Vite/uvicorn и слушает порт из аргумента.
@@ -214,12 +214,6 @@ def test_нечего_запускать_и_неверное_имя(tmp_path: Pa
 # --------------------------------------------------------------- права
 
 
-def test_серверы_проекта_закрыты_для_токенов_агента() -> None:
-    for mode in access.AGENT_MODES:
-        for method, path in (("GET", "/api/devservers"), ("POST", "/api/devservers/start"),
-                             ("POST", "/api/devservers/stop"), ("POST", "/api/devservers/config")):
-            assert not access.route_allowed(mode, method, path)
-        assert access.route_allowed(access.FULL, "POST", "/api/devservers/start")
 
 
 def test_ссылка_берётся_с_нашим_портом_а_не_с_первого_адреса_в_выводе(tmp_path: Path, cleanup) -> None:

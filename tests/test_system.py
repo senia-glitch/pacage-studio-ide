@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 import json
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import pytest
-from agent_helpers import call
-from test_catalog import CREDENTIALS
 from test_server import _Server
 
-from studio.agent import adapters
-from studio.server.idea import IdeaService
 from studio.server.state import ProjectState
 from studio.server.system import NO_DOMAIN, build_system
 
 
-def _build(root: Path, front: dict | None = None, links: dict | None = None, idea=None) -> dict:
+def _build(
+    root: Path, front: dict | None = None, links: dict | None = None, pipeline=None
+) -> dict:
     state = ProjectState(root)
     front = front if front is not None else {"pages": []}
-    return build_system(state.ensure_graph(), front, links if links is not None else {}, idea)
+    return build_system(state.ensure_graph(), front, links if links is not None else {}, pipeline)
 
 
 def test_срезы_по_доменам_с_данными_и_тестами(demo: Path) -> None:
@@ -74,47 +74,32 @@ def test_страницы_подставляются_к_эндпоинтам_и_
     assert out["summary"]["planned"] == 1 and out["summary"]["missing_calls"] == 1
 
 
-def test_пустой_проект_и_этап_идея(tmp_path: Path) -> None:
+def test_пустой_проект_и_конвейер(tmp_path: Path) -> None:
     state = ProjectState(tmp_path)
-    out = build_system(state.ensure_graph(), {"pages": []}, {}, state.idea)
-    assert out["empty"] and out["domains"] == [] and out["idea"] == {
-        "started": False, "title": "", "scenarios": 0}
-    service = IdeaService(tmp_path)
-    service.create("Парикмахерская")
-    project = service.need()
-    project.act("set_sphere", {"title": "парикмахерская"})
-    project.act("add_role", {"title": "Клиент", "body": "записывается"})
-    project.act("add_scenario", {"title": "Запись", "body": "клиент записывается", "roles": ["Клиент"]})
-    started = build_system(state.ensure_graph(), {"pages": []}, {}, service)
-    assert started["idea"]["started"] and started["idea"]["title"] == "Парикмахерская"
-    assert started["idea"]["scenarios"] == 1
+    out = build_system(state.ensure_graph(), {"pages": []}, {})
+    assert out["empty"] and out["domains"] == []
+    assert out["pipeline"] == {"started": False, "title": "", "scenarios": 0}
+    given = {"started": True, "title": "Парикмахерская", "scenarios": 1}
+    started = build_system(state.ensure_graph(), {"pages": []}, {}, given)
+    assert started["pipeline"] == given
 
 
-def test_модели_без_вызова_инструментов_помечены(monkeypatch) -> None:
-    """Агенту этапа «Идея» нужны вызовы инструментов: каталог говорит, какие модели их умеют."""
-    plain = {"id": "plain", "providerID": "opencode-go", "name": "Plain",
-             "cost": {"input": 1, "output": 1}, "capabilities": {"toolcall": False}}
-    smart = {"id": "smart", "providerID": "opencode-go", "name": "Smart",
-             "cost": {"input": 1, "output": 1}, "capabilities": {"toolcall": True}}
-    unknown = {"id": "unknown", "providerID": "opencode-go", "name": "Unknown",
-               "cost": {"input": 1, "output": 1}}
-    text = "".join(f"opencode-go/{m['id']}\n{json.dumps(m)}\n" for m in (plain, smart, unknown))
-    monkeypatch.setattr(adapters, "_run", lambda argv, timeout: text if "--verbose" in argv else "")
-    monkeypatch.setattr(adapters.OpenCodeAdapter, "credentials", lambda self, exe: CREDENTIALS)
-    items = {item["id"]: item for item in adapters.get("opencode").catalog("opencode")}
-    assert items["opencode-go/plain"]["toolcall"] is False
-    assert items["opencode-go/smart"]["toolcall"] is True
-    assert items["opencode-go/unknown"]["toolcall"] is True  # неизвестное считаем пригодным
+def _call(srv, path: str, token: str):
+    request = urllib.request.Request(srv.url + path, headers={"X-Studio-Token": token})
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            return exc.code, json.loads(exc.read().decode("utf-8"))
+        finally:
+            exc.close()
 
 
 @pytest.mark.integration
-def test_маршрут_system_только_для_человека(demo: Path) -> None:
-    from studio.server import access
-
+def test_маршрут_system_только_по_токену(demo: Path) -> None:
     with _Server(demo) as srv:
-        status, body = call(srv, "GET", "/api/system", srv.token)
+        status, body = _call(srv, "/api/system", srv.token)
         assert status == 200 and body["summary"]["endpoints"] == 3 and body["domains"]
-        assert call(srv, "GET", "/api/system", "wrong-token")[0] == 403
-        for mode in (*access.AGENT_MODES, access.IDEA):
-            token = access.derive_token(srv.token, mode)
-            assert call(srv, "GET", "/api/system", token)[0] == 403
+        assert body["pipeline"]["started"] is False
+        assert _call(srv, "/api/system", "wrong-token")[0] == 403

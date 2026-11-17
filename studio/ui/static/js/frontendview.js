@@ -1,7 +1,5 @@
 ﻿import {api} from "./api.js";
 import {$,esc,S,toast,modal,schedulePersist,openEditorForNode,enableNodeDrag} from "./core.js";
-import {createSyncAcceptPane, promptTotal} from "./syncapply.js";
-import {copyText as copyFront, documentDialog} from "./docdialog.js";
 import {bindViewport, applyTransform, fitView} from "./viewport.js";
 import {clearStage, measure, sizeStage} from "./edges.js";
 import {drawEdges} from "./edges.js";
@@ -1104,236 +1102,13 @@ function treePageVisible(page, mode) {
         || (page.rules || []).length > 0;
 }
 
-/* ---------- ТЗ и отчёт ---------- */
-
-const VERIFY_KINDS = {
-    page: "страница",
-    block: "блок",
-    page_deletion: "удаление страницы",
-    block_deletion: "удаление блока",
-    rule: "правило",
-    violation: "нарушение",
-};
-const VERIFY_MARKS = {"выполнено": "✓", "частично": "◐", "не сделано": "✗"};
-
-function verifyBody(report) {
-    const rows = (report.items || []).map((item) => `<li>
-        <b>${VERIFY_MARKS[item.status] || "?"}</b> T${esc(String(item.number))} ${esc(VERIFY_KINDS[item.kind] || item.kind)}
-        «${esc(item.name)}» — ${esc(item.message)}</li>`).join("");
-    return `<p class="hint">ТЗ ${esc(report.brief_id || "?")}: выполнено ${report.done} из ${report.total} · ${esc(report.status)}.
-        Проверка идёт по текущему коду frontend/ и объявленным вызовам эндпоинтов.</p>
-        <ul class="verify-list">${rows || "<li>В ТЗ нет задач.</li>"}</ul>`;
-}
-
-async function openVerify() {
+async function copyFront(text, message) {
     try {
-        const report = await api("/api/frontend/verify?brief=last");
-        modal("Проверка ТЗ фронтенда", verifyBody(report), [
-            {label: "Проверить снова", action: openVerify},
-            {label: "Закрыть", cls: "primary"},
-        ]);
-    } catch (error) {
-        toast(error.status === 404
-            ? "ТЗ фронтенда ещё не собрано: нажмите «⇄ ТЗ…»"
-            : "Не удалось проверить ТЗ: " + error.message);
+        await navigator.clipboard.writeText(text);
+        toast(message || "Скопировано");
+    } catch (_) {
+        toast("Не удалось скопировать: разрешите доступ к буферу обмена");
     }
-}
-
-const BRIEF_SECTIONS = [
-    ["outline", "Область работ"],
-    ["links", "Связи с бэкендом"],
-    ["violations", "Нарушения правил"],
-    ["verify", "Проверка"],
-];
-const REPORT_SECTIONS = [
-    ["summary", "Стек и сводка"],
-    ["notes", "Замечания проекта"],
-    ["structure", "Структура"],
-    ["coverage", "Покрытие правил"],
-    ["violations", "Нарушения"],
-    ["dag", "Связи импортов (DAG)"],
-];
-
-async function requestBrief(scope, nodeId) {
-    const base = {scope};
-    if (scope === "node" && nodeId) base.nodeId = nodeId;
-    const scopes = [["all", "весь фронтенд"], ["violations", "только нарушения"]];
-    if (scope === "node" && nodeId) scopes.unshift(["node", "выбранный узел и потомки"]);
-    await documentDialog({
-        title: "ТЗ для AI-агента — фронтенд",
-        endpoint: "/api/frontend/brief",
-        base,
-        sections: BRIEF_SECTIONS,
-        json: false,
-        scopes,
-        accept: {
-            endpoint: "/api/frontend/sync/apply",
-            intro: "Вставьте итоговый JSON-отчёт агента по этому ТЗ (подойдёт и весь ответ с блоком json). Студия сверит записи с кодом и покажет отличия; описания и критерии страниц и блоков пишутся только отмеченные и только по кнопке «Применить».",
-            onApplied: (data) => applySyncedGraph(data.graph),
-        },
-    });
-}
-
-/* ---------- синхронизация описаний с кодом (⇄ как на карте) ---------- */
-
-let syncOpen = false;
-
-async function renderSyncPrompt(syncState) {
-    const preview = $("frontSyncPreview");
-    const stats = $("frontSyncStats");
-    if (!preview) return;
-    preview.textContent = "Собираю промпт…";
-    try {
-        const data = await api("/api/frontend/sync", "POST", {
-            scope: syncState.scope,
-            domain: syncState.domain,
-            pageId: syncState.pageId,
-        });
-        syncState.markdown = data.markdown || "";
-        preview.textContent = syncState.markdown;
-        stats.textContent = "Узлов в области: " + promptTotal(syncState.markdown);
-    } catch (error) {
-        preview.textContent = "Ошибка: " + error.message;
-    }
-}
-
-function applySyncedGraph(graph) {
-    if (!graph) return;
-    S0.graph = graph;
-    drawFrontCanvas(graph);
-    renderHeading(graph);
-    renderTree(graph);
-    renderViolCount(graph);
-    renderViolationsPanel(graph);
-    renderProps();
-}
-
-function openSyncDialog() {
-    if (syncOpen) return;
-    syncOpen = true;
-    const domains = [...new Set(
-        (S0.graph?.pages || [])
-            .filter((page) => !page.planned)
-            .map((page) => String(page.domain || "").trim())
-            .filter(Boolean)
-    )];
-    const state = {scope: "all", domain: "", pageId: "", markdown: ""};
-    const overlay = document.createElement("div");
-    overlay.className = "studio-modal frontend-overlay";
-    overlay.innerHTML = `<div class="modal-box brief-box"><h3>Синхронизация описаний фронтенда с кодом</h3>
-        <div class="brief-layout">
-            <div class="brief-left">
-                <div class="brief-controls">
-                    <label class="hint">Область:
-                        <select id="frontSyncScope">
-                            <option value="all">весь фронтенд</option>
-                            <option value="domain">конкретный домен (роль)</option>
-                            <option value="page">конкретная страница</option>
-                            <option value="unready">только узлы без описания</option>
-                        </select>
-                    </label>
-                    <label class="hint" id="frontSyncDomainWrap" hidden>Домен:
-                        <select id="frontSyncDomain">${domains.map((d) => `<option>${esc(d)}</option>`).join("")}</select>
-                    </label>
-                    <label class="hint" id="frontSyncPageWrap" hidden>Страница:
-                        <select id="frontSyncPage">${(S0.graph?.pages || [])
-                            .filter((page) => !page.planned)
-                            .map((page) => `<option value="${esc(page.id)}">${esc(page.name)}</option>`).join("")}</select>
-                    </label>
-                </div>
-                <p class="hint">Шаг 1. Промпт для AI-агента с доступом к папке проекта: агент прочитает реальный
-                код страниц и блоков и вернёт <b>описания и критерии</b> одним JSON-блоком. Файлы агент не правит.
-                Плановые узлы и правила в промпт не попадают.</p>
-                <p class="hint">Шаг 2. Вставьте JSON-ответ на вкладке «Принять ответ»: студия покажет отличия,
-                и вы сами решите, что записать в .studio/frontend.json. Код frontend/, домены и связи не меняются.</p>
-            </div>
-            <div class="brief-preview">
-                <div class="sync-steps" role="tablist">
-                    <button type="button" class="on" data-step="prompt" role="tab">1. Промпт</button>
-                    <button type="button" data-step="accept" role="tab">2. Принять ответ</button>
-                </div>
-                <div class="sync-step" id="frontSyncStepPrompt">
-                    <div class="brief-stats" id="frontSyncStats">Подготовка…</div>
-                    <pre id="frontSyncPreview">Собираю промпт…</pre>
-                    <div class="hint">Промпт содержит узлы фронтенда. Перед отправкой во внешний AI-сервис это решает пользователь.</div>
-                    <div class="brief-actions">
-                        <button type="button" id="frontSyncCopy">Скопировать промпт</button>
-                        <button type="button" id="frontSyncDownload">Скачать .md</button>
-                    </div>
-                </div>
-                <div class="sync-step" id="frontSyncStepAccept" hidden></div>
-                <div class="brief-actions"><button type="button" class="primary" id="frontSyncClose">Закрыть</button></div>
-            </div>
-        </div></div>`;
-    document.body.appendChild(overlay);
-    overlay.addEventListener("click", (event) => {
-        if (event.target === overlay) {
-            overlay.remove();
-            syncOpen = false;
-        }
-    });
-    const acceptHost = overlay.querySelector("#frontSyncStepAccept");
-    acceptHost.appendChild(createSyncAcceptPane({
-        endpoint: "/api/frontend/sync/apply",
-        onApplied: (data) => applySyncedGraph(data.graph),
-    }));
-    overlay.querySelectorAll(".sync-steps button").forEach((button) => {
-        button.onclick = () => {
-            overlay.querySelectorAll(".sync-steps button").forEach((b) => b.classList.toggle("on", b === button));
-            overlay.querySelector("#frontSyncStepPrompt").hidden = button.dataset.step !== "prompt";
-            acceptHost.hidden = button.dataset.step !== "accept";
-        };
-    });
-    const scopeSelect = overlay.querySelector("#frontSyncScope");
-    const domainWrap = overlay.querySelector("#frontSyncDomainWrap");
-    const pageWrap = overlay.querySelector("#frontSyncPageWrap");
-    const domainSelect = overlay.querySelector("#frontSyncDomain");
-    const pageSelect = overlay.querySelector("#frontSyncPage");
-    const syncTabs = () => {
-        domainWrap.hidden = state.scope !== "domain";
-        pageWrap.hidden = state.scope !== "page";
-    };
-    syncTabs();
-    scopeSelect.onchange = () => {
-        state.scope = scopeSelect.value;
-        syncTabs();
-        void renderSyncPrompt(state);
-    };
-    domainSelect.onchange = () => {
-        state.domain = domainSelect.value;
-        void renderSyncPrompt(state);
-    };
-    pageSelect.onchange = () => {
-        state.pageId = pageSelect.value;
-        void renderSyncPrompt(state);
-    };
-    overlay.querySelector("#frontSyncCopy").onclick = () => copyFront(state.markdown, "Промпт скопирован");
-    overlay.querySelector("#frontSyncDownload").onclick = () => {
-        const blob = new Blob([state.markdown], {type: "text/markdown;charset=utf-8"});
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = "sync-frontend.md";
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-    };
-    overlay.querySelector("#frontSyncClose").onclick = () => {
-        overlay.remove();
-        syncOpen = false;
-    };
-    void renderSyncPrompt(state);
-}
-
-async function requestReport() {
-    await documentDialog({
-        title: "Отчёт о существующем фронтенде",
-        endpoint: "/api/frontend/report",
-        base: {},
-        sections: REPORT_SECTIONS,
-        json: true,
-        jsonName: "frontend-report.json",
-    });
 }
 
 /* ---------- формы создания (домен/плановый потомок) ---------- */
@@ -1610,15 +1385,6 @@ function initFrontend() {
         switchRightTab("props");
         openDomainForm();
     });
-    document.getElementById("frontSyncBtn")?.addEventListener("click", () => openSyncDialog());
-    document.getElementById("frontBriefBtn")?.addEventListener("click", async () => {
-        const target = S0.selected ? S0.nodes.find((item) => item.id === S0.selected) : null;
-        if (target && target.kind === "rule") {
-            await requestBrief("node", target.parentId);
-            return;
-        }
-        await requestBrief(target?.kind === "page" || target?.kind === "block" ? "node" : "all", target?.id || null);
-    });
     document.getElementById("frontUndoBtn")?.addEventListener("click", () => restoreLastDelete());
     document.getElementById("frontFitBtn")?.addEventListener("click", () => {
         stopFrontAnim();
@@ -1628,8 +1394,6 @@ function initFrontend() {
         fitView(canvas, S0.view, applyFrontView);
         saveFrontUi();
     });
-    document.getElementById("frontReportBtn")?.addEventListener("click", requestReport);
-    document.getElementById("frontVerifyBtn")?.addEventListener("click", openVerify);
     document.querySelectorAll("[data-front-mode]").forEach((button) => {
         button.addEventListener("click", () => {
             S0.mode = button.dataset.frontMode === "plan" ? "plan" : "fact";

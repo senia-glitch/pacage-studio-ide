@@ -99,21 +99,8 @@ def test_install_full_запускает_pip(demo: Path, monkeypatch, capsys):
     assert calls[1][1:4] == ["-m", "pip", "check"]  # после установки — проверка конфликтов
 
 
-def test_brief_map_full_создаёт_документ(demo: Path, capsys):
-    assert cli.main(["brief", "--project", str(demo), "--map", "full"]) == 0
-    target = demo / ".studio/agent-brief.md"
-    assert target.is_file()
-    text = target.read_text(encoding="utf-8")
-    assert text.startswith("# ТЗ для AI-агента")
-    assert "## 2. Правила работы (обязательны)" in text
-    assert "## 5. Карта проекта" in text
 
 
-def test_brief_out(demo: Path, capsys):
-    target = demo / "docs/out.md"
-    assert cli.main(["brief", "--project", str(demo), "--out", str(target)]) == 0
-    assert target.is_file()
-    assert target.read_text(encoding="utf-8").startswith("# ТЗ для AI-агента")
 
 
 def test_параметр_project_без_команды(demo: Path, monkeypatch):
@@ -182,11 +169,6 @@ def test_ctrl_c_код_1_без_трейсбека(demo: Path, monkeypatch, caps
     assert "Traceback" not in out
 
 
-def test_brief_json_только_json(demo: Path, capsys):
-    assert cli.main(["brief", "--project", str(demo), "--map", "none", "--json"]) == 0
-    data = json.loads(capsys.readouterr().out)
-    assert "markdown" in data
-    assert "brief_id" in data
 
 
 def test_поиск_корня_вверх(demo: Path, monkeypatch):
