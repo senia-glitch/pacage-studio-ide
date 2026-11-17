@@ -48,7 +48,7 @@ GATE_KEYS_2 = {
     key: {"score": 9, "evidence": "см. c1"}
     for key in ("completeness", "clarity", "noncontradiction", "size", "normalization", "standards",
                 "extensibility", "data_rules", "scenario_fit", "states", "accessibility",
-                "test_quality", "permissions", "errors", "security", "idea_fit", "integrity",
+                "test_quality", "stack_fit", "permissions", "errors", "security", "idea_fit", "integrity",
                 "quality", "documentation")
 }  # fmt: skip
 
@@ -260,6 +260,27 @@ def stage1_rules_dynamic(requirements):
 
 
 # ------------------------------------------------------------------ этапы 3–4
+
+
+class FakeStack:
+    """Проверки стека без сканеров: по умолчанию замечаний нет (настоящие — ``stackcheck``)."""
+
+    def __init__(self, back=None, front=None):
+        self.back = list(back or [])
+        self.front = list(front or [])
+
+    def backend(self, pl):
+        return list(self.back)
+
+    def frontend(self, pl):
+        return list(self.front)
+
+
+def fake_stack(pl, back=None, front=None):
+    """Подменить проверки стека и генераторы стека в проекте конвейера."""
+    pl.stack = FakeStack(back, front)
+    pl.stack_init = lambda project: []
+    return pl.stack
 
 
 class FakeCoder:

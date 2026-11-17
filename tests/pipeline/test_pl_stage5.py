@@ -8,6 +8,7 @@ from fake_llm import (
     FakeLauncher,
     FakeTests,
     agents_with,
+    fake_stack,
     full_rules,
     red_then_green,
     rules_stage5,
@@ -25,6 +26,7 @@ def build(tmp_path, e2e=None):
     registry, agent = agents_with(rules)
     pl = Pipeline(tmp_path, registry)
     pl.coder = FakeCoder()
+    fake_stack(pl)
     pl.tests = FakeTests(
         {
             "frontend": red_then_green(),

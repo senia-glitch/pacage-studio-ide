@@ -202,7 +202,7 @@ def test_replan_keeps_finished_waves(tmp_path):
 def test_rerun_after_rework_carries_the_stage_facts(tmp_path):
     pl = make_pl(tmp_path)
     assert flow.gate_facts(pl, "problems") is None
-    assert set(flow.gate_facts(pl, "frontend")) == {"tests_green"}
+    assert set(flow.gate_facts(pl, "frontend")) == {"tests_green", "stack"}
     assert "contract_matches" in flow.gate_facts(pl, "backend")
     assert "e2e_green" in flow.gate_facts(pl, "final")
     with pytest.raises(PipelineError) as err:
@@ -262,7 +262,7 @@ def wave_rules():
 
 
 def test_two_waves_run_one_after_another_through_autopilot(tmp_path):
-    from fake_llm import FakeCoder, FakeTests, full_rules
+    from fake_llm import FakeCoder, FakeTests, fake_stack, full_rules
 
     from studio.pipeline import stage1, stage4
     from studio.pipeline.coder import TestResult
@@ -271,6 +271,7 @@ def test_two_waves_run_one_after_another_through_autopilot(tmp_path):
     registry, _ = agents_with(rules[:-1] + wave_rules() + rules[-1:])
     pl = Pipeline(tmp_path, registry)
     pl.coder = FakeCoder()
+    fake_stack(pl)
     red, green = TestResult(True, False, [], "красный"), TestResult(True, True, [], "зелёный")
     # у каждой волны: красный старт, реализация и (для интерфейса) прогон после замены моков
     pl.tests = FakeTests(

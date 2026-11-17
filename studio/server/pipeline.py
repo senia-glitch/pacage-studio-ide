@@ -23,6 +23,7 @@ from studio.pipeline import (
     entry,
     flow,
     maps,
+    stack,
     stage1,
     stage2,
     stage3,
@@ -64,6 +65,9 @@ def _brief(card: dict) -> dict:
 def _summary(result) -> str:
     """Короткая фраза о том, что сделал шаг, для строки состояния экрана."""
     if isinstance(result, dict):
+        if "ran" in result:
+            ran = result["ran"]
+            return "выполнено: " + ", ".join(ran) if ran else "проект уже на стеке"
         if result.get("gate"):
             return f"ворота «{GATES[result['gate']].title}»: {result['state']}"
         created = result.get("created")
@@ -271,8 +275,21 @@ class PipelineService:
             "warnings": s.evaluator_warnings(),
         }
 
+    def stack_info(self) -> dict:
+        """Готов ли проект к бэкенду на стеке (fastbase, core-package, event-infra)."""
+        tools = {name: stack._tool(self.root, name) is not None for name, _ in stack.GENERATORS}
+        return {
+            "line": stack.STACK_LINE,
+            "missing": stack.missing_files(self.root),
+            "tools": tools,
+            "install": stack.INSTALL_HINT,
+            "frontend": (self.root / "frontend" / "package.json").is_file(),
+        }
+
     def get(self, path: str, query: dict) -> dict:
         route = path[len(PREFIX) :]
+        if route == "/stack":
+            return self.stack_info()
         if route == "/state":
             return self.state()
         if route == "/settings":
@@ -333,6 +350,10 @@ class PipelineService:
         if route == "/start":
             self.pl(create=True)
             return self.state()
+        if route == "/stack/init":
+            root = self.root
+            label = "подготовка проекта на стеке"
+            return {"job": self._start(label, lambda: {"ran": stack.init_stack(root)})}
         if route == "/develop/scan":
             pl = self.pl(create=True)
             return {"scanned": entry.scan_into_bank(pl), "state": self.state()}

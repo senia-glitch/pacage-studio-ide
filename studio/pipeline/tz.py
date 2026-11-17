@@ -13,21 +13,19 @@ from pathlib import Path
 
 from studio.pipeline.graph import ACCEPTED
 
-from . import waves
+from . import stack, waves
 from .engine import Pipeline
 from .errors import PipelineError
 
 DIR = Path(".studio") / "tz"
 FRONT_RULES = (
-    "Работай только в каталоге frontend/. Данные берёшь из моков по контракту: "
-    "frontend/src/logic/api/mocks/. Слои: ui/pages, ui/blocks, ui/components → ui/composables → "
-    "logic/actions → logic/api, logic/store. Страницы не обращаются к API напрямую. Тесты в "
-    "frontend/tests/pipeline не меняй."
+    stack.FRONTEND_GUIDE
+    + "\nТесты в frontend/tests/pipeline не меняй. Данные берёшь из моков по контракту."
 )
 BACK_RULES = (
-    "Работай в бэкенде проекта (эндпоинты fastbase, сценарии core-package, модели event-infra). "
-    "Эндпоинт принимает и отдаёт ровно то, что описано в контракте. Модели берёшь из сгенерированного "
-    "файла. Тесты в tests/pipeline не меняй. Фронтенд не трогай."
+    stack.BACKEND_GUIDE
+    + "\nТесты в tests/pipeline не меняй. Фронтенд не трогай. Документация стека лежит в docs/ "
+    "проекта (fastbase.md, core-package.md, event-infra.md, full-stack.md): читай её при сомнениях."
 )
 
 

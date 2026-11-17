@@ -214,13 +214,15 @@ def test_frontend_backend_and_final_facts_and_chains(tmp_path):
     page = bank.add("page", "Запись", parents=[scenario["id"]])
     call = bank.add("call", "создать запись", parents=[page["id"]])
     bank.add("test", "создаётся запись", parents=[r["crit"]["id"]])
-    assert run_code_layer(bank, "frontend", {"tests_green": True}) == []
-    assert codes(run_code_layer(bank, "frontend")) == ["not_checked"]
-    assert codes(run_code_layer(bank, "frontend", {"tests_green": False})) == ["failed"]
+    assert run_code_layer(bank, "frontend", {"tests_green": True, "stack": []}) == []
+    assert sorted(codes(run_code_layer(bank, "frontend"))) == ["not_checked", "not_checked"]  # тесты и стек
+    assert codes(run_code_layer(bank, "frontend", {"tests_green": False, "stack": []})) == ["failed"]
     assert "uncovered" in codes(run_code_layer(bank, "backend", {"tests_green": True}))
     bank.add("endpoint", "POST /records", parents=[call["id"]])
-    facts = {"tests_green": True, "contract_matches": True, "mocks_removed": True}
+    facts = {"tests_green": True, "contract_matches": True, "mocks_removed": True, "stack": []}
     assert run_code_layer(bank, "backend", facts) == []
+    stack_problem = {**facts, "stack": ["Эндпоинт POST /records не найден в коде"]}
+    assert codes(run_code_layer(bank, "backend", stack_problem)) == ["stack"]
     final = {"e2e_green": True, "tests_green": True, "load_ok": True}
     assert "broken_chain" not in codes(run_code_layer(bank, "final", final))
     bank.add("criterion", "Ещё критерий", parents=[r["req"]["id"]])

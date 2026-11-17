@@ -35,6 +35,11 @@ class Pipeline:
         from .stage5 import Launcher
 
         self.launcher = Launcher()  # запуск приложения (этап 5)
+        from . import stack
+        from .stackcheck import StackChecker
+
+        self.stack = StackChecker()  # проверки стека сканерами студии (ворота 3–4)
+        self.stack_init = stack.init_stack  # генераторы стека (fb init и др.), если проекта ещё нет
 
     # ------------------------------------------------------------------ ворота
 

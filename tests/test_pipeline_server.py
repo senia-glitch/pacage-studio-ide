@@ -273,3 +273,30 @@ def test_waves_are_offered_and_switched_through_routes(tmp_path):
     assert on["on"] and on["current"] == 1 and on["total"] == 2 and on["suggestion"] is None
     off = svc.post(f"{P}/waves/disable", {})["waves"]
     assert off["on"] is False and off["packages"] == []
+
+
+def test_stack_status_and_init_job(tmp_path, monkeypatch):
+    from studio.pipeline import stack
+
+    svc, _ = service(tmp_path)
+    info = svc.get(f"{P}/stack", {})  # конвейер можно не начинать
+    assert info["missing"] == list(stack.STACK_FILES) and set(info["tools"]) == {
+        "fb", "infra-init", "core-init",
+    }
+    assert "fastbase[full]" in info["install"] and info["frontend"] is False
+    ran = []
+    monkeypatch.setattr(stack, "init_stack", lambda root: ran.append(str(root)) or ["fb init"])
+    out = svc.post(f"{P}/stack/init", {})
+    assert out["job"]["running"] in (True, False)
+    for _ in range(100):
+        if not svc.job_view()["running"]:
+            break
+        time.sleep(0.02)
+    assert svc.job_view()["result"] == "выполнено: fb init" and ran == [str(tmp_path)]
+    monkeypatch.setattr(stack, "init_stack", lambda root: [])
+    svc.post(f"{P}/stack/init", {})
+    for _ in range(100):
+        if not svc.job_view()["running"]:
+            break
+        time.sleep(0.02)
+    assert svc.job_view()["result"] == "проект уже на стеке"

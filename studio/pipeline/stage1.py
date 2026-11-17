@@ -11,7 +11,7 @@ import re
 
 from studio.pipeline.graph import ACCEPTED
 
-from . import prompts
+from . import prompts, stack
 from .engine import Pipeline
 from .errors import PipelineError
 
@@ -24,9 +24,7 @@ TOPICS = (
     "Интерфейс и языки",
     "Нормы и законы",
 )
-STUDIO_PRESET = (
-    "Windows; Python 3.12 или новее; стек fastbase, core-package, event-infra; интерфейс на Vue"
-)
+STUDIO_PRESET = stack.STACK_LINE
 IMPORTANCE = ("низкая", "средняя", "высокая", "критическая")
 
 

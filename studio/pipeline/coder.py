@@ -17,6 +17,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from studio.agent import projectenv
 from studio.agent.adapters import ALLOWED_BASH, DENIED_TOOLS
 
 from .errors import PipelineError
@@ -24,6 +25,7 @@ from .llm import OPENCODE_PROMPT, Llm, Reply, _json_lines, execute
 
 CODE_TIMEOUT = 1800
 TEST_TIMEOUT = 600
+INSTALL_TIMEOUT = 900
 OPENCODE_BASH_DENY = (
     "git push*", "git remote*", "git checkout*", "git reset*", "pip install*", "npm install*",
     "rm -rf*",
@@ -47,6 +49,15 @@ class TestResult:
     passed: bool = False
     failed: list[str] = field(default_factory=list)  # файлы тестов, которые упали
     output: str = ""
+
+
+def project_env(project: Path) -> dict:
+    """Окружение процессов в проекте: его venv впереди в PATH и корень проекта в PYTHONPATH."""
+    env = dict(os.environ)
+    projectenv.activate(env, project)
+    env["PYTHONPATH"] = str(project) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    env["PYTHONUTF8"] = "1"
+    return env
 
 
 def file_hashes(root: Path, files: list[str]) -> dict[str, str]:
@@ -90,7 +101,9 @@ class AgentCoder(Coder):
             ]  # fmt: skip
             if model:
                 argv += ["--model", model]
-            out, err, code = execute(argv, project, task, timeout=CODE_TIMEOUT)
+            out, err, code = execute(
+                argv, project, task, project_env(project), timeout=CODE_TIMEOUT
+            )
             found: dict = {}
             for parsed in _json_lines(out):
                 found = parsed
@@ -119,7 +132,8 @@ class AgentCoder(Coder):
         if model:
             argv += ["--model", model]
         out, err, code = execute(
-            argv, project, None, {"OPENCODE_CONFIG": str(config_file)}, CODE_TIMEOUT
+            argv, project, None, {**project_env(project), "OPENCODE_CONFIG": str(config_file)},
+            CODE_TIMEOUT,
         )
         texts = []
         for parsed in _json_lines(out):
@@ -142,19 +156,43 @@ class ProjectTests:
     def command(self, layer: str) -> list[str] | None:
         if layer in ("backend", "e2e"):
             target = "tests/pipeline/e2e" if layer == "e2e" else "tests/pipeline"
-            return [shutil.which("python") or "python", "-m", "pytest", target, "-q", "-x"]
+            python = projectenv.project_python(self.project)  # python проекта, а не студии
+            return [python, "-m", "pytest", target, "-q", "-x"]
         pkg = self.project / "frontend" / "package.json"
         npx = shutil.which("npx")
         if pkg.is_file() and npx:
             return [npx, "vitest", "run", "tests/pipeline"]
         return None
 
+    def _install_frontend(self) -> TestResult | None:
+        """Пакеты интерфейса: первый запуск тестов ставит их сам (исполнителю npm install запрещён)."""
+        front = self.project / "frontend"
+        npm = shutil.which("npm")
+        if not (front / "package.json").is_file() or (front / "node_modules").is_dir() or not npm:
+            return None
+        try:
+            done = subprocess.run(  # noqa: S603 — npm install по package.json, который написала студия
+                [npm, "install", "--no-audit", "--no-fund"], cwd=str(front), capture_output=True,
+                text=True, encoding="utf-8", errors="replace", timeout=INSTALL_TIMEOUT,
+                env=project_env(self.project), stdin=subprocess.DEVNULL,
+            )  # fmt: skip
+        except (OSError, subprocess.TimeoutExpired) as error:
+            return TestResult(True, False, [], f"npm install не запустился: {error}")
+        if done.returncode != 0:
+            tail = ((done.stdout or "") + (done.stderr or ""))[-1500:]
+            return TestResult(True, False, [], "npm install не удался:\n" + tail)
+        return None
+
     def run(self, layer: str) -> TestResult:
+        if layer == "frontend":
+            failed = self._install_frontend()
+            if failed is not None:
+                return failed
         argv = self.command(layer)
         folder = self.project / ("frontend" if layer == "frontend" else "")
         if argv is None:
             return TestResult(False, False, [], "Нет способа запустить тесты этого слоя")
-        env = {**os.environ, "PYTHONUTF8": "1"}
+        env = project_env(self.project)
         try:
             done = subprocess.run(  # noqa: S603 — команда собрана студией
                 argv, cwd=str(folder), capture_output=True, text=True, encoding="utf-8",
@@ -190,5 +228,6 @@ __all__ = [
     "Reply",
     "TestResult",
     "file_hashes",
+    "project_env",
     "safe_test_path",
 ]

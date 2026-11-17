@@ -70,6 +70,11 @@ def _keys(method: str, path: str, prefix: str) -> set[str]:
     return keys
 
 
+def call_keys(method: str, path: str, prefix: str = "") -> set[str]:
+    """Ключи сопоставления вызова с эндпоинтом (путь с префиксом API и без него)."""
+    return _keys(method.upper(), path, prefix)
+
+
 def endpoint_index(backend_graph, api_prefix: str = "") -> dict[str, str]:
     """Ключ вызова → id эндпоинта бэкенда (факт и плановые)."""
     index: dict[str, str] = {}
@@ -148,6 +153,7 @@ def check_links(front_graph: dict, backend_graph, api_prefix: str = "") -> dict:
 
 __all__ = [
     "METHODS",
+    "call_keys",
     "check_links",
     "endpoint_index",
     "normalize_call",

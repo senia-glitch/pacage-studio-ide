@@ -11,16 +11,12 @@ from pathlib import Path
 
 from studio.pipeline.graph import ACCEPTED
 
-from . import prompts, stage3, tz, waves
+from . import prompts, stack, stage3, tz, waves
 from .engine import Pipeline
 from .errors import PipelineError
 from .stage1 import _ids, _items, _s, _step
 
-MODELS_FILE = "models_generated.py"
-SQL_TYPES = {
-    "int": "int", "text": "str", "bool": "bool", "float": "float", "date": "date",
-    "datetime": "datetime", "json": "dict", "uuid": "UUID",
-}  # fmt: skip
+MODELS_FILE = "models.py"  # единственный источник схемы БД в стеке (event-infra)
 
 
 def entry_ok(pl: Pipeline) -> bool:
@@ -56,12 +52,16 @@ def plan_backend(pl: Pipeline) -> dict:
         f"Конституция:\n{prompts.constitution(pl.bank)}\n\nТаблицы БД:\n{prompts.render(pl.bank, 'table')}\n\n"
         f"Вызовы контракта, для которых нужны эндпоинты:\n{listing}\n\n"
         "Спланируй бэкенд: эндпоинт на каждый вызов (метод и путь — строго по контракту), краткое "
-        "описание бизнес-сценария и таблицы, с которыми он работает.\n"
-        'Ответ: {"endpoints": [{"call": "c30", "summary": "...", "tables": ["appointment"]}]}'
+        "описание бизнес-сценария, имя сценария core-package (snake_case латиницей, глагол и "
+        "существительное: create_appointment) и таблицы, с которыми он работает.\n"
+        'Ответ: {"endpoints": [{"call": "c30", "summary": "...", "scenario": "create_appointment", '
+        '"tables": ["appointment"]}]}'
     )
     data = pl.llm.ask_json("backend_designer", prompts.SYSTEM["backend_designer"], prompt)
     created, skipped = [], []
     valid = {c["id"]: c for c in todo}
+    prefix = stack.api_prefix(pl.project)
+    taken = {(e.get("attrs") or {}).get("scenario") for e in pl.bank.records("endpoint")}
     for item in _items(data, "endpoints"):
         ids = [i for i in _ids(pl, item.get("call"), ("call",)) if i in valid]
         if not ids:
@@ -69,6 +69,10 @@ def plan_backend(pl: Pipeline) -> dict:
             continue
         call = valid[ids[0]]
         a = call.get("attrs") or {}
+        name = stack.scenario_name(
+            str(a.get("method")), str(a.get("path")), prefix, taken, _s(item.get("scenario"), 60)
+        )
+        taken.add(name)
         created.append(
             pl.bank.add(
                 "endpoint",
@@ -78,6 +82,7 @@ def plan_backend(pl: Pipeline) -> dict:
                 attrs={
                     "method": a.get("method"),
                     "path": a.get("path"),
+                    "scenario": name,
                     "tables": [_s(t, 60) for t in (item.get("tables") or [])][:10],
                 },
                 author="backend_designer",
@@ -86,67 +91,48 @@ def plan_backend(pl: Pipeline) -> dict:
     return {"created": created, "skipped": skipped}
 
 
-# ---------------------------------------------------------------------- 4.2 Модели
-
-
-def _pascal(name: str) -> str:
-    return "".join(part.capitalize() for part in re.split(r"[_\W]+", name) if part) or "Model"
+# ---------------------------------------------------------------------- 4.2 Модели и каркас
 
 
 def render_models(tables: list[dict]) -> str:
-    """Модели SQLModel из схемы БД — детерминированно, без агента."""
-    lines = [
-        '"""Модели БД. Сгенерировано студией из схемы БД банка знаний — не править руками."""',
-        "",
-        "from __future__ import annotations",
-        "",
-        "from datetime import date, datetime",
-        "from uuid import UUID",
-        "",
-        "from sqlalchemy import JSON, Column",
-        "from sqlmodel import Field, SQLModel",
-        "",
-    ]
-    for table in tables:
-        name = (table.get("attrs") or {}).get("name") or table["title"]
-        lines += [
-            "",
-            f"class {_pascal(name)}(SQLModel, table=True):",
-            f'    __tablename__ = "{name}"',
-            "",
-        ]
-        for col in (table.get("attrs") or {}).get("columns") or []:
-            py = SQL_TYPES.get(col["type"], "str")
-            nullable = col.get("null") or col["key"] == "pk"
-            ann = f"{py} | None" if nullable else py
-            if col["key"] == "pk":
-                default = "Field(default=None, primary_key=True)"
-            elif col["key"] == "fk":
-                default = f'Field(foreign_key="{col["ref"]}"' + (
-                    ", default=None)" if nullable else ")"
-                )
-            elif col["type"] == "json":
-                default = (
-                    "Field(default=None, sa_column=Column(JSON))"
-                    if nullable
-                    else "Field(sa_column=Column(JSON))"
-                )
-            else:
-                default = "Field(default=None)" if nullable else "Field()"
-            lines.append(f"    {col['name']}: {ann} = {default}")
-        if not (table.get("attrs") or {}).get("columns"):
-            lines.append("    pass")
-    return "\n".join(lines) + "\n"
+    """Классы SQLModel из схемы БД — детерминированно, без агента (см. ``stack``)."""
+    return stack.render_models(tables)
+
+
+def _endpoint_specs(pl: Pipeline) -> list[dict]:
+    """Эндпоинты банка вместе с контрактом вызова: из них кодом строятся сценарии и роуты."""
+    specs = []
+    for card in waves.records(pl, "endpoint"):  # до ворот эндпоинты ещё черновики
+        attrs = card.get("attrs") or {}
+        call = next((p for p in pl.bank.parents(card["id"]) if p["kind"] == "call"), None)
+        contract = (call or {}).get("attrs") or {}
+        specs.append(
+            {
+                "method": str(attrs.get("method") or "GET"),
+                "path": str(attrs.get("path") or "/"),
+                "scenario": attrs.get("scenario") or "",
+                "summary": card.get("body") or "",
+                "request": contract.get("request") or {},
+                "response": contract.get("response") or {},
+            }
+        )
+    return specs
 
 
 def build_models(pl: Pipeline) -> list[dict]:
-    """4.2 Модели из схемы БД: файл пишет код; записи «модель» привязаны к таблицам."""
+    """4.2 Модели и каркас по стеку: всё пишет код, агент не нужен.
+
+    Если проекта на стеке ещё нет — запускаются генераторы самого стека (``fb init``,
+    ``infra-init``, ``core-init``). Потом: ``models.py`` из схемы БД и каркас сценария и роута на
+    каждый эндпоинт (``stack``). Записи «модель» привязаны к таблицам.
+    """
     _need_entry(pl)
     tables = waves.records(pl, "table", status=ACCEPTED)
     if not tables:
         raise PipelineError("no_tables", "В банке нет принятых таблиц")
-    path = pl.project / MODELS_FILE
-    path.write_text(render_models(tables), encoding="utf-8")
+    pl.stack_init(pl.project)
+    stack.write_models(pl.project, tables)
+    stack.scaffold_backend(pl.project, _endpoint_specs(pl))
     out = []
     for table in tables:
         if any(c["kind"] == "model" for c in pl.bank.children(table["id"])):
@@ -155,7 +141,7 @@ def build_models(pl: Pipeline) -> list[dict]:
         out.append(
             pl.bank.add(
                 "model",
-                _pascal(name),
+                stack.pascal(name),
                 parents=[table["id"]],
                 body=f"таблица {name}",
                 attrs={"file": MODELS_FILE},
@@ -254,6 +240,7 @@ def facts(pl: Pipeline) -> dict:
     done = stage3.results(pl).get("mocks_replaced")
     return {
         "tests_green": stage3.tests_green(pl, "backend"),
+        "stack": pl.stack.backend(pl),
         **waves.facts(pl),
         "contract_matches": matches,
         "mocks_removed": True

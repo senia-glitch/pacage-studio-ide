@@ -1,4 +1,4 @@
-# pacage-studio 8.0 — студия «от идеи до работающего ПО»
+# pacage-studio 8.1 — студия «от идеи до работающего ПО»
 
 Студия ведёт проект от сырой идеи до работающей системы по одной схеме: пять этапов вокруг единого
 банка знаний, ворота качества между этапами, AI-агенты с настраиваемыми моделями и карты фронтенда
@@ -8,6 +8,13 @@
 
 *Схема (SVG; та же картинка для браузера — [`docs/pipeline-v3/v3.html`](docs/pipeline-v3/v3.html),
 подробности по пунктам решения — остальные файлы в [`docs/pipeline-v3/`](docs/pipeline-v3/README.md)).*
+
+## Заточена под один стек
+
+Бэкенд — **fastbase → core-package → event-infra** (PostgreSQL), фронтенд — **Vue 3, Vite, Pinia, Vue Router**.
+Студия строит и проверяет проекты именно на нём: каркас `frontend/` и сценарии/роуты/`models.py` создаёт код,
+правила стека входят в каждое ТЗ и в подсказки ролей, а на воротах этапов 3–4 код проверяют сканеры студии
+(роут → `run("сценарий")` → модель, слои и правила интерфейса). Подробно — [docs/stack.md](docs/stack.md).
 
 ## Как это устроено
 
@@ -95,6 +102,7 @@ studio            # автоскан + интерфейс в браузере
 - [docs/install.md](docs/install.md) — установка, обновление, Windows/PowerShell.
 - [docs/usage.md](docs/usage.md) — разделы, команды, что студия хранит в проекте.
 - [docs/pipeline-v3/README.md](docs/pipeline-v3/README.md) — схема студии и решения по ней.
+- [docs/stack.md](docs/stack.md) — как студия заточена под стек: каркас, правила, проверки.
 - [docs/metadata-format.md](docs/metadata-format.md) — описание `.studio/metadata.json`, якорей и связей.
 - [docs/troubleshooting.md](docs/troubleshooting.md) — коды диагностик, ошибки конвейера и агентов.
 - [docs/SPEC.md](docs/SPEC.md) — краткое устройство пакета.

@@ -126,12 +126,17 @@ GATES: dict[str, GateDef] = {
             3,
             "Приёмка интерфейса",
             ("style", "page", "call", "test"),
-            ("uncovered_page", "uncovered_test", "orphans_3", "upstream_3", "facts"),
+            ("uncovered_page", "uncovered_test", "orphans_3", "upstream_3", "stack", "facts"),
             (
                 _c(
                     "scenario_fit",
                     "Соответствие сценариям",
                     "страницы делают то, что описано в сценариях",
+                ),
+                _c(
+                    "stack_fit",
+                    "Соответствие стеку",
+                    "слои logic/ui, контракты index.js и правила Vue, Pinia и Router соблюдены",
                 ),
                 _c("states", "Состояния", "учтены пусто, загрузка и ошибка"),
                 _c(
@@ -152,12 +157,25 @@ GATES: dict[str, GateDef] = {
             4,
             "Приёмка бэкенда",
             ("endpoint", "model", "test"),
-            ("uncovered_endpoint", "uncovered_test_backend", "orphans_4", "upstream_4", "facts"),
+            (
+                "uncovered_endpoint",
+                "uncovered_test_backend",
+                "orphans_4",
+                "upstream_4",
+                "stack",
+                "facts",
+            ),
             (
                 _c(
                     "permissions",
                     "Права по ролям",
                     "роль без права получает отказ, проверено тестами",
+                ),
+                _c(
+                    "stack_fit",
+                    "Соответствие стеку",
+                    "роут → сценарий → self._db; сценарии, модели и ошибки по правилам "
+                    "fastbase, core-package и event-infra",
                 ),
                 _c("errors", "Обработка ошибок", "ошибки ожидаемы и понятны"),
                 _c("security", "Безопасность", "нет секретов в коде, входные данные проверяются"),
@@ -265,6 +283,11 @@ CHECKS: dict[str, Callable[[ProjectBank, dict], list[Finding]]] = {
         b, "call", "endpoint", skip=lambda c: not _wave(f, c)
     ),
     "orphans_4": lambda b, f: cov.orphans(b, ("endpoint", "model")),
+    "stack": lambda b, f: (
+        [Finding("stack", message) for message in f["stack"]]
+        if "stack" in f
+        else [Finding("not_checked", "Не проверено: соответствие стеку (сканеры студии)")]
+    ),
     "broken_chains": lambda b, f: cov.broken_chains(b),
     # «Устарело» выше по цепочке блокирует ворота: сначала перепроверяют то, на чём всё держится.
     # Устаревшее своё ворота перепроверяют сами и после прохождения делают принятым.

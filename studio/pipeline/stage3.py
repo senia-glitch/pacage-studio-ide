@@ -14,7 +14,7 @@ from pathlib import Path
 
 from studio.pipeline.graph import ACCEPTED
 
-from . import prompts, tz, waves
+from . import prompts, stack, tz, waves
 from .coder import file_hashes, safe_test_path
 from .engine import Pipeline
 from .errors import PipelineError
@@ -97,7 +97,9 @@ def build_style(pl: Pipeline, theme: str | None = None) -> dict:
             ][:12]
             attrs["notes"] = _s(data.get("notes"), 600)
         title = f"Стиль: {THEMES[attrs['theme']]}"
-    return pl.bank.add("style", title, attrs=attrs, author="ui_designer")
+    card = pl.bank.add("style", title, attrs=attrs, author="ui_designer")
+    stack.scaffold_frontend(pl.project, attrs["theme"])  # каркас frontend/ по стандарту стека, кодом
+    return card
 
 
 # ---------------------------------------------------------------------- 3.2 План интерфейса
@@ -176,9 +178,10 @@ def write_contract(pl: Pipeline) -> list[dict]:
     tables = prompts.render(pl.bank, "table")
     prompt = (
         f"Таблицы БД:\n{tables}\n\nВызовы без контракта:\n{listing}\n\n"
-        "Для каждого вызова опиши контракт API: метод, путь, форму запроса и ответа (JSON) и мок — "
+        "Для каждого вызова опиши контракт API: метод, путь (без префикса API: /appointments, "
+        "/appointments/{id}), форму запроса и ответа (JSON) и мок — "
         "пример ответа, на котором интерфейс работает до появления бэкенда.\n"
-        'Ответ: {"calls": [{"id": "c30", "method": "POST", "path": "/api/appointments", '
+        'Ответ: {"calls": [{"id": "c30", "method": "POST", "path": "/appointments", '
         '"request": {"doctor_id": 1}, "response": {"id": 1}, "mock": {"id": 1}}]}'
     )
     data = pl.llm.ask_json("ui_designer", prompts.SYSTEM["ui_designer"], prompt)
@@ -251,13 +254,16 @@ def write_tests_for(pl: Pipeline, stage: int, layer: str, scenarios: list[dict])
 def _write_tests(pl: Pipeline, layer: str, criteria: list[dict], context: str) -> list[dict]:
     created = []
     listing = "\n".join(f"{c['id']}: {c['body'] or c['title']}" for c in criteria)
-    kind = "Vitest (TypeScript)" if layer == "frontend" else "pytest (Python)"
+    kind = "Vitest (JavaScript)" if layer == "frontend" else "pytest (Python)"
+    guide = {"frontend": stack.FRONTEND_TEST_GUIDE, "e2e": stack.E2E_TEST_GUIDE}.get(
+        layer, stack.BACKEND_TEST_GUIDE
+    )
     base = {"frontend": "frontend/tests/pipeline/", "e2e": "tests/pipeline/e2e/"}.get(
         layer, "tests/pipeline/"
     )
-    ext = ".test.ts" if layer == "frontend" else ".py"
+    ext = ".test.js" if layer == "frontend" else ".py"
     prompt = (
-        f"ТЗ:\n{context}\n\nКритерии, для которых нужны тесты:\n{listing}\n\n"
+        f"ТЗ:\n{context}\n\nКритерии, для которых нужны тесты:\n{listing}\n\n{guide}\n\n"
         f"Напиши тесты ({kind}) по одному на критерий. Кода реализации ты не видишь и не "
         f"выдумываешь: опирайся только на ТЗ и контракт. Файлы — в {base}. Тест должен падать, "
         "пока функции нет.\n"
@@ -407,7 +413,11 @@ def implement(pl: Pipeline) -> dict:
 
 
 def facts(pl: Pipeline) -> dict:
-    return {"tests_green": tests_green(pl, "frontend"), **waves.facts(pl)}
+    return {
+        "tests_green": tests_green(pl, "frontend"),
+        "stack": pl.stack.frontend(pl),
+        **waves.facts(pl),
+    }
 
 
 def steps(pl: Pipeline) -> list[dict]:

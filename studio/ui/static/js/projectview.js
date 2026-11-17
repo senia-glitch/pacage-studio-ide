@@ -16,6 +16,21 @@ function pipelineCard() {
   </section>`;
 }
 
+function stackCard(info) {
+  if (!info) return "";
+  const ready = !info.missing.length;
+  const tools = Object.entries(info.tools).map(([name, ok]) => `<code>${esc(name)}</code> ${ok ? "✓" : "✗"}`).join(" · ");
+  return `<section class="pj-card">
+    <h3>Стек проекта</h3>
+    <p>Бэкенд: <b>fastbase → core-package → event-infra</b> (PostgreSQL), фронтенд: <b>Vue 3, Vite, Pinia, Vue Router</b>.
+      Студия строит и проверяет проект именно по этому стеку: каркас кодом, правила в каждом ТЗ, проверки сканерами на воротах этапов 3–4.</p>
+    <p>${ready ? "В проекте есть всё, что создают генераторы стека." : `Не хватает: <code>${esc(info.missing.join(", "))}</code>.`}
+      Генераторы: ${tools}. Фронтенд: ${info.frontend ? "каркас есть" : "каркаса ещё нет (его создаёт шаг 3.1)"}.</p>
+    ${ready ? "" : `<p class="hint">Стек ставится так: <code>${esc(info.install)}</code>. Дальше генераторы (<code>fb init</code>, <code>infra-init</code>, <code>core-init</code>) запустит сама студия на шаге 4.2 — или кнопкой ниже.</p>
+    <div class="pj-row"><button type="button" class="primary" id="stackInit">Подготовить проект на стеке</button></div>`}
+  </section>`;
+}
+
 function serversCard(servers) {
   if (!servers || !Array.isArray(servers.servers)) return "";
   const config = servers.config || {};
@@ -61,11 +76,12 @@ function gitCard() {
 export async function renderProject() {
   const root = $("projectBody");
   if (!root) return;
-  const [tests, servers] = await Promise.all([
+  const [tests, servers, stackInfo] = await Promise.all([
     api("/api/tests").catch(() => null),
     api("/api/devservers").catch(() => null),
+    api("/api/pipeline/stack").catch(() => null),
   ]);
-  root.innerHTML = `<div class="pj-wrap"><h2>Настройки</h2>${pipelineCard()}${serversCard(servers)}${testsCard(tests)}${gitCard()}</div>`;
+  root.innerHTML = `<div class="pj-wrap"><h2>Настройки</h2>${pipelineCard()}${stackCard(stackInfo)}${serversCard(servers)}${testsCard(tests)}${gitCard()}</div>`;
   const on = (selector, handler) => {
     const element = root.querySelector(selector);
     if (element) element.onclick = async () => {
@@ -76,6 +92,10 @@ export async function renderProject() {
     const pipeline = await import("./pipeline/main.js");
     pipeline.showView("settings");
     await setTab("pipeline");
+  });
+  on("#stackInit", async () => {
+    await api("/api/pipeline/stack/init", "POST", {});
+    toast("Подготовка проекта запущена: ход виден на экране «Конвейер»");
   });
   on("#srvSave", async () => {
     const payload = {};

@@ -6,6 +6,7 @@ from fake_llm import (
     FakeCoder,
     FakeTests,
     agents_with,
+    fake_stack,
     full_rules,
     red_then_green,
     rules_stage34,
@@ -27,6 +28,7 @@ def build(tmp_path, tamper=None, red=("frontend/tests/pipeline/t_c.test.ts",)):
     registry, agent = agents_with(rules)
     pl = Pipeline(tmp_path, registry)
     pl.coder = FakeCoder(tamper)
+    fake_stack(pl)
     pl.tests = FakeTests({"frontend": red_then_green(red), "backend": red_then_green()})
     return pl, agent
 
@@ -172,7 +174,7 @@ def test_stage4_full_walk(tmp_path):
     assert "вызов контракта" in plan["skipped"][0]
     assert stage4.plan_backend(pl) == {"created": [], "skipped": []}
     models = stage4.build_models(pl)
-    source = (tmp_path / "models_generated.py").read_text(encoding="utf-8")
+    source = (tmp_path / "models.py").read_text(encoding="utf-8")
     assert "class Patient(SQLModel, table=True)" in source and 'foreign_key="patient.id"' in source
     assert len(models) == 2 and stage4.build_models(pl) == []
     stage4.build_tz(pl)
@@ -185,7 +187,9 @@ def test_stage4_full_walk(tmp_path):
     out = stage4.run_step(pl, "mocks")
     assert out["mocks"] == [] and out["frontend_green"] is True
     facts = stage4.facts(pl)
-    assert facts == {"tests_green": True, "contract_matches": True, "mocks_removed": True}
+    assert facts == {
+        "tests_green": True, "contract_matches": True, "mocks_removed": True, "stack": [],
+    }  # fmt: skip
     assert all(s["state"] == "done" for s in stage4.steps(pl) if s["key"] != "gate_backend")
     accept(pl, "backend")
     assert flow.stage_open(pl, 4)
@@ -232,7 +236,7 @@ def test_models_render_and_mock_scanner(tmp_path):
         [table, {"title": "empty", "attrs": {"name": "empty", "columns": []}}]
     )
     assert "class DoctorVisit(SQLModel, table=True)" in text
-    assert 'foreign_key="doctor.id", default=None' in text and "sa_column=Column(JSON)" in text
+    assert 'foreign_key="doctor.id", default=None' in text and "sa_type=JSON" in text
     assert "at: datetime = Field()" in text and "class Empty" in text
     compile(text, "models", "exec")
     src = tmp_path / "frontend" / "src"
