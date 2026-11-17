@@ -5,7 +5,6 @@ import {initBank, renderBank} from "./bank.js";
 import {$, S, act, api, esc, on, toast} from "./core.js";
 import {setDomRoot} from "./dom.js";
 import {fitGraph, initGraph, loadGraph, resetGraphView} from "./graph.js";
-import {renderSettings} from "./settings.js";
 import {initSteps, renderSteps} from "./steps.js";
 
 const TEMPLATE = `
@@ -43,9 +42,7 @@ let seen = -1;
 let polling = false;
 
 function tabs() {
-  const items = S.project
-    ? [["work", "Работа"], ["bank", "Банк"], ["settings", "Модели"]]
-    : [["welcome", "Начало"], ["settings", "Модели"]];
+  const items = S.project ? [["work", "Работа"], ["bank", "Банк"]] : [["welcome", "Начало"]];
   $("tabs").innerHTML = items.map(([id, name]) => `<button class="tabbtn${tab === id ? " on" : ""}" data-tab="${id}">${esc(name)}</button>`).join("");
 }
 
@@ -54,7 +51,6 @@ async function show(next) {
   shadow.querySelectorAll("main > .tab").forEach((el) => el.classList.toggle("on", el.id === "tab-" + next));
   for (const id of ["zoomLabel", "fitBtn", "composeBtn", "exportBtn", "checkBtn", "exportAutoBtn"]) $(id).style.display = next === "work" ? "" : "none";
   tabs();
-  if (next === "settings") renderSettings();
   if (next === "welcome") renderWelcome();
   if (next === "bank") renderBank(true);
   if (next === "work") { renderSteps(true); setTimeout(fitGraph, 80); }
@@ -69,7 +65,7 @@ function renderWelcome() {
       <label>Название сферы или идеи<input name="title" required maxlength="120" placeholder="Например: автоматизация парикмахерской"></label>
       <div class="row-actions"><button class="primary">Начать</button></div>
     </form>
-    <p class="hint">Граф и документация хранятся в <code>${esc(S.boot?.folder || "")}</code>.</p>`;
+    <p class="hint">Агенты и модели для этого этапа выбираются в «Настройки → Агенты». Граф и документация хранятся в <code>${esc(S.boot?.folder || "")}</code>.</p>`;
   $("createForm").onsubmit = (e) => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.currentTarget));

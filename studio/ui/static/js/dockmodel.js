@@ -241,7 +241,7 @@ export function dockActions(flow, view) {
 /* Короткая подсказка под шагами: что происходит и что делать. */
 export function dockNote(flow, view) {
   const status = agentStatus(view);
-  if (!status.connected) return "Подключите агента на странице «Настройки агента» — дальше всё идёт само.";
+  if (!status.connected) return "Подключите агента на странице «Настройки → Агенты» — дальше всё идёт само.";
   if (status.tone === "wait") return "Агент задал вопрос и ждёт ответа — ответьте ниже.";
   const cards = (flow && flow.cards) || {};
   const step = activeDockStep(flow);
@@ -257,7 +257,7 @@ export function dockNote(flow, view) {
         : `Карточек от агента: ${cards.total || 0}.`;
     case "review":
       return cards.pending > 0
-        ? "На странице «Генератор идей» свайпните карточки: вверх — на карту, вниз — удалить."
+        ? "На странице «План» свайпните карточки: вверх — на карту, вниз — удалить."
         : "Все карточки разобраны. Можно переходить к выбору задач.";
     case "select":
       return "Отметьте, что отдать агенту на реализацию.";

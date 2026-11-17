@@ -228,8 +228,8 @@ function pageCard(page,index,idea){
       <textarea data-bfield="calls" rows="1" placeholder="Вызывает: GET /path (по одному на строку)">${esc(b.calls.join("\n"))}</textarea>
     </div>`).join("");
   return `<article class="idea-scenario-card idea-page-card swipeable${sent?" on-map":""}" data-page="${esc(page.id)}">
-    <div class="idea-scenario-head"><span class="swipe-grip" title="Потяните карточку: вверх — во фронтенд, вниз — удалить">⇅</span><span class="scenario-index">${String(index+1).padStart(2,"0")}</span>${isAgentCard(page,idea)?'<span class="agent-badge">агент</span>':""}${isCardDone(page)?'<span class="scenario-on-map">реализовано</span>':""}<input class="scenario-title" data-pfield="title" aria-label="Название страницы" value="${esc(page.title)}"><button class="text-button" type="button" data-page-to-front="${esc(page.id)}" title="Создать плановую страницу и блоки во вкладке «Фронтенд»">Во фронтенд ↗</button><button class="icon-button danger" type="button" data-delete-page="${esc(page.id)}" title="Удалить страницу из ветки" aria-label="Удалить страницу">×</button></div>
-    ${sent?'<div class="hint">✓ Передана во вкладку «Фронтенд». «Во фронтенд ↗» обновит те же узлы.</div>':""}
+    <div class="idea-scenario-head"><span class="swipe-grip" title="Потяните карточку: вверх — во фронтенд, вниз — удалить">⇅</span><span class="scenario-index">${String(index+1).padStart(2,"0")}</span>${isAgentCard(page,idea)?'<span class="agent-badge">агент</span>':""}${isCardDone(page)?'<span class="scenario-on-map">реализовано</span>':""}<input class="scenario-title" data-pfield="title" aria-label="Название страницы" value="${esc(page.title)}"><button class="text-button" type="button" data-page-to-front="${esc(page.id)}" title="Создать плановую страницу и блоки в «Система → Фронтенд»">Во фронтенд ↗</button><button class="icon-button danger" type="button" data-delete-page="${esc(page.id)}" title="Удалить страницу из ветки" aria-label="Удалить страницу">×</button></div>
+    ${sent?'<div class="hint">✓ Передана в «Система → Фронтенд». «Во фронтенд ↗» обновит те же узлы.</div>':""}
     ${page.inCode?`<div class="hint">✓ Уже есть в коде: ${esc(page.inCode)}. Во фронтенд не переносится.</div>`:""}
     <label class="idea-field-label">ПАПКА СТРАНИЦЫ<input data-pfield="name" value="${esc(page.name)}" placeholder="orders-list"></label>
     <label class="idea-field-label">МАРШРУТ<input data-pfield="route" value="${esc(page.route)}" placeholder="/orders"></label>
@@ -263,7 +263,7 @@ function acceptAllButton(idea,view){
   const kind=view==="frontend"?"page":"scenario";
   const count=pendingCards(idea,kind).length;
   if(!count)return "";
-  return `<div class="idea-accept-all"><button type="button" class="primary" data-accept-all="${esc(idea.id)}" data-kind="${kind}" title="Перенести все неразобранные карточки ветки: ${kind==="page"?"во вкладку «Фронтенд»":"на карту"}">${kind==="page"?"Принять все страницы":"Принять все сценарии"} ↗ <span>${count}</span></button></div>`;
+  return `<div class="idea-accept-all"><button type="button" class="primary" data-accept-all="${esc(idea.id)}" data-kind="${kind}" title="Перенести все неразобранные карточки ветки: ${kind==="page"?"в «Система → Фронтенд»":"на карту"}">${kind==="page"?"Принять все страницы":"Принять все сценарии"} ↗ <span>${count}</span></button></div>`;
 }
 function branchTabs(idea,view){
   if(!idea.pages.length)return "";
@@ -477,7 +477,7 @@ async function transferCard(kind,card,options={}){
       const partial=result.verdict&&result.verdict.status==="partial"?" (только недостающие блоки)":"";
       toast(missing.length
         ?`Страница добавлена во «Фронтенд»${partial}. Эндпоинтов нет в бэкенде: ${missing.length} (${missing.slice(0,2).join(", ")}${missing.length>2?"…":""}) — передайте сценарии «На карту ↗»`
-        :`Страница и блоки добавлены во вкладку «Фронтенд» как плановые узлы${partial}`);
+        :`Страница и блоки добавлены в «Система → Фронтенд» как плановые узлы${partial}`);
     }
     return result;
   }catch(error){
@@ -562,7 +562,7 @@ async function sendPageToFront(page,button,options={}){
     if(!options.stay)await setTab("frontend");
     toast(missing.size
       ?`Страница добавлена во «Фронтенд». Эндпоинтов нет в бэкенде: ${missing.size} (${[...missing].slice(0,2).join(", ")}${missing.size>2?"…":""}) — передайте сценарии «На карту ↗»`
-      :"Страница и блоки добавлены во вкладку «Фронтенд» как плановые узлы");
+      :"Страница и блоки добавлены в «Система → Фронтенд» как плановые узлы");
   }catch(error){button.disabled=false;toast("Не удалось передать страницу во фронтенд: "+error.message)}
 }
 function confirmRecreate(scenario){

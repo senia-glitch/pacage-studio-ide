@@ -20,5 +20,5 @@ export function briefState(backend, frontend) {
   const part = (title, count, missing) => (count === null
     ? `${title}: ${missing}`
     : `${title}: ${count} ${tasksWord(count)}`);
-  return `${part("ТЗ бэкенда", backend, "не сохранено (кнопка «ТЗ» на карте)")} · ${part("ТЗ фронтенда", frontend, "не собрано («⇄ ТЗ…» во вкладке «Фронтенд»)")}`;
+  return `${part("ТЗ бэкенда", backend, "не сохранено (кнопка «ТЗ» на карте)")} · ${part("ТЗ фронтенда", frontend, "не собрано («⇄ ТЗ…» в «Система → Фронтенд»)")}`;
 }

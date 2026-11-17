@@ -26,7 +26,7 @@ from studio.frontend import verify as front_verify
 from studio.idea import EngineError as IdeaError
 from studio.idea.graph import GraphError as IdeaGraphError
 from studio.metadata import MetadataError
-from studio.server import access, autopilot, chain, discovery, gitops
+from studio.server import access, autopilot, chain, discovery, gitops, system
 from studio.server.idea import PREFIX as IDEA_PREFIX
 from studio.server.security import (
     CSP,
@@ -350,6 +350,12 @@ def make_handler(ctx):
                 graph = front_graph.build_front_graph(state.root)
                 graph["links"] = state.check_front_links(graph)
                 return self._json(graph)
+            if url.path == "/api/system":
+                # единая карта системы: бэкенд, фронтенд и их связи одним ответом (только чтение)
+                front = front_graph.build_front_graph(state.root)
+                links = state.check_front_links(front)
+                graph = state.ensure_graph()
+                return self._json(system.build_system(graph, front, links, state.idea))
             if url.path == "/api/verify":
                 query = urllib.parse.parse_qs(url.query)
                 target = (query.get("brief") or [None])[0]
@@ -684,7 +690,7 @@ def frontend_brief_last(root: Path) -> dict:
     """ТЗ фронтенда, собранное в окне «⇄ ТЗ…» последним: его и реализует агент."""
     path = Path(root) / ".studio" / front_brief.FRONT_BRIEF_FILENAME
     if not path.is_file():
-        raise BriefNotFound("ТЗ фронтенда нет: соберите его кнопкой «⇄ ТЗ…» во вкладке «Фронтенд»")
+        raise BriefNotFound("ТЗ фронтенда нет: соберите его кнопкой «⇄ ТЗ…» в «Система → Фронтенд»")
     try:
         markdown = path.read_text(encoding="utf-8")
         brief = front_brief.load_front_brief(root, path.as_posix())

@@ -11,7 +11,7 @@ import {
 import {closeSwipe, isSwipeOpen, openSwipe, refreshSwipe} from "./swipeview.js";
 
 /* Окно агента: связь, 7 шагов цепочки («чей ход»), главная кнопка шага и окна выбора задач и отчёта.
-   Разбор карточек идёт свайпом на странице «Генератор идей», подключение — в «Настройках агента». */
+   Разбор карточек идёт свайпом в разделе «План», подключение — в «Настройки → Агенты». */
 
 const POLL_MS = 4000;
 const OPENED_KEY = "studio:roadmap-opened";
@@ -236,8 +236,10 @@ function confirmManual() {
 
 const COLLAPSE_KEY = "studio:dock-collapsed";
 
+/* Окно агента по умолчанию свёрнуто в одну строку и не закрывает страницы; раскрывает его человек
+   (запоминается), а вопрос агента раскрывает его сам, пока ждёт ответа. */
 function collapsed() {
-  try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch (_) { return false; }
+  try { return localStorage.getItem(COLLAPSE_KEY) !== "0"; } catch (_) { return true; }
 }
 
 function setCollapsed(value) {
@@ -415,8 +417,8 @@ function render() {
   if (flow.stage === "implement" && progress && progress.total && !units.length) {
     note = `Агент реализует · выполнено ${progress.done} из ${progress.total}`;
   }
-  const open = !collapsed();
   const ask = agent && agent.ask;
+  const open = !collapsed() || !!ask;
   const goal = list.find((step) => step.state === "active" && step.id === "goal") && status.connected;
   const tail = agent && agent.log_tail && status.connected
     ? `<details class="dock-log"><summary>Лог агента</summary><pre>${esc(agent.log_tail)}</pre></details>` : "";
@@ -450,7 +452,7 @@ function render() {
           ${status.tone === "run" ? '<button type="button" data-rm="stop" title="Остановить агента">■ Стоп</button>' : ""}
           ${canRollback(agent) ? '<button type="button" data-rm="rollback" title="Вернуть проект к состоянию до работы агента">↩ Откат</button>' : ""}
           ${flow.stage !== "mode" ? '<button type="button" data-rm="reset" title="Сбросить цепочку и начать заново">⟲ Заново</button>' : ""}
-          <button type="button" data-rm="settings" title="Настройки агента">⚙</button>
+          <button type="button" data-rm="settings" title="Настройки → Агенты">⚙</button>
         </span>
       </div>
     </div>` : ""}`;

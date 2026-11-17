@@ -379,6 +379,9 @@ class OpenCodeAdapter(Adapter):
                 "provider": provider,
                 "tier": classify(provider, model.get("cost"), credentials),
                 "variants": list(variants) if isinstance(variants, dict) else [],
+                # Агент этапа «Идея» работает только через вызовы инструментов,
+                # поэтому модели без них ему не подходят.
+                "toolcall": (model.get("capabilities") or {}).get("toolcall") is not False,
             })
         return sorted(items, key=lambda item: (order[item["tier"]], item["provider"], item["id"]))
 

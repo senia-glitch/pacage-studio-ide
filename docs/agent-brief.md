@@ -158,7 +158,7 @@ HTTP: `POST /api/sync/apply` (карта) и `POST /api/frontend/sync/apply`
 
 ## Проверка ТЗ фронтенда
 
-`studio verify --part frontend` (и кнопка «Проверить ТЗ» во вкладке «Фронтенд»)
+`studio verify --part frontend` (и кнопка «Проверить ТЗ» в «Система → Фронтенд»)
 читает последнее ТЗ фронтенда — по маркеру `studio-front-brief` в
 `.studio/agent-brief-frontend.md` — и проверяет задачи по коду `frontend/`:
 

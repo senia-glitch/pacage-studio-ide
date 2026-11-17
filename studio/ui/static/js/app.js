@@ -14,7 +14,8 @@ import {initReport} from "./reportview.js";
 import {initAgent, openReport, refreshAgentReports} from "./agentview.js";
 import {initRoadmap, refreshRoadmap} from "./roadmapview.js";
 import {renderSettings} from "./settingsview.js";
-import {renderAgentSettings} from "./agentsettingsview.js";
+import {renderSettingsHub} from "./settingshub.js";
+import {renderOverview} from "./systemview.js";
 import {initUiMode} from "./uimode.js";
 import {bindViewport, fitView} from "./viewport.js";
 import {initTree, renderTree} from "./treeview.js";
@@ -24,7 +25,8 @@ hooks.renderMap = renderMap;
 hooks.renderTree = renderTree;
 hooks.renderIdeas = renderIdeas;
 hooks.renderSettings = renderSettings;
-hooks.renderAgentSettings = renderAgentSettings;
+hooks.renderSettingsHub = renderSettingsHub;
+hooks.renderOverview = renderOverview;
 hooks.renderInspector = renderInspector;
 hooks.renderFrontend = renderFrontend;
 // Этап «Идея» подключается при первом открытии вкладки: остальным вкладкам он не мешает.
@@ -61,7 +63,7 @@ async function boot(){
   void initUiMode();
   initTree();
   initFrontend();
-  document.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+  document.querySelectorAll(".tabbtn,.subtab").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
   bindViewport("mapCanvas",S.mapView,()=>applyTransform("mapView",S.mapView));
   $("mapCanvas").addEventListener("click",ev=>{
     if(Date.now()-S.justDraggedAt<250)return;
@@ -120,7 +122,7 @@ async function boot(){
   document.addEventListener("click",schedulePersist);
   document.addEventListener("change",schedulePersist);
   const initial=location.hash.replace(/^#/,"");
-  setTab(["idea","map","ideas","frontend","settings","agent"].includes(initial)?initial:S.tab);
+  setTab(["idea","overview","map","ideas","frontend","settings","agent","system"].includes(initial)?initial:S.tab);
 }
 boot();
 

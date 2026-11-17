@@ -101,7 +101,7 @@ test("кнопки окна зависят от шага и состояния �
 
 test("подсказки по шагам и вопрос агента", () => {
   assert.match(dockNote({stage: "mode"}, ready), /Начать/);
-  assert.match(dockNote({stage: "mode"}, {claude_found: true, enabled: false}), /Настройки агента/);
+  assert.match(dockNote({stage: "mode"}, {claude_found: true, enabled: false}), /Настройки → Агенты/);
   assert.match(dockNote({stage: "review", cards: {pending: 2}}, ready), /вверх/);
   assert.match(dockNote({stage: "review", cards: {pending: 0}}, ready), /разобраны/);
   assert.match(dockNote({stage: "select"}, {...ready, state: "waiting_user"}), /вопрос/);

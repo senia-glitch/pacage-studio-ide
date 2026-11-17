@@ -17,18 +17,30 @@ def test_две_рабочие_области_одного_окна():
     assert 'data-tab="map"' in HTML
     assert 'data-tab="ideas"' in HTML
     assert 'data-tab="scenario"' not in HTML
-    assert "Карта backend" in HTML
-    assert "Генератор идей" in HTML
+    assert "Бэкенд" in HTML
+    assert "План: идеи и сценарии" in HTML
     assert 'data-map-mode="fact"' in HTML
     assert 'data-map-mode="plan"' in HTML
 
 
-def test_шесть_страниц_в_согласованном_порядке():
-    tabs = re.findall(r'<button class="tabbtn[^"]*" id="tab-[a-z]+-button" data-tab="([a-z]+)"', HTML)
-    assert tabs == ["idea", "map", "frontend", "ideas", "settings", "agent"]
-    for title in ("Идея", "Карта backend", "Карта frontend", "Генератор идей",
-                  "Настройки промптов", "Настройки агента"):
+def test_четыре_раздела_в_порядке_цепочки():
+    """Идея → План → Система → Настройки; внутри «Системы» — обзор, бэкенд и фронтенд."""
+    top = re.findall(r'<button class="tabbtn[^"]*" id="tab-[a-z]+-button" data-tab="([a-z]+)"', HTML)
+    assert top == ["idea", "ideas", "system", "settings"]
+    sub = re.findall(r'<button class="subtab[^"]*" id="tab-[a-z]+-button" data-tab="([a-z]+)"', HTML)
+    assert sub == ["overview", "map", "frontend"]
+    for title in ("Идея", "План", "Система", "Настройки", "Обзор", "Бэкенд", "Фронтенд"):
         assert title in HTML
+    for section in ("overview", "idea", "map", "ideas", "frontend", "settings"):
+        assert f'id="tab-{section}"' in HTML
+    assert 'id="tab-agent"' not in HTML  # отдельной вкладки настроек агента больше нет
+
+
+def test_настройки_в_одном_месте():
+    nav = HTML[HTML.index('id="settingsNav"'):HTML.index('class="settings-pane"')]
+    for section in ("agents", "project", "prompts", "mode"):
+        assert f'data-sec="{section}"' in nav
+    assert 'id="agentBody"' in HTML and 'id="settingsBody"' in HTML
 
 
 def test_верхняя_панель_без_лишнего():
@@ -36,7 +48,8 @@ def test_верхняя_панель_без_лишнего():
     assert 'id="editorChoice"' not in HTML  # поддерживается только VS Code
     header = HTML[HTML.index("<header>"):HTML.index("</header>")]
     assert 'id="searchBox"' not in header and 'id="frontSearch"' not in header
-    assert 'data-ui-mode="agent"' in header and 'data-ui-mode="manual"' in header
+    assert "data-ui-mode" not in header  # режим работы переехал в «Настройки → Режим работы»
+    assert 'data-ui-mode="agent"' in JS and 'data-ui-mode="manual"' in JS
 
 
 def test_поиск_узлов_в_левых_панелях_карт():

@@ -61,13 +61,13 @@ def _result(ok: bool, code: str = "", reason: str = "", fix: str = "", fix_comma
 def load_server(root: Path) -> tuple[dict | None, dict | None]:
     """``(описание сервера из .studio/mcp.json, ошибка)``; одно из двух пусто."""
     path = config_path(root)
-    reconnect = "Нажмите «Переподключить» на странице «Настройки агента»: студия перепишет файл."
+    reconnect = "Нажмите «Переподключить» на странице «Настройки → Агенты»: студия перепишет файл."
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return None, _result(
             False, "no_config", f"Нет файла {path.name} в .studio: агент ещё не подключён.",
-            "Нажмите «Подключить Claude Code» на странице «Настройки агента».",
+            "Нажмите «Подключить Claude Code» на странице «Настройки → Агенты».",
         )
     except (OSError, ValueError) as exc:
         return None, _result(False, "no_config", f"Файл .studio/{path.name} не читается: {exc}.",
@@ -149,7 +149,7 @@ def handshake(root: Path, server: dict | None = None, timeout: float = TIMEOUT) 
         return _result(
             False, "python_missing", f"Программа из .studio/mcp.json не найдена: {command}.",
             "Путь устарел (окружение удалено или перенесено). Нажмите «Переподключить» на странице "
-            "«Настройки агента» из студии, запущенной в нужном окружении.",
+            "«Настройки → Агенты» из студии, запущенной в нужном окружении.",
             f'"{sys.executable}" -m studio dev',
         )
     args = [str(item) for item in server.get("args") or []]
@@ -174,7 +174,7 @@ def _talk(root: Path, exe: str, args: list[str], env: dict, timeout: float) -> d
         )
     except OSError as exc:
         return _result(False, "python_missing", f"Сервер не запустился: {exc}.",
-                       "Нажмите «Переподключить» на странице «Настройки агента».")
+                       "Нажмите «Переподключить» на странице «Настройки → Агенты».")
     lines: queue.Queue = queue.Queue()
     err: list[str] = []
 

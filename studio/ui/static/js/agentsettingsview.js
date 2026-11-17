@@ -1,20 +1,22 @@
 import {api} from "./api.js";
-import {$, esc, toast} from "./core.js";
+import {$, S, esc, toast} from "./core.js";
 import {agentStatus, gitNote, roleViews} from "./dockmodel.js";
+import {applyUiMode, bindUiButtons} from "./uimode.js";
 
-/* Страница «Настройки агента»: кто строит план и кто реализует (агент и модель), подключение, права, git, запуск и инструкции
-   человеческим языком. Агент работает в фоне: студия запускает его на ваш шаг. */
+/* Разделы «Агенты», «Проект» и «Режим работы» страницы «Настройки»: кто что делает (студия и этап «Идея»), подключение,
+   git, запуск, серверы, права и инструкции человеческим языком. Агент работает в фоне: студия запускает его на ваш шаг. */
 
 let loading = false;
 
 async function load() {
-  const [view, runner, tests, servers] = await Promise.all([
+  const [view, runner, tests, servers, idea] = await Promise.all([
     api("/api/agent/status"),
     api("/api/runner"),
     api("/api/tests").catch(() => null),
     api("/api/devservers").catch(() => null),
+    api("/api/idea/boot").then((boot) => boot.settings).catch(() => null),
   ]);
-  return {view, runner, tests, servers};
+  return {view, runner, tests, servers, idea};
 }
 
 const EXE = {claude: "claude", opencode: "opencode"};
@@ -71,6 +73,51 @@ function rolePanel(role, item, view) {
     ${model}
     <p class="hint" data-role-hint="${role}">${esc(item.reason || (item.inherited ? "Пока свой не выбран, контролёр повторяет «Реализацию». Лучше выбрать другую модель: чужой взгляд находит больше." : opencode ? "Список строит команда opencode models: только провайдеры, в которые вы вошли (opencode auth login)." : "Доступные уровни усилий зависят от модели."))}</p>
   </div>`;
+}
+
+const IDEA_ROLES = [
+  ["helper", "Помощник", "предлагает роли, сценарии, проблемы и решения, строит диаграммы"],
+  ["autopilot", "Автопилот", "самая сильная модель: вопросы о границах и самостоятельное прохождение цепочки"],
+  ["checker", "Проверяющий", "независимая проверка перед выгрузкой: выберите не ту модель, что у помощника и автопилота"],
+  ["researcher0", "Исследователь 1", "ищет и анализирует конкурентов в сети (нужен веб-поиск)"],
+  ["researcher1", "Исследователь 2", "то же, лучше другая модель"],
+  ["researcher2", "Исследователь 3", "то же, лучше другая модель"],
+];
+
+function ideaSlot(settings, key) {
+  const raw = key.startsWith("researcher") ? (settings.researchers || [])[Number(key.slice(10))] : settings[key];
+  return {agent: (raw && raw.agent) || "claude", model: (raw && raw.model) || "", effort: (raw && raw.effort) || ""};
+}
+
+/* Роль этапа «Идея»: агент, модель и усилие. У агента этапа нет файлов и терминала: он ищет в сети, предлагает и спрашивает. */
+function ideaPanel(key, title, help, slot, view) {
+  const options = agentList(view).map((entry) => `<option value="${esc(entry.name)}"${entry.name === slot.agent ? " selected" : ""}>${esc(entry.label)}${entry.found ? "" : " (не найден)"}</option>`).join("");
+  const opencode = slot.agent === "opencode";
+  const model = opencode
+    ? `<label class="rm-task">Модель из вашей подписки
+        <select data-irole-model="${key}"><option value="">— выберите модель —</option>${slot.model ? `<option value="${esc(slot.model)}" selected>${esc(slot.model)}</option>` : ""}</select></label>
+       <label class="rm-task">Уровень усилий
+        <select data-irole-effort="${key}">${effortOptions([], slot.effort)}</select></label>`
+    : `<label class="rm-task">Модель
+        <input data-irole-model="${key}" list="claudeModels" value="${esc(slot.model)}" placeholder="по умолчанию Claude Code" size="26"></label>
+       <label class="rm-task">Уровень усилий
+        <select data-irole-effort="${key}">${effortOptions(CLAUDE_EFFORTS, slot.effort)}</select></label>`;
+  return `<div class="role-panel" data-irole="${key}">
+    <h4>${esc(title)} <small>— ${esc(help)}</small></h4>
+    <div class="agent-row"><label class="rm-task">Агент <select data-irole-agent="${key}">${options}</select></label></div>
+    ${model}
+    <p class="hint" data-role-hint="${key}">${opencode ? "Показаны только модели с вызовом инструментов: без него агент этапа «Идея» не работает." : "Доступные уровни усилий зависят от модели."}</p>
+  </div>`;
+}
+
+function ideaCard(settings, view) {
+  if (!settings) return "";
+  return `<section class="agent-card" id="ideaAgents">
+    <h3>Этап «Идея»</h3>
+    <p class="hint">Эти агенты строят документацию по идее. Файлов и терминала у них нет: они ищут в сети, предлагают и задают вопросы, а решения принимаете вы.
+      Выбор сохраняется сразу.</p>
+    <div class="role-grid">${IDEA_ROLES.map(([key, title, help]) => ideaPanel(key, title, help, ideaSlot(settings, key), view)).join("")}</div>
+  </section>`;
 }
 
 function claudeDatalist() {
@@ -130,18 +177,33 @@ function mcpBlock(mcp) {
     ${mcp.fix ? `<p>${esc(mcp.fix)}</p>` : ""}${command}</div>`;
 }
 
+function modeCard() {
+  return `<section class="agent-card" id="modeCard">
+    <h3>Как вы работаете со студией</h3>
+    <div class="ui-mode big" id="uiMode" role="group" aria-label="Режим работы">
+      <button type="button" data-ui-mode="agent" class="on">С агентом</button>
+      <button type="button" data-ui-mode="manual">Вручную</button>
+    </div>
+    <p><b>С агентом</b> (обычный режим): студия сама запускает агента на ваших шагах, показывает окно агента и цепочку. Автоматизацию можно включать по частям на шаге «Цель».</p>
+    <p><b>Вручную</b>: без агента. Вы сами собираете промпт, копируете его в любой чат и вставляете ответ обратно. Подходит, если агента нет или нужен полный контроль каждого шага.</p>
+  </section>`;
+}
+
+function sectionHead(eyebrow, title, text) {
+  return `<div class="settings-head"><div class="eyebrow">${eyebrow}</div><h2>${title}</h2><p>${text}</p></div>`;
+}
+
 function howCard() {
   return `<section class="agent-card">
     <h3>Как это работает</h3>
     <p>Агент не сидит в чате и не ждёт: студия сама запускает выбранного агента в фоне, когда наступает его ход, и он завершается, сделав шаг. Пока вы ничего не нажимаете, агент не запущен и токены не расходуются. Пользоваться чатом агента не нужно.</p>
     <div class="agent-scenario"><b>1. Цель.</b> В окне агента (справа внизу) опишите, что хотите, и нажмите «Начать». Студия запустит агента.</div>
-    <div class="agent-scenario"><b>2. Идеи.</b> Агент изучает проект и кладёт на страницу «Генератор идей» карточки с пометкой «агент».</div>
+    <div class="agent-scenario"><b>2. Идеи.</b> Агент изучает проект и кладёт в раздел «План» карточки с пометкой «агент».</div>
     <div class="agent-scenario"><b>3. Разбор — ваш ход.</b> Свайпайте карточки прямо на странице: вверх — отправить на карту, вниз — удалить. Затем в окне агента нажмите «Дальше».</div>
     <div class="agent-scenario"><b>4. Выбор задач — ваш ход.</b> Отметьте, что отдать агенту в реализацию. Студия сама соберёт ТЗ и запустит агента.</div>
     <div class="agent-scenario"><b>5. Реализация и проверка.</b> Агент пишет код, студия сохраняет чекпоинт в git и прогоняет тесты.</div>
     <div class="agent-scenario"><b>6. Приёмка — ваш ход.</b> Прочитайте отчёт: «Принять», «Вернуть на доработку» (агент учтёт ваше пожелание) или «Откат» (проект вернётся к состоянию до работы агента).</div>
     <div class="agent-scenario"><b>Если агент спросил.</b> Вопрос появится в окне агента. Ответьте — студия запустит агента снова с тем же контекстом.</div>
-    <div class="agent-scenario"><b>Режимы сверху.</b> «Агент режим» — всё описанное выше. «Ручной режим» — без агента: вы сами собираете промпт, копируете его в любой чат и вставляете ответ обратно.</div>
   </section>`;
 }
 
@@ -276,7 +338,43 @@ function bind(root, data) {
     try { localStorage.setItem(PAID_KEY, showPaid ? "1" : "0"); } catch (_) { /* без хранилища */ }
     reload();
   };
-  if (root.querySelector("select[data-role-model]")) loadModels(root, data.view);
+  const saveIdea = async () => {
+    const slot = (key) => ({
+      agent: root.querySelector(`[data-irole-agent="${key}"]`).value,
+      model: root.querySelector(`[data-irole-model="${key}"]`).value.trim(),
+      effort: root.querySelector(`[data-irole-effort="${key}"]`).value,
+    });
+    try {
+      await api("/api/idea/settings", "POST", {
+        helper: slot("helper"), autopilot: slot("autopilot"), checker: slot("checker"),
+        researchers: ["researcher0", "researcher1", "researcher2"].map(slot),
+      });
+      toast("Агенты этапа «Идея» сохранены");
+    } catch (error) { toast(error.message); }
+  };
+  root.querySelectorAll("[data-irole-agent]").forEach((el) => {
+    el.onchange = async () => {
+      const model = root.querySelector(`[data-irole-model="${el.dataset.iroleAgent}"]`);
+      if (model) model.value = "";  // модели разных агентов не совместимы
+      await saveIdea();
+      await reload();
+    };
+  });
+  root.querySelectorAll("[data-irole-model]").forEach((el) => {
+    el.onchange = async () => {
+      const effort = root.querySelector(`[data-irole-effort="${el.dataset.iroleModel}"]`);
+      if (el.tagName === "SELECT" && effort) {
+        const item = catalogItem(el.value);
+        if (effort.value && !(item && item.variants.includes(effort.value))) effort.value = "";
+      }
+      await saveIdea();
+      await reload();
+    };
+  });
+  root.querySelectorAll("[data-irole-effort]").forEach((el) => { el.onchange = saveIdea; });
+  bindUiButtons();
+  applyUiMode(document.body.dataset.uiMode);
+  if (root.querySelector("select[data-role-model], select[data-irole-model]")) loadModels(root, data.view);
   on("#modelsRefresh", async () => { await loadModels(root, data.view, true); });
   on("#agentConnect", async () => {
     const view = await api("/api/agent/connect", "POST", {});
@@ -358,17 +456,21 @@ function catalogItem(id) {
 /* Подписочные модели: список спрашиваем у OpenCode и кладём в выпадающие списки ролей.
    Платные (по токенам) скрыты, пока не включён переключатель; выбранная модель остаётся видна. */
 async function loadModels(root, view, force = false) {
-  const selects = [...root.querySelectorAll("select[data-role-model]")];
+  const selects = [...root.querySelectorAll("select[data-role-model], select[data-irole-model]")];
   const refresh = root.querySelector("#modelsRefresh");
   if (!selects.length) return;
   if (refresh) refresh.disabled = true;
   const hints = [...root.querySelectorAll("[data-role-hint]")].filter((el) => root.querySelector(`select[data-role-model="${el.dataset.roleHint}"]`));
+  const modelKey = (select) => select.dataset.roleModel || select.dataset.iroleModel;
   try {
     if (!catalog || force) catalog = await api(`/api/agent/models?agent=opencode${force ? "&refresh=1" : ""}`);
     const items = catalog.items || [];
     for (const select of selects) {
       const current = select.value || "";
-      const shown = items.filter((item) => showPaid || item.tier !== "paid" || item.id === current);
+      // агенту этапа «Идея» нужны вызовы инструментов: модели без них ему не предлагаем
+      const needsTools = !!select.dataset.iroleModel;
+      const shown = items.filter((item) => (showPaid || item.tier !== "paid" || item.id === current)
+        && (!needsTools || item.toolcall !== false || item.id === current));
       const groups = new Map();
       for (const item of shown) {
         if (!groups.has(item.provider)) groups.set(item.provider, []);
@@ -379,8 +481,8 @@ async function loadModels(root, view, force = false) {
       select.innerHTML = `<option value="">— выберите модель —</option>${extra}`
         + [...groups].map(([provider, list]) => `<optgroup label="${esc(provider)}">${list.map((item) => `<option value="${esc(item.id)}"${item.id === current ? " selected" : ""}>${esc(item.name + (TIER_NOTE[item.tier] || ""))}</option>`).join("")}</optgroup>`).join("");
       // уровни усилий выбранной модели
-      const role = select.dataset.roleModel;
-      const effort = root.querySelector(`[data-role-effort="${role}"]`);
+      const role = modelKey(select);
+      const effort = root.querySelector(`[data-role-effort="${role}"], [data-irole-effort="${role}"]`);
       if (effort) {
         const levels = (catalogItem(current) || {variants: []}).variants;
         const now = effort.value;
@@ -408,9 +510,13 @@ export async function renderAgentSettings() {
   loading = true;
   try {
     const data = await load();
-    root.innerHTML = connectionCard(data.view) + howCard() + rightsCard(data.view)
-      + gitCard(data.view) + runCard(data.runner, data.tests, data.view)
-      + serversCard(data.servers) + manualCard(data.view);
+    const wrap = (name, html) => `<div data-sec-body="${name}"${S.settingsSection === name ? "" : " hidden"}>${html}</div>`;
+    root.innerHTML = wrap("agents", sectionHead("АГЕНТЫ", "Агенты и модели", "Кто что делает: план, код и контроль в студии и все помощники этапа «Идея». Каждой роли можно выбрать своего агента и модель.")
+        + connectionCard(data.view) + ideaCard(data.idea, data.view))
+      + wrap("project", sectionHead("ПРОЕКТ", "Проект", "Git и GitHub, запуск агента и тестов, серверы проекта.")
+        + gitCard(data.view) + runCard(data.runner, data.tests, data.view) + serversCard(data.servers))
+      + wrap("mode", sectionHead("РЕЖИМ РАБОТЫ", "Режим работы", "С агентом или вручную, как это устроено и что агенту можно.")
+        + modeCard() + howCard() + rightsCard(data.view) + manualCard(data.view));
     bind(root, data);
   } catch (error) {
     root.innerHTML = `<p class="hint">Не удалось загрузить настройки агента: ${esc(error.message)}</p>`;

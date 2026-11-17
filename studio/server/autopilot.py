@@ -346,7 +346,7 @@ def _after_decide(state, job: dict) -> str:
     if counts[cards.PENDING]:
         return (
             f"Контроль не решил по {counts[cards.PENDING]} карточкам: нажмите «Повторить» "
-            "или решите их сами на странице «Генератор идей»"
+            "или решите их сами в разделе «План»"
         )
     opts = options(state)
     if pipeline["iteration"] < opts["iterations"] and counts["total"] > pipeline["cards_before"]:

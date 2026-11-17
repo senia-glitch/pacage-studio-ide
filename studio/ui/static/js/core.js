@@ -14,7 +14,9 @@ import {applyTransform as applyTransformImpl} from "./viewport.js";
 export const S = {
   G: null,
   byId: {},
-  tab: "map",
+  tab: "overview",
+  sysTab: "overview",
+  settingsSection: "agents",
   selectedNode: null,
   mapMode: "fact",
   mapViewNodes: {},
@@ -121,16 +123,27 @@ function nodeMeta(n){
   return d.class_name||d.name||"";
 }
 /* ---------- вкладки ---------- */
+/* Разделы: «Идея», «План», «Система» (обзор, бэкенд, фронтенд) и «Настройки». Внутри кода остаются
+   прежние имена экранов (overview, map, frontend, ideas, idea, settings): меняется только то, как они
+   сгруппированы в шапке. Старые адреса (#agent) ведут в «Настройки → Агенты». */
+const SYSTEM_TABS=["overview","map","frontend"];
 async function setTab(name){
   if(name==="create"||name==="scenario")name="map";
+  if(name==="system")name=SYSTEM_TABS.includes(S.sysTab)?S.sysTab:"overview";
+  if(name==="agent"){S.settingsSection="agents";name="settings"}
   if(!(await flushPending()))return;
   S.tab=name;
+  const group=SYSTEM_TABS.includes(name)?"system":name;
+  if(group==="system")S.sysTab=name;
   document.body.dataset.activeTab=name;
-  document.querySelectorAll(".tabbtn").forEach(b=>{const active=b.dataset.tab===name;b.classList.toggle("on",active);b.setAttribute("aria-selected",String(active))});
-  document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="tab-"+(name==="ideas"?"ideas":name)));
-  if(name==="map"){hooks.renderMap();hooks.renderInspector()}
-  else if(name==="settings"){if(hooks.renderSettings)hooks.renderSettings()}
-  else if(name==="agent"){if(hooks.renderAgentSettings)hooks.renderAgentSettings()}
+  document.body.dataset.group=group;
+  document.querySelectorAll(".tabbtn").forEach(b=>{const active=b.dataset.tab===group;b.classList.toggle("on",active);b.setAttribute("aria-selected",String(active))});
+  document.querySelectorAll(".subtab").forEach(b=>{const active=b.dataset.tab===name;b.classList.toggle("on",active);b.setAttribute("aria-selected",String(active))});
+  const sysbar=document.getElementById("sysbar");if(sysbar)sysbar.hidden=group!=="system";
+  document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id==="tab-"+name));
+  if(name==="overview"){hooks.renderOverview&&hooks.renderOverview()}
+  else if(name==="map"){hooks.renderMap();hooks.renderInspector()}
+  else if(name==="settings"){hooks.renderSettingsHub&&hooks.renderSettingsHub()}
   else if(name==="frontend"){hooks.renderFrontend&&hooks.renderFrontend()}
   else if(name==="idea"){hooks.renderIdea&&hooks.renderIdea()}
   else hooks.renderIdeas();
@@ -200,7 +213,8 @@ function schedulePersist(){
 }
 function restoreUiState(saved){
   if(!saved)return;
-  if(["map","ideas","frontend"].includes(saved.tab))S.tab=saved.tab;else S.tab="map";
+  S.tab=["overview","map","ideas","frontend","idea","settings"].includes(saved.tab)?saved.tab:"overview";
+  if(["overview","map","frontend"].includes(S.tab))S.sysTab=S.tab;
   if(saved.mapMode==="fact"||saved.mapMode==="plan")S.mapMode=saved.mapMode;
   if(typeof saved.inspectorOpen==="boolean")S.inspectorOpen=saved.inspectorOpen;
   if(Number.isFinite(saved.inspectorWidth))S.inspectorWidth=Math.max(280,Math.min(520,saved.inspectorWidth));
@@ -267,7 +281,8 @@ function setLive(online){
 function rerenderActive(){
   if(S.tab==="map"){hooks.renderMap();hooks.renderInspector()}
   else if(S.tab==="frontend"){hooks.renderFrontend&&hooks.renderFrontend()}
-  else hooks.renderIdeas();
+  else if(S.tab==="overview"){hooks.renderOverview&&hooks.renderOverview()}
+  else if(S.tab==="ideas")hooks.renderIdeas();
   hooks.updateDiagBadge();
 }
 async function refreshLiveGraph(){
