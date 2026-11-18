@@ -124,9 +124,9 @@ def unanswered(pl: Pipeline) -> list[dict]:
     return [q for q in pl.bank.records("question") if not (q.get("attrs") or {}).get("answer")]
 
 
-def auto_answer(pl: Pipeline) -> list[dict]:
-    """Автопилот: аналитик сам отвечает на неотвеченные вопросы; ответы помечены допущением."""
-    todo = unanswered(pl)
+def auto_answer(pl: Pipeline, ids: list[str] | None = None) -> list[dict]:
+    """Студия сама отвечает на вопросы (автопилот и «Решить за меня») по своим правилам."""
+    todo = [q for q in unanswered(pl) if ids is None or q["id"] in ids]
     if not todo:
         return []
     root = area(pl)
@@ -135,7 +135,13 @@ def auto_answer(pl: Pipeline) -> list[dict]:
         for q in todo
     )
     prompt = (
-        f"Идея:\n{root['body']}\n\nОтветь на вопросы наиболее разумным допущением:\n{listing}\n"
+        f"Идея:\n{root['body']}\n\n"
+        "Ответь на вопросы по правилам студии. Опирайся по порядку: 1) границы, ограничения и уже "
+        "принятые решения; 2) предметная область и конкуренты; 3) здравый смысл и обычная практика "
+        "для такого продукта. Ответы не должны противоречить друг другу и границам.\n\n"
+        f"Границы, ограничения и решения:\n{prompts.constitution(pl.bank)}\n\n"
+        f"Предметная область и конкуренты:\n{prompts.render(pl.bank, 'domain', 'competitor')}\n\n"
+        f"Вопросы:\n{listing}\n"
         'Ответ: {"answers": [{"id": "c1", "answer": "..."}]}'
     )
     data = pl.llm.ask_json("analyst", prompts.SYSTEM["analyst"], prompt)
@@ -144,9 +150,7 @@ def auto_answer(pl: Pipeline) -> list[dict]:
     for item in _items(data, "answers"):
         qid = _s(item.get("id"), 20)
         if qid in wanted and _s(item.get("answer"), 400):
-            pl.bank.mark(
-                qid, "analyst", answer=_s(item["answer"], 400), answered_by="analyst", assumed=True
-            )
+            pl.bank.mark(qid, "analyst", answer=_s(item["answer"], 400), answered_by="analyst")
             done.append(pl.bank.get(qid))
     return done
 

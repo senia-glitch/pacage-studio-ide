@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from . import prompts
+from . import clarify, prompts
 from .engine import Pipeline
 from .errors import PipelineError
 from .gates import GATES
@@ -51,11 +51,15 @@ def _prompt(pl: Pipeline, run: dict) -> str:
         + "По каждому замечанию дай разбор. cause: \"here\" — дефект в записях этих ворот, "
         '"upstream" — в записи выше (тогда укажи её код в target и правку в change). '
         'action: "improve" — запись можно довести правкой, "reject" — довести нельзя (лишняя, '
-        "дублирует другую или противоречит цепочке): назови её в records, её отклонят.\n"
+        "дублирует другую или противоречит цепочке): назови её в records, её отклонят. "
+        'cause: "ask" — не хватает данных, которые знает только человек (автор их выдумал бы): дай '
+        "в questions 1–3 закрытых вопроса с вариантами (text, options, about — код записи).\n"
         + 'Ответ: {"summary": "главная причина в одной фразе", "items": [{"criterion": "<ключ или code>", '
         '"cause": "here", "records": ["c7"], "defect": "что не так", "fix": "что сделать автору", '
         '"action": "improve", "evaluator_ok": true}, {"criterion": "completeness", "cause": "upstream", "target": "c3", '
-        '"defect": "...", "fix": "...", "change": {"title": "...", "body": "..."}}]}'
+        '"defect": "...", "fix": "...", "change": {"title": "...", "body": "..."}}, '
+        '{"criterion": "clarity", "cause": "ask", "defect": "неясно, кто пользователь", "questions": '
+        '[{"text": "...", "options": ["...", "..."], "about": "c7"}]}]}'
     )
 
 
@@ -64,7 +68,8 @@ def _clean(pl: Pipeline, run: dict, data) -> dict:
     stage = GATES[run["gate"]].stage
     for raw in _items(data, "items")[:MAX_ITEMS]:
         defect, fix = _s(raw.get("defect"), 400), _s(raw.get("fix"), 400)
-        if not defect and not fix:
+        questions = [q for q in _items(raw, "questions") if _s(q.get("text"), 300)][:3]
+        if not defect and not fix and not questions:
             continue
         item = {
             "criterion": _s(raw.get("criterion"), 60),
@@ -75,6 +80,8 @@ def _clean(pl: Pipeline, run: dict, data) -> dict:
             "fix": fix,
             "evaluator_ok": raw.get("evaluator_ok") is not False,
         }
+        if raw.get("cause") == "ask" and questions:
+            item.update(cause="ask", questions=questions)
         target = _s(raw.get("target"), 20)
         change = raw.get("change") if isinstance(raw.get("change"), dict) else {}
         if raw.get("cause") == "upstream" and _exists(pl, target):
@@ -112,7 +119,46 @@ def make(pl: Pipeline, run: dict) -> dict | None:
     if not result["items"]:
         return None
     pl.keeper.annotate(run["id"], audit=result)
+    if pl.settings.mode != "manual":
+        _ask(pl, run, result)
     return result
+
+
+def _ask(pl: Pipeline, run: dict, result: dict) -> None:
+    """Не хватает данных или нужна правка выше по цепочке: студия спрашивает человека, а не требует
+    ручной работы. Автопилот отвечает на эти вопросы сам (``clarify.settle``)."""
+    gate = run["gate"]
+    clarify.drop_pending(pl, gate)
+    items: list[dict] = []
+    for item in result["items"]:
+        if item.get("cause") == "ask":
+            items += item.get("questions") or []
+    if pl.settings.mode == "gates":  # в «На воротах» человек решает, а не правит руками
+        for item in result["items"]:
+            if item.get("cause") == "upstream":
+                what = item["change"].get("title") or item["change"].get("body")
+                items.append(
+                    {
+                        "text": f"Принятая запись {item['target']} мешает: {item['defect']}. Исправить её так: «{what}»?",
+                        "options": ["Да, исправить", "Нет, оставить как есть"],
+                        "about": item["target"],
+                        "upstream": {"target": item["target"], "patch": item["change"]},
+                    }
+                )
+        drop = rejectable(pl, {**run, "audit": result})
+        if drop:
+            titles = ", ".join(f"«{pl.bank.get(r)['title']}»" for r in drop)
+            items.append(
+                {
+                    "text": f"Записи {titles} довести до порога нельзя. Отклонить?",
+                    "options": ["Да, отклонить", "Нет, оставить"],
+                    "about": drop[0],
+                    "reject": drop,
+                }
+            )
+    made = clarify.create(pl, items, source="audit", batch=run["id"], gate=gate)
+    if made:
+        pl.keeper.annotate(run["id"], audit={**result, "asked": [q["id"] for q in made]})
 
 
 def lines(run: dict) -> list[str]:
@@ -121,7 +167,9 @@ def lines(run: dict) -> list[str]:
     out = []
     for item in audit.get("items") or []:
         where = f" (записи {', '.join(item['records'])})" if item.get("records") else ""
-        if item["cause"] == "upstream":
+        if item["cause"] == "ask":
+            out.append(f"- {item['criterion']}: не хватает данных — {item['defect'] or 'нужны ответы человека'}")
+        elif item["cause"] == "upstream":
             out.append(f"- {item['criterion']}: причина выше — запись {item['target']}: {item['defect']}")
         elif item.get("action") == "reject":
             out.append(f"- {item['criterion']}{where}: довести нельзя ({item['defect']})")
@@ -165,6 +213,8 @@ def escalate(pl: Pipeline, run: dict) -> list[str]:
     """Причины выше по цепочке: подать запросы на изменение. Автопилот принимает их сам."""
     audit = run.get("audit") or {}
     opened: list[str] = []
+    if pl.settings.mode == "gates":
+        return opened  # в «На воротах» это вопрос человеку (см. ``_ask``), а не запрос на одобрение
     busy = {t for r in pl.changes.open_requests() for t in r.get("targets") or []}
     for item in audit.get("items") or []:
         target = item.get("target")

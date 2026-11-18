@@ -37,11 +37,17 @@ def test_short_and_lines_for_code_findings_and_ratings(tmp_path):
     data = advice.for_gate(pl, run)
     assert data["summary"].startswith("Ворота «Проверка проблем»: проверки кодом")
     assert any("повторяет" in line for line in data["lines"])
-    assert keys(data["actions"]) == ["integrate", "rework", "reject_all", "rerate"]
+    assert keys(data["actions"]) == ["integrate", "rework", "dedupe", "rerate"]  # «На воротах»: студия сама
+    pl.settings.set_mode("manual")
+    assert keys(advice.for_gate(pl, run)["actions"]) == ["integrate", "rework", "reject_all", "rerate"]
+    pl.settings.set_mode("gates")
     by_key = {o["key"]: o for o in data["actions"]}
     assert by_key["integrate"]["recommended"] is True and by_key["rework"]["recommended"] is False
     by_code = dict(zip((f["code"] for f in run["code"]), data["findings"], strict=True))
-    assert by_code["duplicate"][0]["key"] == "reject"
+    assert by_code["duplicate"][0]["key"] == "dedupe"  # студия сама убирает повтор
+    pl.settings.set_mode("manual")
+    assert advice.finding_options(pl, {"code": "duplicate", "ids": []}, "problems")[0]["key"] == "reject"
+    pl.settings.set_mode("gates")
     ready = {**run, "state": "ready", "code": [], "failing": []}
     assert advice.short(ready) == "всё в порядке, ждут вашего решения"
     assert keys(advice.for_gate(pl, ready)["actions"]) == ["accept"]
@@ -50,6 +56,7 @@ def test_short_and_lines_for_code_findings_and_ratings(tmp_path):
 
 def test_options_for_each_kind_of_finding(tmp_path):
     pl, _ = make(tmp_path)
+    pl.settings.set_mode("manual")
     cases = {
         "orphan": ["integrate", "link", "reject"],
         "duplicate": ["reject"],
@@ -70,10 +77,16 @@ def test_options_for_each_kind_of_finding(tmp_path):
         assert sum(o["recommended"] for o in options) == 1
     options = advice.finding_options(pl, {"code": "uncovered", "ids": []}, "frontend")
     assert "3.2" in options[0]["hint"]
+    pl.settings.set_mode("gates")  # не «Вручную»: ни привязки, ни открытия записей руками — студия сама
+    assert keys(advice.finding_options(pl, {"code": "orphan", "ids": []}, "schema")) == ["integrate"]
+    assert keys(advice.finding_options(pl, {"code": "duplicate", "ids": []}, "schema")) == ["dedupe"]
+    assert keys(advice.finding_options(pl, {"code": "uncovered", "ids": []}, "schema")) == ["rework"]
+    assert keys(advice.criterion_options({"key": "k"}, False)) == ["rework"]
 
 
 def test_criteria_with_low_score_and_missing_ratings(tmp_path):
     pl, _ = make(tmp_path)
+    pl.settings.set_mode("manual")
     low = {"key": "k", "title": "Ясность", "score": 4, "threshold": 8, "why": "ниже порога"}
     miss = {"key": "m", "title": "Полнота", "why": "оценщик не вернул оценку", "missing": True}
     base = {"id": "g1", "gate": "requirements", "state": "returned", "code": []}

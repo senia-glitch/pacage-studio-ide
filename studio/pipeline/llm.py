@@ -354,6 +354,7 @@ class Llm:
         self.agents = agents or Agents()
         self.lock = threading.Lock()
         self.feedback = ""  # замечания прошлого круга: добавляются к подсказкам ролей-авторов
+        self.questions: list[dict] = []  # вопросы, которые авторы вернули вместо выдумывания
 
     def resolve(self, role_key: str) -> tuple[Agent, str]:
         """Агент и модель роли: выбор пользователя, иначе первый найденный и рекомендация."""
@@ -398,7 +399,7 @@ class Llm:
         """Ответ роли как JSON. При неудаче один раз просим исправить формат."""
         reply = self.ask(role_key, system, prompt, web=web)
         try:
-            return extract_json(reply.text)
+            data = extract_json(reply.text)
         except PipelineError:
             retry = self.ask(
                 role_key,
@@ -406,7 +407,19 @@ class Llm:
                 prompt + "\n\nПрошлый ответ нельзя разобрать. Ответь ТОЛЬКО JSON без пояснений.",
                 web=web,
             )
-            return extract_json(retry.text)
+            data = extract_json(retry.text)
+        if isinstance(data, dict) and role_key != "evaluator":
+            asked = data.pop("open_questions", None)  # автор сомневается и спрашивает
+            if isinstance(asked, list):
+                with self.lock:
+                    self.questions += [q for q in asked if isinstance(q, dict)]
+        return data
+
+    def take_questions(self) -> list[dict]:
+        """Забрать вопросы авторов, накопленные с прошлого раза."""
+        with self.lock:
+            out, self.questions = self.questions, []
+        return out
 
     def _log(self, role_key: str, reply: Reply) -> None:
         path = self.project / ".studio" / "agents.log"

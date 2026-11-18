@@ -80,7 +80,6 @@ function attrLines(record) {
   add("выбран вариант", a.chosen ? "да" : "");
   if (a.options && Array.isArray(a.options)) add("варианты ответа", a.options.join("; "));
   if (a.options === true) add("несколько способов", "да");
-  if (a.assumed) add("допущение", "ответ дал агент");
   if (a.analysis) add("анализ", `${a.analysis.strengths || ""} / ${a.analysis.weaknesses || ""}`);
   return lines;
 }
@@ -112,7 +111,9 @@ function drawDetail(ctx, detail, data) {
 function actions(ctx, detail, data) {
   const r = data.record;
   const box = h("div", {class: "pl-actions"});
-  if (r.status === "proposed") {
+  if (r.status === "proposed" && ctx.state.mode !== "manual") {
+    box.append(h("div", {class: "hint"}, "Согласованием записей занимается студия: она сама правит черновики и задаёт вам вопросы. Руками записи правятся только в режиме «Вручную»."));
+  } else if (r.status === "proposed") {
     const title = h("input", {type: "text", value: r.title});
     const bodyBox = h("textarea", {rows: 3}, r.body || "");
     box.append(

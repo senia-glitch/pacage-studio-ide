@@ -152,3 +152,12 @@ def test_настройки_умеют_сносить_проект_с_подтв
     settings = (JS_DIR / "pipeline" / "settings.js").read_text(encoding="utf-8")
     for part in ("dangerBlock", "/api/pipeline/reset/plan", "/api/pipeline/reset", "Снести проект", "имя папки"):
         assert part in settings, part
+
+
+def test_вопросы_студии_и_режимы_в_интерфейсе():
+    path = (JS_DIR / "pipeline" / "path.js").read_text(encoding="utf-8")
+    for part in ("Решить за меня", "/api/pipeline/answer/auto", "Вопросы студии", "dedupe", 'ctx.state.mode === "manual"'):
+        assert part in path, part
+    bank = (JS_DIR / "pipeline" / "bank.js").read_text(encoding="utf-8")
+    assert 'ctx.state.mode !== "manual"' in bank and "допущение" not in bank
+

@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from . import advice, audit, debt, integrate, prompts, stage1, stage2, stage3, stage4, stage5, waves
+from . import advice, audit, clarify, debt, integrate, stage1, stage2, stage3, stage4, stage5, waves
 from .engine import Pipeline
 from .errors import PipelineError
 from .gates import GATES, STAGE_GATES, gate
@@ -37,10 +37,18 @@ def stage_open(pl: Pipeline, stage: int) -> bool:
 
 def all_steps(pl: Pipeline) -> dict[int, list[dict]]:
     out = {}
+    asked = pl.settings.mode == "gates" and bool(clarify.pending(pl))
     for stage, module in STAGES.items():
         items = module.steps(pl)
         if not stage_open(pl, stage):
             items = [{**i, "state": "blocked"} if i["state"] == "available" else i for i in items]
+        elif asked:  # «На воротах»: есть вопросы к человеку — до ответов дальше не идём
+            items = [
+                {**i, "state": "blocked", "hint": "ответьте на вопросы студии"}
+                if i["state"] == "available"
+                else i
+                for i in items
+            ]
         out[stage] = items
     return out
 
@@ -57,7 +65,37 @@ def next_step(pl: Pipeline, skip: set | frozenset = frozenset()) -> dict | None:
 def run_step(pl: Pipeline, stage: int, key: str):
     if stage not in STAGES:
         raise PipelineError("unknown_stage", f"Этап {stage} ещё не подключён")
-    return STAGES[stage].run_step(pl, key)
+    before = clarify.last_id(pl)
+    result = STAGES[stage].run_step(pl, key)
+    if key.startswith("gate_") or key == "questions":
+        return result
+    result = _repair(pl, stage, key, result)
+    made = clarify.after_step(pl, stage, key, before)  # критик и сомнения авторов → вопросы
+    if made and isinstance(result, dict):
+        result["questions"] = [q["id"] for q in made]
+    return result
+
+
+def _repair(pl: Pipeline, stage: int, key: str, result):
+    """Записи, потерявшие родителя при создании, студия не бросает до ворот: один раз переспрашивает
+    автора со списком допустимых кодов (шаг сам берёт только то, чего ещё нет)."""
+    if not isinstance(result, dict) or not result.get("skipped"):
+        return result
+    pl.llm.feedback = (
+        "Прошлая попытка потеряла записи, потому что не указан или неверен код родителя:\n"
+        + "\n".join(f"- {line}" for line in result["skipped"])
+        + "\nУкажи точный код родителя из списка выше для каждой записи."
+    )
+    try:
+        again = STAGES[stage].run_step(pl, key)
+    except PipelineError:
+        return result  # повтор не получился: останется то, что было, ворота и внедрение закроют
+    finally:
+        pl.llm.feedback = ""
+    if isinstance(again, dict):
+        result["created"] = [*result.get("created", []), *again.get("created", [])]
+        result["skipped"] = again.get("skipped", [])
+    return result
 
 
 # ---------------------------------------------------------------------- доработка
@@ -92,36 +130,10 @@ def rework(pl: Pipeline, gate_key: str, run: dict) -> dict:
         )
     spec = gate(gate_key)
     role, fill = REWORK[gate_key]
-    feedback = feedback_text(run)
+    answers = clarify.answers_text(pl, run.get("id", ""))  # ответы человека по этим воротам
+    feedback = feedback_text(run) + answers
     drafts = [c for kind in spec.subject for c in pl.bank.records(kind, status="proposed")]
-    changed = 0
-    if drafts:
-        prompt = (
-            "Замечания ворот к твоей работе:\n"
-            + feedback
-            + "\n\nЧерновики:\n"
-            + "\n".join(prompts.line(c) for c in drafts)
-            + "\n\nИсправь то, что можно исправить правкой текста, и отклони лишнее. Пробелы "
-            "(чего-то не хватает) закроют отдельным шагом.\n"
-            'Ответ: {"revise": [{"id": "c1", "title": "...", "body": "..."}], '
-            '"reject": [{"id": "c2"}]}'
-        )
-        data = pl.llm.ask_json(role, prompts.SYSTEM[role], prompt)
-        live = {c["id"] for c in drafts}
-        for item in stage1._items(data, "revise"):
-            cid = stage1._s(item.get("id"), 20)
-            if cid in live and (item.get("title") or item.get("body")):
-                title = stage1._s(item.get("title"), 200) or None
-                body = stage1._s(item.get("body"), 800) or None
-                pl.bank.revise(
-                    cid, role, title=title, body=body, note="доработка по замечаниям ворот"
-                )
-                changed += 1
-        for item in stage1._items(data, "reject"):
-            cid = stage1._s(item.get("id"), 20)
-            if cid in live:
-                pl.bank.reject(cid, role, "отклонено при доработке", cascade=False)
-                changed += 1
+    changed = clarify.revise_drafts(pl, role, drafts, feedback)
     pl.llm.feedback = feedback
     try:
         filled = fill(pl)
@@ -131,6 +143,7 @@ def rework(pl: Pipeline, gate_key: str, run: dict) -> dict:
     integrated = integrate.run(pl) if integrate.orphans(pl) else {}
     upstream = audit.escalate(pl, run)  # причина выше по цепочке: запрос на изменение принятого
     dropped = audit.apply_rejects(pl, run)  # недоводимое отклоняет автопилот, остальные — человек
+    clarify.mark_applied(pl, run.get("id", ""))  # ответы человека учтены этой доработкой
     return {
         "changed": changed,
         "filled": filled,
@@ -138,6 +151,35 @@ def rework(pl: Pipeline, gate_key: str, run: dict) -> dict:
         "upstream": upstream,
         "dropped": dropped,
     }
+
+
+def apply_answers(pl: Pipeline, batch: str):
+    """Ответили на все вопросы пачки: студия сама меняет систему. Вопросы аудита ворот — доработка с
+    ответами и ворота заново, вопросы шага — правка записей, к которым они относились."""
+    questions = clarify.batch_questions(pl, batch)
+    gate_key = next((q["attrs"]["gate"] for q in questions if q["attrs"].get("gate")), "")
+    if not gate_key:
+        changed = clarify.refine(pl, batch)
+        clarify.mark_applied(pl, batch)
+        return {"refined": changed}
+    run = pl.keeper.run(batch)
+    decided = clarify.apply_decisions(pl, batch)  # правка принятого выше и отклонения — по ответам
+    if gate_key in REWORK:
+        rework(pl, gate_key, run)
+    clarify.mark_applied(pl, batch)
+    again = pl.run_gate(gate_key, gate_facts(pl, gate_key))
+    return {**again, "decided": decided}
+
+
+def answer_for_me(pl: Pipeline, ids: list[str]):
+    """«Решить за меня»: студия отвечает на вопросы по своим правилам и применяет ответы."""
+    done = clarify.decide(pl, ids)
+    batches = list(dict.fromkeys(q["attrs"].get("batch") for q in done if q["attrs"].get("batch")))
+    out: dict = {"answered": len(done)}
+    for batch in batches:
+        if clarify.batch_ready(pl, batch):
+            out["applied"] = apply_answers(pl, batch)
+    return out
 
 
 # ---------------------------------------------------------------------- автопилот
@@ -230,6 +272,7 @@ def autopilot(pl: Pipeline, limit: int = LIMIT, stop_after: int | None = None) -
                     entry["stop"] = advice.explain(pl, result)
                     log.append(entry)
                     break
+                clarify.settle(pl, result["id"])  # вопросы аудита: студия отвечает сама
                 entry["rework"] = rework(pl, gate_key, result)
             elif result.get("human"):
                 entry["stop"] = "нужно ваше решение: " + (

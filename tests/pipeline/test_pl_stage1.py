@@ -20,7 +20,7 @@ def rules(pl_state=None):
             },
         ),
         (
-            "Ответь на вопросы наиболее разумным допущением",
+            "Ответь на вопросы по правилам студии",
             {
                 "answers": [
                     {"id": "c2", "answer": "пациенты"},
@@ -278,7 +278,7 @@ def test_autopilot_walks_the_stage_and_stops_for_the_human(tmp_path):
     assert "gate_problems" in steps_done
     # в автопилоте ворота проходят без человека; на требованиях id проблемы другой — пропуск
     assert pl.bank.records("problem", status=ACCEPTED)
-    assert any(q["attrs"].get("assumed") for q in pl.bank.records("question")[:2])
+    assert any(q["attrs"].get("answered_by") == "analyst" for q in pl.bank.records("question")[:2])
 
 
 def test_gate_returns_on_low_score_and_evaluator_prompt(tmp_path):

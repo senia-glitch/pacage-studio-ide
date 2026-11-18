@@ -70,6 +70,7 @@ UPSTREAM = {
 
 def test_upstream_cause_becomes_a_change_request_the_human_decides(tmp_path):
     pl, _ = make(tmp_path, UPSTREAM)
+    pl.settings.set_mode("manual")  # в «Вручную» человек сам решает по запросу
     ids, run = returned_scenarios(pl)
     audit.make(pl, run)
     opened = audit.escalate(pl, pl.keeper.run(run["id"]))

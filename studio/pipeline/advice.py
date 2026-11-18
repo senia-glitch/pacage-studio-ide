@@ -76,6 +76,11 @@ def finding_options(pl: Pipeline, item: dict, gate_key: str) -> list[dict]:
     """Варианты решения для одного замечания проверок кодом."""
     code = item["code"]
     step = FIX_STEP.get(gate_key, "соответствующий шаг")
+    manual = pl.settings.mode == "manual"  # руками — только в «Вручную»; иначе студия сама или спрашивает
+    if code == "orphan" and not manual:
+        return [_opt("integrate", "Внедрить агентом", "агент привяжет запись к подходящему родителю или создаст родителя по цепочке; ненужное отклонит", True)]
+    if code == "duplicate" and not manual:
+        return [_opt("dedupe", "Убрать повтор", "студия оставит одну запись из двух", True)]
     if code == "orphan":
         return [
             _opt("integrate", "Внедрить агентом", "агент привяжет запись к подходящему родителю или создаст родителя по цепочке; ненужное отклонит", True),
@@ -85,10 +90,10 @@ def finding_options(pl: Pipeline, item: dict, gate_key: str) -> list[dict]:
     if code == "duplicate":
         return [_opt("reject", "Отклонить повтор", "оставить одну запись из двух", True)]
     if code in ("uncovered", "broken_chain"):
-        return [
-            _opt("rework", "Закрыть пробел агентом", f"агент выполнит шаг {step} с этим замечанием", True),
-            _opt("open", "Открыть запись", "добавить недостающее вручную в «Банке знаний»"),
-        ]
+        options = [_opt("rework", "Закрыть пробел агентом", f"агент выполнит шаг {step} с этим замечанием", True)]
+        if manual:
+            options.append(_opt("open", "Открыть запись", "добавить недостающее вручную в «Банке знаний»"))
+        return options
     if code == "unknown_participant":
         return [
             _opt("rework", "Поправить агентом", "агент приведёт участников диаграммы к словарю", True),
@@ -107,13 +112,13 @@ def finding_options(pl: Pipeline, item: dict, gate_key: str) -> list[dict]:
     return [_opt("rework", "Доработать агентом", "", True)]
 
 
-def criterion_options(item: dict) -> list[dict]:
+def criterion_options(item: dict, manual: bool = True) -> list[dict]:
     if item.get("missing"):
         return [_opt("rerate", "Оценить заново", "оценщик не вернул оценку — попросим ещё раз", True)]
-    return [
-        _opt("rework", "Доработать агентом", "агент-автор учтёт замечание оценщика", True),
-        _opt("open", "Поправить самому", "открыть записи в «Банке знаний»"),
-    ]
+    options = [_opt("rework", "Доработать агентом", "агент-автор учтёт замечание оценщика", True)]
+    if manual:
+        options.append(_opt("open", "Поправить самому", "открыть записи в «Банке знаний»"))
+    return options
 
 
 def for_gate(pl: Pipeline, run: dict | None) -> dict:
@@ -143,11 +148,14 @@ def for_gate(pl: Pipeline, run: dict | None) -> dict:
         if orphans:
             actions.append(_opt("integrate", f"Внедрить висящее агентом ({len(orphans)})", "агент привяжет записи к подходящим родителям или создаст родителей по цепочке, ненужное отклонит; ворота пройдут заново", True))
         actions.append(_opt("rework", "Доработать агентом", "автор поправит черновики и закроет пробелы, ворота пройдут заново", not orphans))
-    if hang:
+    manual = pl.settings.mode == "manual"
+    if hang and manual:
         actions.append(_opt("reject_all", f"Отклонить висящее ({len(hang)})", "убрать черновики без родителя и повторы"))
+    elif hanging_ids(pl, run, ("duplicate",)):
+        actions.append(_opt("dedupe", "Убрать повторы", "студия оставит по одной записи"))
     if code and not evaluator_failed(run):
         actions.append(_opt("rerate", "Проверить заново", "после правок записей: ворота пройдут ещё раз"))
-    if failing and not code and not evaluator_failed(run):
+    if manual and failing and not code and not evaluator_failed(run):
         actions.append(_opt("accept_below", "Принять ниже порога", "записи получат пометку «ниже порога»"))
     if run["state"] == "ready":
         actions.append(_opt("accept", "Принять", "все слои пройдены", True))
@@ -160,7 +168,7 @@ def for_gate(pl: Pipeline, run: dict | None) -> dict:
         "lines": lines,
         "actions": actions,
         "findings": [finding_options(pl, f, gate_key) for f in code],
-        "criteria": {f["key"]: criterion_options(f) for f in failing},
+        "criteria": {f["key"]: criterion_options(f, manual) for f in failing},
     }
 
 
@@ -195,8 +203,9 @@ def explain(pl: Pipeline, run: dict, rounds: int | None = None) -> str:
 def fix(pl: Pipeline, run_id: str, action: str) -> dict:
     """Действие над воротами одним нажатием (``reject_all``); остальные идут через свои маршруты."""
     run = pl.keeper.run(run_id)
-    if action == "reject_all":
-        done = auto_fix(pl, run)  # «мусор»: отклонить всё висящее и повторы (с потомками)
+    if action in ("reject_all", "dedupe"):
+        codes = HANGING if action == "reject_all" else ("duplicate",)
+        done = auto_fix(pl, run, codes)  # «мусор»: отклонить висящее и повторы (с потомками)
         if not done:
             raise PipelineError("nothing_to_do", "Висящих и повторяющихся черновиков нет")
         return {"rejected": len(done), "items": done}

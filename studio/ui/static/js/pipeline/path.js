@@ -43,7 +43,8 @@ function nextBar(ctx) {
   const next = state.next;
   const bar = h("div", {class: "pl-next"});
   if (!next) {
-    bar.append(h("b", null, "Сейчас: "), "все подключённые шаги пройдены или ждут вашего решения на воротах.");
+    const asked = (state.questions || []).length;
+    bar.append(h("b", null, "Сейчас: "), asked ? "у студии есть вопросы к вам — ответьте на них ниже, и она пойдёт дальше." : "все подключённые шаги пройдены или ждут вашего решения на воротах.");
   } else {
     bar.append(h("b", null, "Дальше: "), `${next.num && next.num !== "gate" ? next.num + " " : ""}${next.title}`);
     if (next.hint) bar.append(h("span", {class: "hint"}, " — ", next.hint));
@@ -250,7 +251,9 @@ function areaPanel(ctx) {
 function questionsPanel(ctx) {
   const questions = ctx.state.questions || [];
   if (!questions.length) return null;
-  const wrap = h("div", {class: "pl-block"}, h("div", {class: "pl-label"}, "1.2 Уточняющие вопросы — ответьте"));
+  const studio = questions.some((q) => q.attrs && q.attrs.source);
+  const running = ctx.state.job && ctx.state.job.running;
+  const wrap = h("div", {class: "pl-block"}, h("div", {class: "pl-label"}, studio ? "Вопросы студии — ответьте, и она сама доработает систему" : "1.2 Уточняющие вопросы — ответьте"));
   for (const q of questions) {
     const input = h("input", {type: "text", placeholder: "или свой ответ"});
     const send = (answer) => ctx.act("/api/pipeline/answer", {id: q.id, answer});
@@ -265,10 +268,12 @@ function questionsPanel(ctx) {
           (q.attrs.options || []).map((option) => h("button", {onclick: () => send(option)}, option)),
           input,
           h("button", {class: "ghost", onclick: () => input.value.trim() && send(input.value.trim())}, "Ответить"),
+          h("button", {class: "ghost", disabled: running, title: "Студия ответит сама по своим правилам", onclick: () => ctx.act("/api/pipeline/answer/auto", {ids: [q.id]})}, "Решить за меня"),
         ),
       ),
     );
   }
+  if (questions.length > 1) wrap.append(h("div", {class: "acts"}, h("button", {class: "ghost", disabled: running, onclick: () => ctx.act("/api/pipeline/answer/auto", {ids: questions.map((q) => q.id)})}, "Решить за меня всё")));
   return wrap;
 }
 
@@ -391,8 +396,11 @@ function adviceButton(ctx, option, run, running, record) {
   if (option.key === "reject_all") return h("button", {...attrs, onclick: act("/api/pipeline/gate/fix", {run: run.id, action: "reject_all"})}, option.label);
   if (option.key === "rerate") return h("button", {...attrs, onclick: act("/api/pipeline/gate/fix", {run: run.id, action: "rerate"})}, option.label);
   if (option.key === "integrate") return h("button", {...attrs, onclick: act("/api/pipeline/gate/fix", {run: run.id, action: "integrate"})}, option.label);
+  if (option.key === "dedupe") return h("button", {...attrs, onclick: act("/api/pipeline/gate/fix", {run: run.id, action: "dedupe"})}, option.label);
   if (option.key === "settings") return h("button", {...attrs, onclick: () => ctx.go("settings")}, option.label);
   if (option.key === "accept") return h("button", {...attrs, onclick: act("/api/pipeline/gate/decide", {run: run.id, decision: "accept"})}, option.label);
+  const manual = ctx.state.mode === "manual"; // руками — только в «Вручную»
+  if (!manual && ["accept_below", "open", "link", "reject"].includes(option.key)) return null;
   if (option.key === "accept_below") {
     return h("button", {...attrs, class: "warn", onclick: () => { if (confirm("Принять ниже порога? Записи получат пометку.")) ctx.act("/api/pipeline/gate/decide", {run: run.id, decision: "accept_below"}); }}, option.label);
   }
@@ -436,7 +444,7 @@ function auditBlock(ctx, audit, run, running) {
   for (const item of audit.items || []) {
     const where = item.records && item.records.length ? ` (записи ${item.records.join(", ")})` : "";
     const head = item.cause === "upstream" ? `${item.criterion}: причина выше — запись ${item.target}` : `${item.criterion}${where}`;
-    box.append(h("div", {class: "finding"}, h("b", null, head), h("div", null, item.defect), h("div", {class: "hint"}, item.cause === "upstream" ? "Подан запрос на изменение принятой записи (вкладка «Запросы»)." : `Что исправить: ${item.fix}`), item.evaluator_ok === false ? h("div", {class: "pl-warn"}, "Аудитор сомневается в замечании оценщика: по записям оно подтверждается не полностью.") : null, item.action === "reject" && item.records && item.records.length ? h("div", {class: "acts"}, h("span", {class: "hint"}, "Аудитор считает, что довести нельзя: "), h("button", {class: "danger", disabled: running, onclick: async () => { for (const id of item.records) { if (!(await ctx.act("/api/pipeline/record/reject", {id, note: "аудит: довести до порога нельзя"}))) return; } recheck(ctx, run); }}, `Отклонить (${item.records.length})`)) : null));
+    box.append(h("div", {class: "finding"}, h("b", null, head), h("div", null, item.defect), h("div", {class: "hint"}, item.cause === "upstream" ? (ctx.state.mode === "manual" ? "Подан запрос на изменение принятой записи (вкладка «Запросы»): решите его сами." : "Правка принятой записи решается вопросом студии: ответьте на него вверху экрана «Путь».") : `Что исправить: ${item.fix}`), item.evaluator_ok === false ? h("div", {class: "pl-warn"}, "Аудитор сомневается в замечании оценщика: по записям оно подтверждается не полностью.") : null, item.cause === "ask" ? h("div", {class: "hint"}, "Студия задала вопросы — ответьте на них вверху экрана «Путь»; дальше она сама доработает этап.") : null, ctx.state.mode === "manual" && item.action === "reject" && item.records && item.records.length ? h("div", {class: "acts"}, h("span", {class: "hint"}, "Аудитор считает, что довести нельзя: "), h("button", {class: "danger", disabled: running, onclick: async () => { for (const id of item.records) { if (!(await ctx.act("/api/pipeline/record/reject", {id, note: "аудит: довести до порога нельзя"}))) return; } recheck(ctx, run); }}, `Отклонить (${item.records.length})`)) : null));
   }
   return box;
 }
@@ -498,7 +506,7 @@ function decision(ctx, data, run, running) {
   if (run.state === "ready") {
     box.append(h("button", {class: "pl-primary", disabled: running, onclick: () => ctx.act("/api/pipeline/gate/decide", {run: run.id, decision: "accept"})}, "Принять"));
   }
-  if (run.state === "returned" && !run.code.length && run.failing && run.failing.length) {
+  if (ctx.state.mode === "manual" && run.state === "returned" && !run.code.length && run.failing && run.failing.length) {
     box.append(h("button", {class: "warn", disabled: running, title: "Записи получат пометку «принято ниже порога»", onclick: () => { if (confirm("Принять ниже порога? Записи получат пометку.")) ctx.act("/api/pipeline/gate/decide", {run: run.id, decision: "accept_below"}); }}, "Принять ниже порога"));
   }
   if (["ready", "returned"].includes(run.state)) {

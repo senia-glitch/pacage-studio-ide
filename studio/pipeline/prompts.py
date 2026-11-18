@@ -8,7 +8,12 @@ from .kinds import KINDS
 COMMON = """Ты работаешь в студии разработки ПО. Пиши по-русски, простыми словами, без воды.
 Ничего не выдумывай: опирайся только на данные ниже. Если данных мало — честно скажи об этом
 в самом ответе, а не додумывай.
-Ответ — ТОЛЬКО JSON, без пояснений и без обёрток. Ссылайся на записи по их коду (например c12)."""
+Ответ — ТОЛЬКО JSON, без пояснений и без обёрток. Ссылайся на записи по их коду (например c12).
+Мысли критично: ничего не принимай за истину, даже идею и принятое выше. Перед ответом проверь:
+каждая связь указывает на существующий код из списка; нет противоречий с границами, ограничениями
+и решениями человека; формулировки однозначны. Если для хорошего ответа не хватает данных —
+не выдумывай: добавь в JSON поле "open_questions": [{"text": "закрытый вопрос", "options":
+["вариант 1", "вариант 2"], "about": "код записи"}] (не больше 3, только существенное)."""
 
 SYSTEM = {
     "analyst": COMMON
@@ -92,4 +97,8 @@ def render(bank: ProjectBank, *kinds: str, status: tuple[str, ...] | None = None
 def constitution(bank: ProjectBank) -> str:
     """«Конституция» проекта: принятое и черновое из границ, ограничений и словаря."""
     items = [c for kind in ("boundary", "constraint", "term", "style") for c in bank.records(kind)]
-    return "\n".join(line(c, with_body=False) for c in items) or "(пока нет)"
+    out = [line(c, with_body=False) for c in items]
+    asked = [c for c in bank.records("question") if (c.get("attrs") or {}).get("source")]
+    decided = [c for c in asked if c["attrs"].get("answer")]  # решения по ходу работы: им не противоречим
+    out += [f"Решение: {c['title']} — {c['attrs']['answer']}" for c in decided[-30:]]
+    return "\n".join(out) or "(пока нет)"

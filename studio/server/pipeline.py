@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 from pathlib import Path
@@ -21,6 +22,7 @@ from studio.pipeline import (
     PipelineError,
     ProjectBank,
     advice,
+    clarify,
     debt,
     entry,
     flow,
@@ -381,6 +383,17 @@ class PipelineService:
         thread.start()
         return self.job_view()
 
+    @staticmethod
+    def _manual_only(pl: Pipeline, what: str) -> None:
+        """Ручная работа с записями и принятие ниже порога — только в «Вручную»: в остальных режимах
+        согласование делает студия, а человеку она задаёт вопросы."""
+        if pl.settings.mode != "manual":
+            raise PipelineError(
+                "manual_only",
+                f"{what} — только в режиме «Вручную». В этом режиме студия сама согласует записи "
+                "и задаёт вам вопросы",
+            )
+
     def _reset(self, data: dict) -> dict:
         """Снести проект целиком (с подтверждением именем папки): начать с чистого листа."""
         with self.lock:
@@ -419,8 +432,20 @@ class PipelineService:
             stage1.set_area(pl, str(data.get("text") or ""))
             return self.state()
         if route == "/answer":
-            stage1.answer_question(pl, str(data.get("id") or ""), str(data.get("answer") or ""))
+            card = stage1.answer_question(
+                pl, str(data.get("id") or ""), str(data.get("answer") or "")
+            )
+            batch = (card.get("attrs") or {}).get("batch")
+            if batch and clarify.batch_ready(pl, batch):  # все ответили: студия сама меняет систему
+                with contextlib.suppress(PipelineError):  # занято — применится при следующем ответе
+                    self._start("учёт ваших ответов", lambda: flow.apply_answers(pl, batch))
             return self.state()
+        if route == "/answer/auto":
+            ids = [str(i) for i in data.get("ids") or [data.get("id")] if i]
+            if not ids:
+                raise PipelineError("nothing_to_do", "Не выбраны вопросы")
+            label = "ответ по правилам студии"
+            return {"job": self._start(label, lambda: flow.answer_for_me(pl, ids))}
         if route == "/style":
             stage3.build_style(pl, str(data.get("theme") or "") or None)
             return self.state()
@@ -442,6 +467,8 @@ class PipelineService:
                 )
             }
         if route == "/gate/decide":
+            if str(data.get("decision") or "") == "accept_below":
+                self._manual_only(pl, "Принять ниже порога")
             run = pl.decide_gate(
                 str(data.get("run") or ""),
                 str(data.get("decision") or ""),
@@ -486,6 +513,8 @@ class PipelineService:
                     return {**run, "integrated": done}
 
                 return {"result": None, "job": self._start(label, integrate_and_rerun)}
+            if action == "reject_all":
+                self._manual_only(pl, "Отклонение записей руками")
             result = advice.fix(pl, run_id, action) if action != "rerate" else None
             facts = flow.gate_facts(pl, gate_key)
             label = "повторные ворота"
@@ -503,11 +532,14 @@ class PipelineService:
             )
             return self.settings()
         if route == "/record/edit":
+            self._manual_only(pl, "Правка записи руками")
             return self._edit(pl, data)
         if route == "/record/reject":
+            self._manual_only(pl, "Отклонение записи руками")
             pl.bank.reject(str(data.get("id") or ""), "human", str(data.get("note") or ""))
             return self.state()
         if route == "/record/link":
+            self._manual_only(pl, "Привязка записей руками")
             pl.bank.link(str(data.get("child") or ""), str(data.get("parent") or ""), "human")
             return self.state()
         if route == "/change":

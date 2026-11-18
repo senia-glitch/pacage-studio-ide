@@ -155,6 +155,7 @@ def test_autopilot_job_and_record_tools(tmp_path):
 def test_record_edit_reject_link_and_changes(tmp_path):
     svc, _ = service(tmp_path)
     svc.post(f"{P}/start", {})
+    svc.pl().settings.set_mode("manual")  # руками — только в «Вручную»
     svc.post(f"{P}/area", {"text": "Сайт"})
     pl = svc.pl()
     area = pl.bank.records("area")[0]
@@ -311,6 +312,7 @@ def test_gate_route_carries_advice_and_fix_actions(tmp_path):
     gate = next(g for st in state["stages"] for g in st["gates"] if g["key"] == "problems")
     assert gate["state"] in ("ready", "returned", "none")
     pl = svc.pl()
+    pl.settings.set_mode("manual")
     ids = pl.bank.records("area")[0]
     second = pl.bank.add("boundary", "Вторая", parents=[ids["id"]])
     stray = pl.bank.add("problem", "Висящая", parents=[second["id"]])
@@ -349,6 +351,7 @@ def hanging_requirement_criterion(svc):
 def test_manual_link_takes_a_hanging_record_out_of_the_findings(tmp_path):
     svc, _ = service(tmp_path)
     svc.post(f"{P}/start", {})
+    svc.pl().settings.set_mode("manual")
     pl, live, stray = hanging_requirement_criterion(svc)
     run = pl.keeper.open("requirements")
     assert any(f["code"] == "orphan" for f in run["code"])
@@ -435,6 +438,70 @@ def test_reset_is_refused_while_a_job_is_running(tmp_path):
     with pytest.raises(PipelineError) as err:
         svc.post(f"{P}/reset", {"confirm": tmp_path.name})
     assert err.value.code == "busy" and svc.started()
+
+
+def test_hand_work_with_records_is_manual_mode_only(tmp_path):
+    svc, _ = service(tmp_path)
+    svc.post(f"{P}/start", {})
+    pl, live, stray = hanging_requirement_criterion(svc)
+    run = pl.keeper.open("requirements")
+    for mode in ("gates", "autopilot"):
+        pl.settings.set_mode(mode)
+        calls = [
+            ("/record/link", {"child": stray["id"], "parent": live["id"]}),
+            ("/record/reject", {"id": stray["id"]}),
+            ("/record/edit", {"id": stray["id"], "title": "x"}),
+            ("/gate/decide", {"run": run["id"], "decision": "accept_below"}),
+            ("/gate/fix", {"run": run["id"], "action": "reject_all"}),
+        ]
+        for route, payload in calls:
+            with pytest.raises(PipelineError) as err:
+                svc.post(f"{P}{route}", payload)
+            assert err.value.code == "manual_only" and "Вручную" in err.value.message, (mode, route)
+    assert pl.bank.get(stray["id"])["status"] != "rejected" and not pl.bank.parents(stray["id"])
+    pl.settings.set_mode("manual")
+    svc.post(f"{P}/record/link", {"child": stray["id"], "parent": live["id"]})  # а в «Вручную» можно
+    assert [p["id"] for p in pl.bank.parents(stray["id"])] == [live["id"]]
+
+
+def test_an_answer_starts_the_studio_work_and_decide_for_me_is_a_job(tmp_path):
+    svc, agent = service(tmp_path)
+    svc.post(f"{P}/start", {})
+    pl = svc.pl()
+    area = pl.bank.add("area", "Запись к врачу")
+    boundary = pl.bank.add("boundary", "Только запись", parents=[area["id"]])
+    problem = pl.bank.add("problem", "Не дозвониться", parents=[boundary["id"]])
+    from studio.pipeline import clarify
+
+    agent.rules.insert(0, ("Ответы человека на уточняющие вопросы", {"revise": [{"id": problem["id"], "title": "Не дозвониться пациенту"}], "reject": []}))
+    agent.rules.insert(0, ("Ответь на вопросы по правилам студии", lambda prompt: {"answers": [{"id": qid, "answer": "Пациенты"} for qid in __import__("re").findall(r"(c\d+): ", prompt.split("Вопросы:")[1])]}))
+    first, second = clarify.create(
+        pl,
+        [
+            {"text": "Кто пользуется?", "options": ["Пациенты", "Врачи"], "about": problem["id"]},
+            {"text": "Нужна ли оплата?", "options": ["Да", "Нет"], "about": problem["id"]},
+        ],
+        source="clarify",
+        batch="s1.problems.0",
+    )
+    state = svc.state()
+    assert [q["id"] for q in state["questions"]] == [first["id"], second["id"]]
+    assert state["questions"][0]["attrs"]["source"] == "clarify"
+    svc.post(f"{P}/answer", {"id": first["id"], "answer": "Пациенты"})
+    assert svc.job is None  # ответили не на всё: студия ждёт остальных
+    out = svc.post(f"{P}/answer/auto", {"ids": [second["id"]]})
+    assert "ответ по правилам" in out["job"]["label"]
+    svc.wait()
+    job = svc.job_view()
+    assert not job["error"] and pl.bank.get(second["id"])["attrs"]["answer"] == "Пациенты"
+    assert pl.bank.get(problem["id"])["title"] == "Не дозвониться пациенту"  # все ответили — студия применила
+    with pytest.raises(PipelineError) as err:
+        svc.post(f"{P}/answer/auto", {})
+    assert err.value.code == "nothing_to_do"
+    third = clarify.create(pl, [{"text": "Ещё?", "options": ["Да"], "about": problem["id"]}], source="clarify", batch="s1.problems.9")[0]
+    svc.post(f"{P}/answer", {"id": third["id"], "answer": "Да"})  # последний ответ пачки сам запускает работу
+    svc.wait()
+    assert svc.job["label"] == "учёт ваших ответов" and not svc.job_view()["error"]
 
 
 def test_settings_describe_the_improvement_rounds_and_have_no_accept_below_switch(tmp_path):
