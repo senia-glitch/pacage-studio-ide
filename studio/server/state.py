@@ -80,7 +80,7 @@ class ProjectState:
         # Серверы самого проекта (бэкенд, фронтенд) по кнопке; останавливаются вместе со студией.
         self.devservers = DevServers(self.root)
         # Конвейер v3: банк знаний, этапы, ворота (маршруты /api/pipeline/*, только человек).
-        self.pipeline = PipelineService(self.root)
+        self.pipeline = PipelineService(self.root, on_reset=self.devservers.stop_all)
 
     # ------------------------------------------------------------------ scan
 

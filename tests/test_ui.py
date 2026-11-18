@@ -146,3 +146,9 @@ def test_ворота_объясняют_причину_и_предлагают_
     assert "openGateOnce" in (JS_DIR / "pipeline" / "main.js").read_text(encoding="utf-8")
     assert "auditBlock" in path and "debtBar" in path and "/api/pipeline/debt/reopen" in path
     assert "autopilot_accept_below" not in (JS_DIR / "pipeline" / "settings.js").read_text(encoding="utf-8")
+
+
+def test_настройки_умеют_сносить_проект_с_подтверждением():
+    settings = (JS_DIR / "pipeline" / "settings.js").read_text(encoding="utf-8")
+    for part in ("dangerBlock", "/api/pipeline/reset/plan", "/api/pipeline/reset", "Снести проект", "имя папки"):
+        assert part in settings, part

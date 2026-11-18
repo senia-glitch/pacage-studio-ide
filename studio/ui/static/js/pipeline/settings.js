@@ -19,7 +19,7 @@ export async function renderSettings(ctx, body) {
     body.replaceChildren(h("p", {class: "pl-warn"}, error.message));
     return;
   }
-  body.replaceChildren(modeBlock(ctx, data), numbersBlock(ctx, data), gatesBlock(ctx, data), rolesBlock(ctx, data));
+  body.replaceChildren(modeBlock(ctx, data), numbersBlock(ctx, data), gatesBlock(ctx, data), rolesBlock(ctx, data), dangerBlock(ctx));
 }
 
 async function save(ctx, path, payload) {
@@ -125,4 +125,50 @@ function rolesBlock(ctx, data) {
   table.append(tbody);
   sec.append(h("div", {class: "pl-tablewrap"}, table));
   return sec;
+}
+
+// ---------------------------------------------------------------------- снос проекта
+
+let resetPlan = null;
+let resetSettings = false;
+
+async function loadResetPlan(ctx) {
+  try {
+    resetPlan = await ctx.api("/api/pipeline/reset/plan?settings=" + (resetSettings ? "1" : "0"));
+  } catch (error) {
+    resetPlan = null;
+    ctx.toast(error.message, "err");
+  }
+  ctx.go(ctx.view);
+}
+
+function dangerBlock(ctx) {
+  const running = ctx.state && ctx.state.job && ctx.state.job.running;
+  const box = h("section", {class: "pl-advice pl-danger"}, h("h3", null, "Начать с чистого листа"));
+  if (!ctx.state || !ctx.state.started) {
+    box.append(h("div", {class: "hint"}, "Конвейер в этой папке ещё не начат: сносить нечего."));
+    return box;
+  }
+  box.append(h("div", {class: "hint"}, "Полностью сносит проект: банк знаний, ворота, запросы, ТЗ и весь созданный студией и агентами код. Окружение не трогается: виртуальные окружения, node_modules в корне и история git остаются. Нужно для тестов студии."));
+  if (!resetPlan) {
+    box.append(h("div", {class: "acts"}, h("button", {class: "danger", disabled: running, onclick: () => loadResetPlan(ctx)}, "Снести проект…")));
+    return box;
+  }
+  const list = (items) => h("ul", {class: "lines"}, items.length ? items.map((item) => h("li", null, item)) : h("li", {class: "hint"}, "ничего"));
+  box.append(h("div", {class: "pl-label"}, `Будет удалено (${resetPlan.remove.length})`), list(resetPlan.remove));
+  box.append(h("div", {class: "pl-label"}, "Останется"), list(resetPlan.keep));
+  box.append(h("label", {class: "pl-row"}, h("input", {type: "checkbox", checked: resetSettings, onchange: (e) => { resetSettings = e.target.checked; loadResetPlan(ctx); }}), h("span", null, " Сбросить и настройки конвейера (режим, роли и модели агентов, критерии)")));
+  const confirm = h("button", {class: "danger", disabled: true}, "Снести навсегда");
+  const input = h("input", {type: "text", placeholder: resetPlan.name, "data-focus": "reset-confirm", oninput: () => { confirm.disabled = input.value.trim() !== resetPlan.name || running; }});
+  confirm.onclick = async () => {
+    const answer = await ctx.act("/api/pipeline/reset", {confirm: input.value.trim(), settings: resetSettings});
+    if (!answer) return;
+    resetPlan = null;
+    resetSettings = false;
+    const failed = answer.result.failed || [];
+    ctx.toast(failed.length ? `Снесено, но не удалось удалить: ${failed.join("; ")}` : "Проект снесён: можно начинать с чистого листа", failed.length ? "err" : "ok");
+    ctx.go("path");
+  };
+  box.append(h("div", {class: "hint"}, `Чтобы подтвердить, введите имя папки проекта: ${resetPlan.name}`), input, h("div", {class: "acts"}, confirm, h("button", {class: "ghost", onclick: () => { resetPlan = null; ctx.go(ctx.view); }}, "Отмена")));
+  return box;
 }

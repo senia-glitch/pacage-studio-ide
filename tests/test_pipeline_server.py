@@ -404,6 +404,39 @@ def test_debt_is_in_the_state_and_can_be_reopened_with_a_job(tmp_path):
     assert pl.bank.get(problem["id"])["status"] in ("accepted", "stale")
 
 
+def test_reset_route_plans_confirms_wipes_and_clears_the_state(tmp_path):
+    stopped = []
+    registry, _ = agents_with(full_rules())
+    svc = PipelineService(tmp_path, registry, on_reset=lambda: stopped.append(1))
+    with pytest.raises(PipelineError) as err:
+        svc.get(f"{P}/reset/plan", {})
+    assert err.value.code == "not_started"
+    svc.post(f"{P}/start", {})
+    svc.post(f"{P}/area", {"text": "Сайт записи к врачу"})
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "main.py").write_text("x = 1\n", encoding="utf-8")
+    plan = svc.get(f"{P}/reset/plan", {"settings": ["1"]})
+    assert plan["name"] == tmp_path.name and "app/" in plan["remove"] and plan["settings"] is True
+    with pytest.raises(PipelineError) as err:
+        svc.post(f"{P}/reset", {"confirm": "не то"})
+    assert err.value.code == "confirm_mismatch" and stopped == [] and (tmp_path / "app").exists()
+    out = svc.post(f"{P}/reset", {"confirm": tmp_path.name})
+    assert stopped == [1] and out["result"]["failed"] == []
+    assert out["state"]["started"] is False and not (tmp_path / "app").exists()
+    assert svc.job is None
+    svc.post(f"{P}/start", {})  # чистый лист: можно начинать заново
+    assert svc.state()["started"] is True and svc.pl().bank.records() == []
+
+
+def test_reset_is_refused_while_a_job_is_running(tmp_path):
+    svc, _ = service(tmp_path)
+    svc.post(f"{P}/start", {})
+    svc.job = {"label": "автопилот", "running": True}
+    with pytest.raises(PipelineError) as err:
+        svc.post(f"{P}/reset", {"confirm": tmp_path.name})
+    assert err.value.code == "busy" and svc.started()
+
+
 def test_settings_describe_the_improvement_rounds_and_have_no_accept_below_switch(tmp_path):
     svc, _ = service(tmp_path)
     svc.post(f"{P}/start", {})

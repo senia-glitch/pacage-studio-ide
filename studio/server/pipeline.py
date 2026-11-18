@@ -26,6 +26,7 @@ from studio.pipeline import (
     flow,
     integrate,
     maps,
+    reset,
     stack,
     stage1,
     stage2,
@@ -119,8 +120,9 @@ def _summary(result) -> str:
 
 
 class PipelineService:
-    def __init__(self, root: Path, agents: Agents | None = None):
+    def __init__(self, root: Path, agents: Agents | None = None, on_reset=None):
         self.root = Path(root)
+        self.on_reset = on_reset  # перед сносом проекта: остановить запущенные серверы
         self.agents = agents or Agents()
         self.lock = threading.RLock()
         self._pl: Pipeline | None = None
@@ -328,6 +330,8 @@ class PipelineService:
         route = path[len(PREFIX) :]
         if route == "/stack":
             return self.stack_info()
+        if route == "/reset/plan":
+            return reset.plan(self.root, query.get("settings", ["0"])[0] in ("1", "true"))
         if route == "/state":
             return self.state()
         if route == "/settings":
@@ -377,6 +381,19 @@ class PipelineService:
         thread.start()
         return self.job_view()
 
+    def _reset(self, data: dict) -> dict:
+        """Снести проект целиком (с подтверждением именем папки): начать с чистого листа."""
+        with self.lock:
+            if self.job and self.job.get("running"):
+                raise PipelineError("busy", f"Конвейер занят: {self.job['label']}")
+            reset.check(self.root, str(data.get("confirm") or ""))
+            if self.on_reset:
+                self.on_reset()
+            done = reset.wipe(self.root, str(data.get("confirm") or ""), bool(data.get("settings")))
+            self._pl = None
+            self.job = None
+        return {"result": done, "state": self.state()}
+
     def wait(self, timeout: float = 30) -> None:
         """Для тестов: дождаться конца фоновой работы."""
         end = time.time() + timeout
@@ -388,6 +405,8 @@ class PipelineService:
         if route == "/start":
             self.pl(create=True)
             return self.state()
+        if route == "/reset":
+            return self._reset(data)
         if route == "/stack/init":
             root = self.root
             label = "подготовка проекта на стеке"
