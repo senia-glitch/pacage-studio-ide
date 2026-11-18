@@ -24,7 +24,7 @@ FILE = DIR / "gates.json"
 DECISIONS = ("accept", "return", "accept_below")
 
 
-def _in_scope(spec, card: dict) -> bool:
+def in_scope(spec, card: dict) -> bool:
     """Тесты делятся по слоям: интерфейс, бэкенд, сквозные — каждые ворота берут свои."""
     if card["kind"] not in spec.subject:
         return False
@@ -264,7 +264,7 @@ class GateKeeper:
         ids = [
             c["id"]
             for c in self.bank.records()
-            if c["status"] in (PROPOSED, STALE) and _in_scope(spec, c)
+            if c["status"] in (PROPOSED, STALE) and in_scope(spec, c)
         ]
         self.bank.set_status(ids, ACCEPTED, "gate:" + gate_key, f"ворота «{spec.title}»")
         if below:

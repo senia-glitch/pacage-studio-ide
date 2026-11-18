@@ -23,6 +23,8 @@ export function renderPath(ctx, body) {
     return;
   }
   body.append(nextBar(ctx));
+  const debt = debtBar(ctx);
+  if (debt) body.append(debt);
   if (state.warnings && state.warnings.length) {
     body.append(h("div", {class: "pl-warn"}, state.warnings.map((text) => h("div", null, "⚠ ", text))));
   }
@@ -409,19 +411,32 @@ function adviceBlock(ctx, data, run, running) {
     const more = advice.lines.length > 8 ? h("li", {class: "hint"}, `…и ещё ${advice.lines.length - 8} (ниже, в списках)`) : null;
     box.append(h("ul", {class: "lines"}, advice.lines.slice(0, 8).map((line) => h("li", null, line)), more));
   }
-  if (advice.audit) box.append(auditBlock(advice.audit));
+  if (advice.audit) box.append(auditBlock(ctx, advice.audit, run, running));
   if (advice.actions.length) box.append(h("div", {class: "acts"}, h("span", {class: "hint"}, "Варианты: "), advice.actions.map((option) => adviceButton(ctx, option, run, running, null))));
   if (run.stuck) box.append(h("div", {class: "pl-warn"}, "Оценка не растёт несколько кругов подряд — нужно ваше решение: поправьте записи сами, согласуйте правку выше по цепочке или (на ваше усмотрение) примите ниже порога."));
   return box;
 }
 
-function auditBlock(audit) {
+function debtBar(ctx) {
+  const debt = ctx.state.debt;
+  if (!debt || !debt.count) return null;
+  const running = ctx.state.job && ctx.state.job.running;
+  const where = debt.gates.map((g) => `${g.title}: ${g.count}`).join("; ");
+  const auto = ctx.state.mode === "autopilot";
+  const box = h("div", {class: "pl-advice"}, h("div", {class: "pl-label"}, `Записей, принятых ниже порога: ${debt.count}`), h("div", {class: "summary"}, where));
+  box.append(h("div", {class: "hint"}, "Это долг качества: всё выше по цепочке опирается на сомнительное. Агент доведёт каждую запись до порога через аудит либо запись отклонят. Идёт сверху вниз, с самых ранних ворот."));
+  if (auto) box.append(h("div", {class: "hint"}, "В режиме «Автопилот» он начнёт с этого при запуске."));
+  box.append(h("div", {class: "acts"}, h("button", {class: "pl-primary", disabled: running, title: "Записи станут «устарело», зависимое принятое тоже, ворота пройдут заново с аудитом", onclick: () => ctx.act("/api/pipeline/debt/reopen")}, "Довести до порога")));
+  return box;
+}
+
+function auditBlock(ctx, audit, run, running) {
   const box = h("div", {class: "pl-audit"}, h("div", {class: "pl-label"}, "Аудит: в чём причина и что исправить"));
   if (audit.summary) box.append(h("div", {class: "summary"}, audit.summary));
   for (const item of audit.items || []) {
     const where = item.records && item.records.length ? ` (записи ${item.records.join(", ")})` : "";
     const head = item.cause === "upstream" ? `${item.criterion}: причина выше — запись ${item.target}` : `${item.criterion}${where}`;
-    box.append(h("div", {class: "finding"}, h("b", null, head), h("div", null, item.defect), h("div", {class: "hint"}, item.cause === "upstream" ? "Подан запрос на изменение принятой записи (вкладка «Запросы»)." : `Что исправить: ${item.fix}`), item.evaluator_ok === false ? h("div", {class: "pl-warn"}, "Аудитор сомневается в замечании оценщика: по записям оно подтверждается не полностью.") : null));
+    box.append(h("div", {class: "finding"}, h("b", null, head), h("div", null, item.defect), h("div", {class: "hint"}, item.cause === "upstream" ? "Подан запрос на изменение принятой записи (вкладка «Запросы»)." : `Что исправить: ${item.fix}`), item.evaluator_ok === false ? h("div", {class: "pl-warn"}, "Аудитор сомневается в замечании оценщика: по записям оно подтверждается не полностью.") : null, item.action === "reject" && item.records && item.records.length ? h("div", {class: "acts"}, h("span", {class: "hint"}, "Аудитор считает, что довести нельзя: "), h("button", {class: "danger", disabled: running, onclick: async () => { for (const id of item.records) { if (!(await ctx.act("/api/pipeline/record/reject", {id, note: "аудит: довести до порога нельзя"}))) return; } recheck(ctx, run); }}, `Отклонить (${item.records.length})`)) : null));
   }
   return box;
 }

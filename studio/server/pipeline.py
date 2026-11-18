@@ -21,6 +21,7 @@ from studio.pipeline import (
     PipelineError,
     ProjectBank,
     advice,
+    debt,
     entry,
     flow,
     integrate,
@@ -73,6 +74,9 @@ def _summary(result) -> str:
         if result.get("gate"):
             why = advice.short(result)
             head = f"ворота «{GATES[result['gate']].title}»: {result['state']}"
+            back = result.get("debt")
+            if back:
+                head = f"на улучшение возвращено записей: {len(back['records'])}; " + head
             done = result.get("integrated") or {}
             if done:
                 head = (
@@ -94,6 +98,12 @@ def _summary(result) -> str:
             text = f"выполнено шагов: {len(result)}"
             fixed = sum(len(e.get("fixed") or []) for e in result if isinstance(e, dict))
             steps = [e for e in result if isinstance(e, dict)]
+            returned = sum(len(e["debt"]["records"]) for e in steps if e.get("debt"))
+            if returned:
+                text += f"; возвращено на улучшение записей ниже порога: {returned}"
+            dropped = sum(len((e.get("rework") or {}).get("dropped") or []) for e in steps)
+            if dropped:
+                text += f"; отклонено по аудиту: {dropped}"
             rounds = sum(1 for e in steps if e.get("rework"))
             upstream = sum(len((e.get("rework") or {}).get("upstream") or []) for e in steps)
             if rounds:
@@ -189,6 +199,7 @@ class PipelineService:
             "requests": len(pl.changes.open_requests()),
             "warnings": pl.settings.evaluator_warnings(),
             "waves": waves.info(pl),
+            "debt": debt.summary(pl),
             "questions": [_brief(q) for q in stage1.unanswered(pl)],
             "unchosen": [
                 {
@@ -432,6 +443,18 @@ class PipelineService:
         if route == "/waves/disable":
             waves.disable(pl)
             return self.state()
+        if route == "/debt/reopen":
+            if not debt.next_gate(pl):
+                raise PipelineError(
+                    "no_debt", "Записей ниже порога нет или раньше ещё идёт работа над воротами"
+                )
+
+            def reopen_and_rate():
+                back = debt.reopen(pl)
+                run = pl.run_gate(back["gate"], flow.gate_facts(pl, back["gate"]))
+                return {**run, "debt": back}
+
+            return {"job": self._start("возврат записей ниже порога на улучшение", reopen_and_rate)}
         if route == "/gate/fix":
             run_id, action = str(data.get("run") or ""), str(data.get("action") or "")
             gate_key = pl.keeper.run(run_id)["gate"]

@@ -30,5 +30,5 @@ def require_python(version_info=None) -> None:
 
 require_python()
 
-__version__ = "8.4.0"
+__version__ = "8.5.0"
 __all__ = ["MIN_PYTHON", "__version__", "require_python"]

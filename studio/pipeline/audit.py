@@ -49,10 +49,12 @@ def _prompt(pl: Pipeline, run: dict) -> str:
         + "\n".join(lines)
         + f"\n\nЗаписи этих ворот:\n{subject}\n\nПринятое и заданное выше:\n{above}\n\n"
         + "По каждому замечанию дай разбор. cause: \"here\" — дефект в записях этих ворот, "
-        '"upstream" — в записи выше (тогда укажи её код в target и правку в change).\n'
+        '"upstream" — в записи выше (тогда укажи её код в target и правку в change). '
+        'action: "improve" — запись можно довести правкой, "reject" — довести нельзя (лишняя, '
+        "дублирует другую или противоречит цепочке): назови её в records, её отклонят.\n"
         + 'Ответ: {"summary": "главная причина в одной фразе", "items": [{"criterion": "<ключ или code>", '
         '"cause": "here", "records": ["c7"], "defect": "что не так", "fix": "что сделать автору", '
-        '"evaluator_ok": true}, {"criterion": "completeness", "cause": "upstream", "target": "c3", '
+        '"action": "improve", "evaluator_ok": true}, {"criterion": "completeness", "cause": "upstream", "target": "c3", '
         '"defect": "...", "fix": "...", "change": {"title": "...", "body": "..."}}]}'
     )
 
@@ -68,6 +70,7 @@ def _clean(pl: Pipeline, run: dict, data) -> dict:
             "criterion": _s(raw.get("criterion"), 60),
             "cause": "here",
             "records": [r for r in _codes(raw.get("records")) if _exists(pl, r)],
+            "action": "reject" if raw.get("action") == "reject" else "improve",
             "defect": defect,
             "fix": fix,
             "evaluator_ok": raw.get("evaluator_ok") is not False,
@@ -120,9 +123,42 @@ def lines(run: dict) -> list[str]:
         where = f" (записи {', '.join(item['records'])})" if item.get("records") else ""
         if item["cause"] == "upstream":
             out.append(f"- {item['criterion']}: причина выше — запись {item['target']}: {item['defect']}")
+        elif item.get("action") == "reject":
+            out.append(f"- {item['criterion']}{where}: довести нельзя ({item['defect']})")
         else:
             out.append(f"- {item['criterion']}{where}: {item['defect']} → {item['fix']}")
     return out
+
+
+def rejectable(pl: Pipeline, run: dict) -> list[str]:
+    """Записи этих ворот, которые аудит велел отклонить: не принятые и не последние своего вида."""
+    spec = GATES[run["gate"]]
+    out: list[str] = []
+    for item in (run.get("audit") or {}).get("items") or []:
+        if item.get("action") != "reject":
+            continue
+        for rid in item.get("records") or []:
+            card = pl.bank.get(rid)
+            alive = [c for c in pl.bank.records(card["kind"]) if c["id"] not in (*out, rid)]
+            if (
+                card["kind"] in spec.subject
+                and card["status"] in ("proposed", "stale")
+                and alive
+                and rid not in out
+            ):
+                out.append(rid)
+    return out
+
+
+def apply_rejects(pl: Pipeline, run: dict) -> list[str]:
+    """Автопилот отклоняет записи, которые аудит признал недоводимыми; остальные режимы — человек."""
+    if pl.changes.needs_human():
+        return []
+    done = []
+    for rid in rejectable(pl, run):
+        pl.bank.reject(rid, "autopilot", "аудит: довести до порога нельзя")
+        done.append(rid)
+    return done
 
 
 def escalate(pl: Pipeline, run: dict) -> list[str]:
@@ -149,4 +185,4 @@ def escalate(pl: Pipeline, run: dict) -> list[str]:
     return opened
 
 
-__all__ = ["escalate", "lines", "make"]
+__all__ = ["apply_rejects", "escalate", "lines", "make", "rejectable"]

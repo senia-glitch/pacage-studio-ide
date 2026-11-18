@@ -380,6 +380,30 @@ def test_gate_fix_integrate_lets_the_agent_place_the_record_and_rechecks(tmp_pat
     assert not [f for f in last["code"] if f["code"] == "orphan"]
 
 
+def test_debt_is_in_the_state_and_can_be_reopened_with_a_job(tmp_path):
+    svc, _ = service(tmp_path)
+    svc.post(f"{P}/start", {})
+    assert svc.state()["debt"] == {"count": 0, "gates": []}
+    with pytest.raises(PipelineError) as err:
+        svc.post(f"{P}/debt/reopen", {})
+    assert err.value.code == "no_debt"
+    pl = svc.pl()
+    area = pl.bank.add("area", "Запись к врачу")
+    boundary = pl.bank.add("boundary", "Только запись", parents=[area["id"]])
+    problem = pl.bank.add("problem", "Не дозвониться", parents=[boundary["id"]])
+    pl.bank.set_status([problem["id"]], "accepted", "human")
+    pl.bank.mark(problem["id"], "human", below_threshold=True)
+    state = svc.state()
+    assert state["debt"]["count"] == 1 and state["debt"]["gates"][0]["gate"] == "problems"
+    out = svc.post(f"{P}/debt/reopen", {})
+    assert "ниже порога" in out["job"]["label"]
+    svc.wait()
+    job = svc.job_view()
+    assert not job["error"] and "на улучшение возвращено записей: 1" in job["result"]
+    assert svc.state()["debt"]["count"] == 0
+    assert pl.bank.get(problem["id"])["status"] in ("accepted", "stale")
+
+
 def test_settings_describe_the_improvement_rounds_and_have_no_accept_below_switch(tmp_path):
     svc, _ = service(tmp_path)
     svc.post(f"{P}/start", {})

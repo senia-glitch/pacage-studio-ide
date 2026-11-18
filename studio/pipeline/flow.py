@@ -7,11 +7,12 @@
 
 from __future__ import annotations
 
-from . import advice, audit, integrate, prompts, stage1, stage2, stage3, stage4, stage5, waves
+from . import advice, audit, debt, integrate, prompts, stage1, stage2, stage3, stage4, stage5, waves
 from .engine import Pipeline
 from .errors import PipelineError
 from .gates import GATES, STAGE_GATES, gate
 
+SPECIAL = ("questions", "style", "variants")  # шаги, которые автопилот делает в обход run_step
 LIMIT = 600  # предел шагов за один запуск (защита от зацикливания; доработка и так ограничена)
 STAGES = {1: stage1, 2: stage2, 3: stage3, 4: stage4, 5: stage5}
 
@@ -129,10 +130,30 @@ def rework(pl: Pipeline, gate_key: str, run: dict) -> dict:
     # записи, у которых пропал родитель, не оставляем: агент встраивает их в цепочку или отклоняет
     integrated = integrate.run(pl) if integrate.orphans(pl) else {}
     upstream = audit.escalate(pl, run)  # причина выше по цепочке: запрос на изменение принятого
-    return {"changed": changed, "filled": filled, "integrated": integrated, "upstream": upstream}
+    dropped = audit.apply_rejects(pl, run)  # недоводимое отклоняет автопилот, остальные — человек
+    return {
+        "changed": changed,
+        "filled": filled,
+        "integrated": integrated,
+        "upstream": upstream,
+        "dropped": dropped,
+    }
 
 
 # ---------------------------------------------------------------------- автопилот
+
+
+def _special(pl: Pipeline, key: str) -> None:
+    """Шаги, которые автопилот делает сам, без вопросов человеку."""
+    if key == "questions":
+        if not pl.bank.records("question"):
+            stage1.propose_questions(pl)
+        stage1.auto_answer(pl)
+    elif key == "style":
+        stage3.build_style(pl, "light")  # в автопилоте — стандартная тема без вопросов
+    elif key == "variants":
+        stage2.propose_variants(pl)
+        stage2.auto_choose(pl)
 
 
 def autopilot(pl: Pipeline, limit: int = LIMIT, stop_after: int | None = None) -> list[dict]:
@@ -144,10 +165,14 @@ def autopilot(pl: Pipeline, limit: int = LIMIT, stop_after: int | None = None) -
         set()
     )  # шаг без результата (например, конкурентов не нашли) не гоняем по кругу
     wave = waves.current(pl)
+    repeats: dict[str, int] = {}
     for _ in range(limit):
         if waves.current(pl) != wave:  # началась новая волна: её шаги — снова с первого
             wave = waves.current(pl)
             tried = {t for t in tried if t[0] < 3}  # этапы 1–2 заново не гоняем
+        reopened = debt.reopen(pl)  # долг «ниже порога» — на улучшение, с ранних ворот
+        if reopened:
+            log.append({"debt": reopened})
         item = next_step(pl, tried)
         if item is None:
             log.append({"stop": "все шаги пройдены"})
@@ -159,19 +184,18 @@ def autopilot(pl: Pipeline, limit: int = LIMIT, stop_after: int | None = None) -
         if key == "area":
             log.append({"step": key, "stop": "нужна идея"})
             break
-        if key == "questions":
-            if not pl.bank.records("question"):
-                stage1.propose_questions(pl)
-            stage1.auto_answer(pl)
-            log.append({"step": key})
-            continue
-        if key == "style":
-            stage3.build_style(pl, "light")  # в автопилоте — стандартная тема без вопросов
-            log.append({"step": key})
-            continue
-        if key == "variants":
-            stage2.propose_variants(pl)
-            stage2.auto_choose(pl)
+        if key in SPECIAL:
+            repeats[key] = repeats.get(key, 0) + 1
+            if repeats[key] > 3:  # шаг выполняется, а доступным остаётся: человек должен вмешаться
+                stop = f"шаг «{key}» не продвигается: проверьте его вручную"
+                log.append({"step": key, "stop": stop})
+                break
+        if key in SPECIAL:
+            try:
+                _special(pl, key)
+            except PipelineError as error:
+                log.append({"step": key, "stop": str(error)})
+                break
             log.append({"step": key})
             continue
         if not key.startswith("gate_"):
