@@ -300,3 +300,59 @@ def test_stack_status_and_init_job(tmp_path, monkeypatch):
             break
         time.sleep(0.02)
     assert svc.job_view()["result"] == "проект уже на стеке"
+
+
+def test_gate_route_carries_advice_and_fix_actions(tmp_path):
+    svc, _ = service(tmp_path)
+    reach_gate(svc)
+    detail = svc.get(f"{P}/gate", {"key": ["problems"]})
+    assert set(detail["advice"]) == {"summary", "lines", "actions", "criteria"}
+    state = svc.state()
+    gate = next(g for st in state["stages"] for g in st["gates"] if g["key"] == "problems")
+    assert gate["state"] in ("ready", "returned", "none")
+    pl = svc.pl()
+    ids = pl.bank.records("area")[0]
+    second = pl.bank.add("boundary", "Вторая", parents=[ids["id"]])
+    stray = pl.bank.add("problem", "Висящая", parents=[second["id"]])
+    pl.bank.reject(second["id"], "human")
+    run = pl.keeper.open("problems")
+    detail = svc.get(f"{P}/gate", {"key": ["problems"]})
+    assert detail["findings"] and detail["findings"][0]["advice"]
+    assert [a["key"] for a in detail["advice"]["actions"]][:3] == ["rework", "reject_all", "rerate"]
+    out = svc.post(f"{P}/gate/fix", {"run": run["id"], "action": "reject_all"})
+    assert out["result"]["rejected"] >= 1 and pl.bank.get(stray["id"])["status"] == "rejected"
+    assert out["job"]["label"] == "повторные ворота"  # после правок ворота идут заново
+    for _ in range(200):
+        if not svc.job_view()["running"]:
+            break
+        time.sleep(0.02)
+    with pytest.raises(PipelineError):
+        svc.post(f"{P}/gate/fix", {"run": run["id"], "action": "reject_all"})
+    state = svc.state()
+    gates = {g["key"]: g for st in state["stages"] for g in st["gates"]}
+    assert "why" in gates["problems"]
+
+
+def test_settings_have_the_autopilot_accept_below_switch(tmp_path):
+    svc, _ = service(tmp_path)
+    svc.post(f"{P}/start", {})
+    assert svc.get(f"{P}/settings", {})["autopilot_accept_below"] is True
+    out = svc.post(f"{P}/settings", {"autopilot_accept_below": False})
+    assert out["autopilot_accept_below"] is False
+    assert svc.pl().settings.autopilot_accept_below is False
+    with pytest.raises(PipelineError):
+        svc.pl().settings.set_flag("нет", True)
+
+
+def test_autopilot_summary_names_the_reason_it_stopped():
+    from studio.server.pipeline import _summary
+
+    log = [
+        {"step": "a", "fixed": ["отклонена «x»"]},
+        {"step": "gate_x", "accepted_below": ["Ясность"]},
+        {"step": "gate_y", "stop": "ворота «Y» не пройдены: причина"},
+    ]
+    text = _summary(log)
+    assert "выполнено шагов: 3" in text and "отклонено висящих записей: 1" in text
+    assert "принято ниже порога: Ясность" in text and text.endswith("Остановка: ворота «Y» не пройдены: причина")
+    assert _summary([{"step": "a"}]) == "выполнено шагов: 1"

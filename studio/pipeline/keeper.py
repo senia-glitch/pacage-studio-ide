@@ -111,7 +111,14 @@ class GateKeeper:
         for crit in self.settings.enabled_criteria(run["gate"]):
             item = (ratings or {}).get(crit["key"])
             if not isinstance(item, dict):
-                failing.append({"key": crit["key"], "title": crit["title"], "why": "нет оценки"})
+                failing.append(
+                    {
+                        "key": crit["key"],
+                        "title": crit["title"],
+                        "why": "оценщик не вернул оценку",
+                        "missing": True,
+                    }
+                )
                 continue
             try:
                 score = int(item.get("score"))

@@ -20,6 +20,7 @@ from studio.pipeline import (
     Pipeline,
     PipelineError,
     ProjectBank,
+    advice,
     entry,
     flow,
     maps,
@@ -69,7 +70,9 @@ def _summary(result) -> str:
             ran = result["ran"]
             return "выполнено: " + ", ".join(ran) if ran else "проект уже на стеке"
         if result.get("gate"):
-            return f"ворота «{GATES[result['gate']].title}»: {result['state']}"
+            why = advice.short(result)
+            head = f"ворота «{GATES[result['gate']].title}»: {result['state']}"
+            return head + (f" — {why}" if why else "")
         created = result.get("created")
         if created is None:
             created = result.get("designed")
@@ -81,7 +84,16 @@ def _summary(result) -> str:
         if not result or (
             isinstance(result[0], dict) and ("step" in result[0] or "stop" in result[0])
         ):
-            return f"выполнено шагов: {len(result)}"
+            text = f"выполнено шагов: {len(result)}"
+            fixed = sum(len(e.get("fixed") or []) for e in result if isinstance(e, dict))
+            steps = [e for e in result if isinstance(e, dict)]
+            below = [t for e in steps for t in e.get("accepted_below") or []]
+            if fixed:
+                text += f"; отклонено висящих записей: {fixed}"
+            if below:
+                text += f"; принято ниже порога: {', '.join(below)}"
+            stop = next((e["stop"] for e in reversed(steps) if e.get("stop")), "")
+            return text + (f". Остановка: {stop}" if stop else "")
         return f"создано записей: {len(result)}"
     return "готово"
 
@@ -144,6 +156,7 @@ class PipelineService:
                      "round": last["round"] if last else 0,
                      "run": last["id"] if last else None,
                      "stuck": bool(last and last.get("stuck")),
+                     "why": advice.short(last) if last and last["state"] != "passed" else "",
                      "human": bool(
                          last and last["state"] != "passed" and pl.keeper.needs_human(last)
                      ),
@@ -230,8 +243,10 @@ class PipelineService:
         if spec is None:
             raise PipelineError("unknown_gate", f"Таких ворот нет: {key!r}")
         last = pl.keeper.last(key)
+        adv = advice.for_gate(pl, last)
         return {
             "gate": {"key": key, "title": spec.title, "stage": spec.stage, "final": spec.final},
+            "advice": {k: adv[k] for k in ("summary", "lines", "actions", "criteria")},
             "criteria": pl.settings.criteria(key),
             "run": last,
             "human": bool(last and last["state"] != "passed" and pl.keeper.needs_human(last)),
@@ -239,8 +254,9 @@ class PipelineService:
                 {
                     **f,
                     "records": [_brief(pl.bank.get(i)) for i in f.get("ids", []) if _exists(pl, i)],
+                    "advice": adv["findings"][n],
                 }
-                for f in (last or {}).get("code", [])
+                for n, f in enumerate((last or {}).get("code", []))
             ],
         }
 
@@ -264,6 +280,7 @@ class PipelineService:
             "mode": s.mode,
             "mode_names": MODE_NAMES,
             "wave_threshold": s.wave_threshold,
+            "autopilot_accept_below": s.autopilot_accept_below,
             "quick_fix_limit": s.quick_fix_limit,
             "max_rounds": s.max_rounds,
             "gates": [
@@ -405,6 +422,14 @@ class PipelineService:
         if route == "/waves/disable":
             waves.disable(pl)
             return self.state()
+        if route == "/gate/fix":
+            run_id, action = str(data.get("run") or ""), str(data.get("action") or "")
+            gate_key = pl.keeper.run(run_id)["gate"]
+            result = advice.fix(pl, run_id, action) if action != "rerate" else None
+            facts = flow.gate_facts(pl, gate_key)
+            label = "повторные ворота"
+            job = self._start(label, lambda: pl.run_gate(gate_key, facts))
+            return {"result": result, "job": job}
         if route == "/settings":
             return self._settings_post(pl, data)
         if route == "/criterion":
@@ -443,6 +468,8 @@ class PipelineService:
         for key in ("wave_threshold", "quick_fix_limit"):
             if key in data:
                 pl.settings.set_number(key, data[key])
+        if "autopilot_accept_below" in data:
+            pl.settings.set_flag("autopilot_accept_below", data["autopilot_accept_below"])
         return self.settings()
 
     def _criterion_post(self, pl: Pipeline, data: dict) -> dict:

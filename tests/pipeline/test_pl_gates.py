@@ -90,7 +90,7 @@ def test_missing_and_bad_scores(tmp_path):
     ratings = good_ratings(settings, "requirements")
     ratings.pop("adequacy")
     run = keeper.rate(run["id"], ratings)
-    assert run["failing"][0]["why"] == "нет оценки"
+    assert run["failing"][0]["why"] == "оценщик не вернул оценку" and run["failing"][0]["missing"]
     run = keeper.open("requirements")
     ratings = good_ratings(settings, "requirements")
     ratings["clarity"]["score"] = 11

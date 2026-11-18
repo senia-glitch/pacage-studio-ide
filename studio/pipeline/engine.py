@@ -88,8 +88,32 @@ class Pipeline:
             f"Контекст (идея, границы, проблемы, требования):\n{parents}\n\n"
             'Ответ: {"<ключ критерия>": {"score": 0-10, "evidence": "код записи и что именно"}, ...}'
         )
-        data = self.llm.ask_json("evaluator", prompts.SYSTEM["evaluator"], prompt)
-        return data if isinstance(data, dict) else {}
+        system = prompts.SYSTEM["evaluator"]
+        try:
+            data = self.llm.ask_json("evaluator", system, prompt)
+        except PipelineError as error:
+            run["eval_note"] = f"ответ не удалось разобрать ({error.message})"
+            return {}
+        data = data if isinstance(data, dict) else {}
+        missing = [c for c in criteria if not isinstance(data.get(c["key"]), dict)]
+        if missing:  # слабая модель ответила не по всем критериям: просим один раз дополнить
+            names = ", ".join(f"{c['key']} ({c['title']})" for c in missing)
+            again_prompt = (
+                f"{prompt}\n\nВ прошлом ответе нет оценок по критериям: {names}. "
+                "Ответь ТОЛЬКО JSON с оценками по ВСЕМ критериям."
+            )
+            try:
+                again = self.llm.ask_json("evaluator", system, again_prompt)
+            except PipelineError:
+                again = None
+            if isinstance(again, dict):
+                for c in missing:
+                    if isinstance(again.get(c["key"]), dict):
+                        data[c["key"]] = again[c["key"]]
+            left = [c["title"] for c in missing if not isinstance(data.get(c["key"]), dict)]
+            if left:
+                run["eval_note"] = "в ответе модели нет оценок по критериям: " + ", ".join(left)
+        return data
 
     def decide_gate(self, run_id: str, decision: str, note: str = "") -> dict:
         """Решение человека на воротах (принять, вернуть, принять ниже порога)."""

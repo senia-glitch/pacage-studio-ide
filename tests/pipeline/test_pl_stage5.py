@@ -116,7 +116,7 @@ def test_autopilot_still_asks_the_human_for_final_acceptance(tmp_path):
     steps = [e.get("step") for e in log]
     assert "launch" in steps and "e2e" in steps
     gate_entries = [e for e in log if e.get("step") == "gate_final"]
-    assert gate_entries and gate_entries[-1]["stop"] == "нужно ваше решение"  # итог — за человеком
+    assert gate_entries and gate_entries[-1]["stop"].startswith("нужно ваше решение")  # итог — за человеком
     run = pl.keeper.last("final")
     assert run["state"] == "ready"
     pl.decide_gate(run["id"], "accept")

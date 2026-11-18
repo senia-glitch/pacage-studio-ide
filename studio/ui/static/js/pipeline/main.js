@@ -91,6 +91,7 @@ ctx.refresh = async () => {
   }
   const running = ctx.state.job && ctx.state.job.running;
   if (before && !running && ctx.state.job) {
+    ctx.openGateOnce = true; // работа закончилась: раскрыть плашку ворот с замечаниями
     ctx.toast(ctx.state.job.error ? "Ошибка: " + ctx.state.job.error : "Готово: " + (ctx.state.job.result || ""), ctx.state.job.error ? "err" : "ok");
   }
   draw();

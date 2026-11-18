@@ -238,11 +238,30 @@ def test_autopilot_stops_when_rounds_are_over(tmp_path):
 
     pl, _ = build(tmp_path, evaluator)
     pl.settings.set_mode("autopilot")
+    pl.settings.set_flag("autopilot_accept_below", False)
     stage1.set_area(pl, "Сайт")
     log = flow.autopilot(pl)
-    assert log[-1]["stop"].startswith("ворота вернули")
+    assert log[-1]["stop"].startswith("ворота «Проверка проблем» не пройдены после 3 кругов")
+    assert "Критерий «" in log[-1]["stop"] and "Что можно сделать" in log[-1]["stop"]
     assert pl.keeper.last("problems")["stuck"] is True
     assert [e for e in log if e.get("rework")]
+
+
+def test_autopilot_accepts_below_threshold_when_rounds_are_over(tmp_path):
+    def evaluator(prompt):
+        bad = {**ALL_KEYS, **GATE_KEYS_2}
+        if "Ворота «Проверка проблем»" in prompt:
+            bad["actuality"] = {"score": 3, "evidence": "c1"}
+        return bad
+
+    pl, _ = build(tmp_path, evaluator)
+    pl.settings.set_mode("autopilot")  # принять ниже порога — по умолчанию
+    stage1.set_area(pl, "Сайт")
+    log = flow.autopilot(pl)
+    taken = [e for e in log if e.get("accepted_below")]
+    assert taken and taken[0]["accepted_below"] == ["Актуальность"]
+    last = pl.keeper.last("problems")
+    assert last["state"] == "passed" and last["below"] is True and last["by"] == "autopilot"
 
 
 def test_feedback_text_and_unknown_stage(tmp_path):

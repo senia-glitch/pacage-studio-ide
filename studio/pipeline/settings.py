@@ -66,6 +66,17 @@ class PipelineSettings:
         self.save()
 
     @property
+    def autopilot_accept_below(self) -> bool:
+        """Автопилот, когда круги закончились: принять ниже порога с пометкой (иначе стоп)."""
+        return bool(self.data.get("autopilot_accept_below", True))
+
+    def set_flag(self, key: str, value) -> None:
+        if key != "autopilot_accept_below":
+            raise PipelineError("bad_setting", f"Неизвестная настройка: {key!r}")
+        self.data[key] = bool(value)
+        self.save()
+
+    @property
     def max_rounds(self) -> int:
         return MAX_ROUNDS
 

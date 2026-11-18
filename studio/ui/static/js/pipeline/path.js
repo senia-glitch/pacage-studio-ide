@@ -26,6 +26,12 @@ export function renderPath(ctx, body) {
   if (state.warnings && state.warnings.length) {
     body.append(h("div", {class: "pl-warn"}, state.warnings.map((text) => h("div", null, "⚠ ", text))));
   }
+  if (ctx.openGateOnce) {
+    ctx.openGateOnce = false;
+    const gates = state.stages.flatMap((stage) => stage.gates);
+    const failed = gates.find((gate) => gate.state === "returned") || gates.find((gate) => gate.state === "ready" && gate.human);
+    if (failed) ctx.gate = failed.key;
+  }
   for (const stage of state.stages) body.append(stageCard(ctx, stage));
 }
 
@@ -139,6 +145,7 @@ function gatesRow(ctx, stage) {
         h("span", {class: "diamond"}, "◇"),
         gate.title,
         h("span", {class: "pl-gstate"}, GATE_STATE_NAMES[gate.state] || gate.state),
+        gate.state === "returned" && gate.why ? h("span", {class: "pl-gwhy"}, gate.why) : null,
         gate.human ? h("span", {class: "pl-flag", title: "Нужно ваше решение"}, "!") : null,
       ),
     ),
@@ -331,14 +338,16 @@ function gateBody(ctx, data) {
     out.push(h("div", null, h("button", {class: "ghost", onclick: () => { ctx.showMap = !ctx.showMap; ctx.go("path"); }}, ctx.showMap ? "Скрыть карту этапа" : "Показать карту этапа"), holder));
     if (ctx.showMap) ctx.track(renderMap(ctx, holder, mapKind));
   }
+  if (run && run.state !== "passed" && data.advice) out.push(adviceBlock(ctx, data, run, running));
   out.push(h("div", {class: "pl-layers"}, layer("1 · Проверки кодом", run ? (run.code.length ? "bad" : "ok") : ""), layer("2 · Независимая оценка", run && run.ratings ? (run.failing.length ? "bad" : "ok") : ""), layer("3 · Ваше решение", run && run.state === "passed" ? "ok" : "")));
   if (!run) {
     out.push(criteriaList(data.criteria));
     return out;
   }
-  if (run.code.length) out.push(findings(ctx, data));
+  if (run.code.length) out.push(findings(ctx, data, running));
   if (run.ratings) out.push(ratingTable(data.criteria, run));
   else out.push(criteriaList(data.criteria));
+  if ((run.failing || []).length) out.push(criteriaAdvice(ctx, data, run, running));
   out.push(decision(ctx, data, run, running));
   return out;
 }
@@ -373,30 +382,63 @@ function ratingTable(criteria, run) {
   return h("table", {class: "pl-table"}, h("thead", null, h("tr", null, h("th", null, "Критерий"), h("th", null, "Оценка"), h("th", null, "Порог"), h("th", null, "Доказательство"))), h("tbody", null, rows));
 }
 
-function findings(ctx, data) {
-  const box = h("div", {class: "pl-findings"}, h("div", {class: "pl-label"}, "Проверки кодом не пройдены — это блокирует ворота"));
-  for (const finding of data.findings) {
-    const item = h("div", {class: "finding"}, h("span", null, finding.message));
-    if (finding.code === "orphan" || finding.code === "duplicate" || finding.code === "unknown_participant" || finding.code === "stale") {
-      for (const rec of finding.records) {
-        item.append(h("span", {class: "acts"}, ...recordActions(ctx, rec, finding.code)));
-      }
-    }
-    box.append(item);
+function adviceButton(ctx, option, run, running, record) {
+  const attrs = {class: option.recommended ? "pl-primary" : "", disabled: running, title: option.hint || ""};
+  const act = (path, body) => () => ctx.act(path, body);
+  if (option.key === "rework") return h("button", {...attrs, onclick: act("/api/pipeline/gate/return", {run: run.id})}, option.label);
+  if (option.key === "reject_all") return h("button", {...attrs, onclick: act("/api/pipeline/gate/fix", {run: run.id, action: "reject_all"})}, option.label);
+  if (option.key === "rerate") return h("button", {...attrs, onclick: act("/api/pipeline/gate/fix", {run: run.id, action: "rerate"})}, option.label);
+  if (option.key === "settings") return h("button", {...attrs, onclick: () => ctx.go("settings")}, option.label);
+  if (option.key === "accept") return h("button", {...attrs, onclick: act("/api/pipeline/gate/decide", {run: run.id, decision: "accept"})}, option.label);
+  if (option.key === "accept_below") {
+    return h("button", {...attrs, class: "warn", onclick: () => { if (confirm("Принять ниже порога? Записи получат пометку.")) ctx.act("/api/pipeline/gate/decide", {run: run.id, decision: "accept_below"}); }}, option.label);
+  }
+  if (option.key === "open") return h("button", {...attrs, class: "ghost", onclick: () => ctx.go("bank", record ? {record: record.id} : undefined)}, option.label);
+  if (option.key === "link" && record) return h("button", {...attrs, onclick: () => linkDialog(ctx, record)}, `${option.label} «${record.title}»…`);
+  if (option.key === "reject" && record) return h("button", {...attrs, class: "danger", onclick: () => ctx.act("/api/pipeline/record/reject", {id: record.id})}, `${option.label} «${record.title}»`);
+  return h("span", {class: "pl-hintopt", title: option.hint || ""}, option.label, option.hint ? " — " + option.hint : "");
+}
+
+function adviceBlock(ctx, data, run, running) {
+  const advice = data.advice;
+  const title = run.state === "ready" ? "Ворота пройдены, ждут вашего решения" : "Почему ворота не пройдены и что делать";
+  const box = h("div", {class: "pl-advice"}, h("div", {class: "pl-label"}, title));
+  if (advice.summary) box.append(h("div", {class: "summary"}, advice.summary));
+  if (advice.lines.length) {
+    const more = advice.lines.length > 8 ? h("li", {class: "hint"}, `…и ещё ${advice.lines.length - 8} (ниже, в списках)`) : null;
+    box.append(h("ul", {class: "lines"}, advice.lines.slice(0, 8).map((line) => h("li", null, line)), more));
+  }
+  if (advice.actions.length) box.append(h("div", {class: "acts"}, h("span", {class: "hint"}, "Варианты: "), advice.actions.map((option) => adviceButton(ctx, option, run, running, null))));
+  if (run.stuck) box.append(h("div", {class: "pl-warn"}, "Круги доработки закончились — решайте сами: правьте записи или принимайте ниже порога."));
+  return box;
+}
+
+function criteriaAdvice(ctx, data, run, running) {
+  const box = h("div", {class: "pl-advice sub"}, h("div", {class: "pl-label"}, "Критерии ниже порога — что можно сделать"));
+  for (const item of run.failing) {
+    const options = (data.advice.criteria || {})[item.key] || [];
+    const text = item.missing ? "оценщик не вернул оценку" : `${item.score} из ${item.threshold || "?"} — ${item.why}`;
+    box.append(h("div", {class: "finding"}, h("span", null, `«${item.title}»: ${text}`), h("span", {class: "acts"}, options.map((option) => adviceButton(ctx, option, run, running, null)))));
   }
   return box;
 }
 
-function recordActions(ctx, rec, code) {
-  const buttons = [];
-  if (code === "orphan" && rec.parent_kinds.length) {
-    buttons.push(h("button", {title: "Привязать к родителю: запись станет частью цепочки", onclick: () => linkDialog(ctx, rec)}, "Внедрить…"));
+function findings(ctx, data, running) {
+  const run = data.run;
+  const box = h("div", {class: "pl-findings"}, h("div", {class: "pl-label"}, "Проверки кодом не пройдены — это блокирует ворота"));
+  for (const finding of data.findings) {
+    const item = h("div", {class: "finding"}, h("span", null, finding.message));
+    const acts = h("span", {class: "acts"});
+    const records = finding.records || [];
+    for (const option of finding.advice || []) {
+      if (option.key === "link") records.filter((rec) => rec.parent_kinds && rec.parent_kinds.length).forEach((rec) => acts.append(adviceButton(ctx, option, run, running, rec)));
+      else if (option.key === "reject") (finding.code === "duplicate" ? records.slice(1) : records).filter((rec) => rec.status !== "accepted").forEach((rec) => acts.append(adviceButton(ctx, option, run, running, rec)));
+      else acts.append(adviceButton(ctx, option, run, running, records[0]));
+    }
+    item.append(acts);
+    box.append(item);
   }
-  if (rec.status !== "accepted" && code !== "unknown_participant") {
-    buttons.push(h("button", {class: "danger", title: "Отклонить: уйдёт в архив, принять её как есть нельзя", onclick: () => ctx.act("/api/pipeline/record/reject", {id: rec.id})}, "Отклонить"));
-  }
-  buttons.push(h("button", {class: "ghost", onclick: () => ctx.go("bank", {record: rec.id})}, "Открыть"));
-  return buttons;
+  return box;
 }
 
 async function linkDialog(ctx, rec) {

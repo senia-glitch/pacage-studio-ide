@@ -137,3 +137,11 @@ def test_перерисовка_не_сбрасывает_прокрутку_и_
     for name in ("inspectorview.js", "frontendview.js"):
         assert "keepScroll" in (JS_DIR / name).read_text(encoding="utf-8"), name
     assert "scrollTop" in (JS_DIR / "projectview.js").read_text(encoding="utf-8")
+
+
+def test_ворота_объясняют_причину_и_предлагают_варианты():
+    path = (JS_DIR / "pipeline" / "path.js").read_text(encoding="utf-8")
+    for part in ("adviceBlock", "criteriaAdvice", "adviceButton", "openGateOnce", "pl-gwhy", "/api/pipeline/gate/fix"):
+        assert part in path, part
+    assert "openGateOnce" in (JS_DIR / "pipeline" / "main.js").read_text(encoding="utf-8")
+    assert "autopilot_accept_below" in (JS_DIR / "pipeline" / "settings.js").read_text(encoding="utf-8")

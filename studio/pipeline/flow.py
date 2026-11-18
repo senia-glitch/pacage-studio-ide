@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from . import prompts, stage1, stage2, stage3, stage4, stage5, waves
+from . import advice, prompts, stage1, stage2, stage3, stage4, stage5, waves
 from .engine import Pipeline
 from .errors import PipelineError
 from .gates import GATES, STAGE_GATES, gate
@@ -127,6 +127,24 @@ def rework(pl: Pipeline, gate_key: str, run: dict) -> dict:
 # ---------------------------------------------------------------------- автопилот
 
 
+def _accept_below(pl: Pipeline, run: dict) -> list[str]:
+    """Круги доработки кончились, проверки кодом чистые, а оценщик строже порога: автопилот
+    принимает ниже порога с пометкой на записях (человек видит её и может вернуться). Если
+    оценщик не дал оценок вообще, принимать нечего: он не оценивал."""
+    failing = run.get("failing") or []
+    if (
+        run.get("code")
+        or not failing
+        or advice.evaluator_failed(run)
+        or not pl.settings.autopilot_accept_below
+        or run["state"] != "returned"
+    ):
+        return []
+    note = "автопилот: круги доработки закончились, принято ниже порога"
+    pl.keeper.decide(run["id"], "accept_below", "autopilot", note)
+    return [f["title"] for f in failing]
+
+
 def autopilot(pl: Pipeline, limit: int = 80, stop_after: int | None = None) -> list[dict]:
     """Идёт по шагам, пока не потребуется человек. Журнал — что сделано и почему остановились."""
     if pl.settings.mode != "autopilot":
@@ -178,13 +196,27 @@ def autopilot(pl: Pipeline, limit: int = 80, stop_after: int | None = None) -> l
             entry["gate"] = result["state"]
             if result["state"] == "returned":
                 gate_key = key[5:]
+                fixed = advice.auto_fix(pl, result)  # висящее и повторы отклоняются без человека
+                if fixed:
+                    entry["fixed"] = fixed
+                    log.append(entry)
+                    continue  # ворота пройдут заново уже без них
                 if result.get("stuck") or gate_key not in REWORK:
-                    entry["stop"] = "ворота вернули на доработку, круги закончились"
+                    taken = _accept_below(pl, result)
+                    if taken:
+                        entry["accepted_below"] = taken
+                        log.append(entry)
+                        continue
+                    entry["stop"] = advice.explain(pl, result, pl.settings.max_rounds)
                     log.append(entry)
                     break
                 entry["rework"] = rework(pl, gate_key, result)
             elif result.get("human"):
-                entry["stop"] = "нужно ваше решение"
+                entry["stop"] = "нужно ваше решение: " + (
+                    "итоговая приёмка остаётся за вами"
+                    if GATES[key[5:]].final
+                    else advice.short(result) or "ворота ждут решения"
+                )
                 log.append(entry)
                 break
         log.append(entry)
