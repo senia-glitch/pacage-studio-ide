@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from . import advice, prompts, stage1, stage2, stage3, stage4, stage5, waves
+from . import advice, integrate, prompts, stage1, stage2, stage3, stage4, stage5, waves
 from .engine import Pipeline
 from .errors import PipelineError
 from .gates import GATES, STAGE_GATES, gate
@@ -114,14 +114,16 @@ def rework(pl: Pipeline, gate_key: str, run: dict) -> dict:
         for item in stage1._items(data, "reject"):
             cid = stage1._s(item.get("id"), 20)
             if cid in live:
-                pl.bank.reject(cid, role, "отклонено при доработке")
+                pl.bank.reject(cid, role, "отклонено при доработке", cascade=False)
                 changed += 1
     pl.llm.feedback = feedback
     try:
         filled = fill(pl)
     finally:
         pl.llm.feedback = ""
-    return {"changed": changed, "filled": filled}
+    # записи, у которых пропал родитель, не оставляем: агент встраивает их в цепочку или отклоняет
+    integrated = integrate.run(pl) if integrate.orphans(pl) else {}
+    return {"changed": changed, "filled": filled, "integrated": integrated}
 
 
 # ---------------------------------------------------------------------- автопилот
@@ -196,7 +198,17 @@ def autopilot(pl: Pipeline, limit: int = 80, stop_after: int | None = None) -> l
             entry["gate"] = result["state"]
             if result["state"] == "returned":
                 gate_key = key[5:]
-                fixed = advice.auto_fix(pl, result)  # висящее и повторы отклоняются без человека
+                if any(f["code"] == "orphan" for f in result.get("code") or []):
+                    try:
+                        done = integrate.run(pl)  # висящее: агент внедряет по цепочке или отклоняет
+                    except PipelineError as error:
+                        entry["stop"] = f"не удалось внедрить висящие записи: {error}"
+                        log.append(entry)
+                        break
+                    entry["integrated"] = done
+                    log.append(entry)
+                    continue
+                fixed = advice.auto_fix(pl, result, ("duplicate",))  # повторы уходят без человека
                 if fixed:
                     entry["fixed"] = fixed
                     log.append(entry)

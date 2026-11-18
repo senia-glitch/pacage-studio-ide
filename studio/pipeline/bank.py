@@ -293,9 +293,20 @@ class ProjectBank:
         self.store.apply([op], author, note=note or "новая версия")
         return self.get(record_id)
 
-    def reject(self, record_id: str, author: str = "agent", note: str = "") -> None:
-        """Отклонить запись: она уходит в архив и не считается ни родителем, ни «висящей»."""
+    def reject(
+        self, record_id: str, author: str = "agent", note: str = "", *, cascade: bool = True
+    ) -> None:
+        """Отклонить запись: она уходит в архив и не считается ни родителем, ни «висящей».
+
+        По умолчанию вместе с ней отклоняются потомки, у которых не осталось другого живого
+        родителя: висеть они не могут. ``cascade=False`` — когда их сразу внедряют в другое место.
+        """
         self.set_status([record_id], REJECTED, author, note)
+        if not cascade:
+            return
+        for child in self.children(record_id, live=True):
+            if not self.parents(child["id"]):  # живых родителей не осталось
+                self.reject(child["id"], author, "родитель отклонён")
 
     def history(self, record_id: str) -> list[dict]:
         return self.store.card_history(record_id)

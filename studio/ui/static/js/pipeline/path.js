@@ -388,14 +388,15 @@ function adviceButton(ctx, option, run, running, record) {
   if (option.key === "rework") return h("button", {...attrs, onclick: act("/api/pipeline/gate/return", {run: run.id})}, option.label);
   if (option.key === "reject_all") return h("button", {...attrs, onclick: act("/api/pipeline/gate/fix", {run: run.id, action: "reject_all"})}, option.label);
   if (option.key === "rerate") return h("button", {...attrs, onclick: act("/api/pipeline/gate/fix", {run: run.id, action: "rerate"})}, option.label);
+  if (option.key === "integrate") return h("button", {...attrs, onclick: act("/api/pipeline/gate/fix", {run: run.id, action: "integrate"})}, option.label);
   if (option.key === "settings") return h("button", {...attrs, onclick: () => ctx.go("settings")}, option.label);
   if (option.key === "accept") return h("button", {...attrs, onclick: act("/api/pipeline/gate/decide", {run: run.id, decision: "accept"})}, option.label);
   if (option.key === "accept_below") {
     return h("button", {...attrs, class: "warn", onclick: () => { if (confirm("Принять ниже порога? Записи получат пометку.")) ctx.act("/api/pipeline/gate/decide", {run: run.id, decision: "accept_below"}); }}, option.label);
   }
   if (option.key === "open") return h("button", {...attrs, class: "ghost", onclick: () => ctx.go("bank", record ? {record: record.id} : undefined)}, option.label);
-  if (option.key === "link" && record) return h("button", {...attrs, onclick: () => linkDialog(ctx, record)}, `${option.label} «${record.title}»…`);
-  if (option.key === "reject" && record) return h("button", {...attrs, class: "danger", onclick: () => ctx.act("/api/pipeline/record/reject", {id: record.id})}, `${option.label} «${record.title}»`);
+  if (option.key === "link" && record) return h("button", {...attrs, onclick: () => linkDialog(ctx, record, run)}, `${option.label} «${record.title}»…`);
+  if (option.key === "reject" && record) return h("button", {...attrs, class: "danger", onclick: async () => { if (await ctx.act("/api/pipeline/record/reject", {id: record.id})) recheck(ctx, run); }}, `${option.label} «${record.title}»`);
   return h("span", {class: "pl-hintopt", title: option.hint || ""}, option.label, option.hint ? " — " + option.hint : "");
 }
 
@@ -441,7 +442,13 @@ function findings(ctx, data, running) {
   return box;
 }
 
-async function linkDialog(ctx, rec) {
+/* После правки записи ворота проверяются заново: иначе на экране остаётся прежний результат,
+   и кажется, что ничего не произошло. */
+function recheck(ctx, run) {
+  if (run) ctx.act("/api/pipeline/gate/fix", {run: run.id, action: "rerate"});
+}
+
+async function linkDialog(ctx, rec, run) {
   const candidates = [];
   for (const kind of rec.parent_kinds) {
     const data = await ctx.api("/api/pipeline/bank?kind=" + kind);
@@ -449,7 +456,7 @@ async function linkDialog(ctx, rec) {
   }
   if (!candidates.length) return ctx.toast("Подходящих родителей пока нет", "err");
   const select = h("select", null, candidates.map((c) => h("option", {value: c.id}, `${c.kind_title}: ${c.title}`)));
-  const dialog = h("div", {class: "pl-dialog"}, h("div", null, `Привязать «${rec.title}» к:`), select, h("button", {class: "pl-primary", onclick: async () => { dialog.remove(); await ctx.act("/api/pipeline/record/link", {child: rec.id, parent: select.value}); }}, "Привязать"), h("button", {class: "ghost", onclick: () => dialog.remove()}, "Отмена"));
+  const dialog = h("div", {class: "pl-dialog"}, h("div", null, `Привязать «${rec.title}» к:`), select, h("button", {class: "pl-primary", onclick: async () => { dialog.remove(); if (await ctx.act("/api/pipeline/record/link", {child: rec.id, parent: select.value})) recheck(ctx, run); }}, "Привязать"), h("button", {class: "ghost", onclick: () => dialog.remove()}, "Отмена"));
   ctx.host.append(dialog);
 }
 

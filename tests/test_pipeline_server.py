@@ -314,11 +314,11 @@ def test_gate_route_carries_advice_and_fix_actions(tmp_path):
     ids = pl.bank.records("area")[0]
     second = pl.bank.add("boundary", "Вторая", parents=[ids["id"]])
     stray = pl.bank.add("problem", "Висящая", parents=[second["id"]])
-    pl.bank.reject(second["id"], "human")
+    pl.bank.reject(second["id"], "human", cascade=False)
     run = pl.keeper.open("problems")
     detail = svc.get(f"{P}/gate", {"key": ["problems"]})
     assert detail["findings"] and detail["findings"][0]["advice"]
-    assert [a["key"] for a in detail["advice"]["actions"]][:3] == ["rework", "reject_all", "rerate"]
+    assert [a["key"] for a in detail["advice"]["actions"]][:3] == ["integrate", "rework", "reject_all"]
     out = svc.post(f"{P}/gate/fix", {"run": run["id"], "action": "reject_all"})
     assert out["result"]["rejected"] >= 1 and pl.bank.get(stray["id"])["status"] == "rejected"
     assert out["job"]["label"] == "повторные ворота"  # после правок ворота идут заново
@@ -331,6 +331,53 @@ def test_gate_route_carries_advice_and_fix_actions(tmp_path):
     state = svc.state()
     gates = {g["key"]: g for st in state["stages"] for g in st["gates"]}
     assert "why" in gates["problems"]
+
+
+def hanging_requirement_criterion(svc):
+    """Идея с критерием, у которого отклонили требование (потомок не тронут): он висит."""
+    pl = svc.pl()
+    area = pl.bank.add("area", "Запись к врачу")
+    boundary = pl.bank.add("boundary", "Только запись", parents=[area["id"]])
+    problem = pl.bank.add("problem", "Не дозвониться", parents=[boundary["id"]])
+    live = pl.bank.add("requirement", "Система должна записывать", parents=[problem["id"]])
+    gone = pl.bank.add("requirement", "Система должна напоминать", parents=[problem["id"]])
+    stray = pl.bank.add("criterion", "Когда сутки до приёма, пришло напоминание", parents=[gone["id"]])
+    pl.bank.reject(gone["id"], "human", cascade=False)
+    return pl, live, stray
+
+
+def test_manual_link_takes_a_hanging_record_out_of_the_findings(tmp_path):
+    svc, _ = service(tmp_path)
+    svc.post(f"{P}/start", {})
+    pl, live, stray = hanging_requirement_criterion(svc)
+    run = pl.keeper.open("requirements")
+    assert any(f["code"] == "orphan" for f in run["code"])
+    svc.post(f"{P}/record/link", {"child": stray["id"], "parent": live["id"]})
+    assert [p["id"] for p in pl.bank.parents(stray["id"])] == [live["id"]]
+    again = pl.keeper.open("requirements")
+    assert not [f for f in again["code"] if f["code"] == "orphan"]
+
+
+def test_gate_fix_integrate_lets_the_agent_place_the_record_and_rechecks(tmp_path):
+    svc, agent = service(tmp_path)
+    svc.post(f"{P}/start", {})
+    pl, live, stray = hanging_requirement_criterion(svc)
+    agent.rules.insert(
+        0,
+        (
+            "Внедри висящие записи",
+            {"decisions": [{"id": stray["id"], "action": "link", "parent": live["id"]}]},
+        ),
+    )
+    run = pl.keeper.open("requirements")
+    out = svc.post(f"{P}/gate/fix", {"run": run["id"], "action": "integrate"})
+    assert out["result"] is None and "внедрение" in out["job"]["label"]
+    svc.wait()
+    job = svc.job_view()
+    assert not job["error"] and "внедрено: 1" in job["result"]
+    assert [p["id"] for p in pl.bank.parents(stray["id"])] == [live["id"]]
+    last = pl.keeper.last("requirements")
+    assert not [f for f in last["code"] if f["code"] == "orphan"]
 
 
 def test_settings_have_the_autopilot_accept_below_switch(tmp_path):

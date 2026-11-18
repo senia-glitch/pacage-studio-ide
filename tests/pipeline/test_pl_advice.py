@@ -23,7 +23,7 @@ def returned_problems(pl):
     ids = idea(pl.bank)
     second = pl.bank.add("boundary", "Вторая граница", parents=[ids["area"]["id"]])
     stray = pl.bank.add("problem", "Висящая", parents=[second["id"]])
-    pl.bank.reject(second["id"], "human")  # родителя нет — запись повисла
+    pl.bank.reject(second["id"], "human", cascade=False)  # родителя нет — запись повисла
     pl.bank.add("problem", "Не дозвониться в регистратуру", parents=[ids["boundary"]["id"]])
     run = pl.keeper.open("problems")
     return ids, stray, run
@@ -37,9 +37,9 @@ def test_short_and_lines_for_code_findings_and_ratings(tmp_path):
     data = advice.for_gate(pl, run)
     assert data["summary"].startswith("Ворота «Проверка проблем»: проверки кодом")
     assert any("повторяет" in line for line in data["lines"])
-    assert keys(data["actions"]) == ["rework", "reject_all", "rerate"]
-    first = {o["key"]: o for o in data["actions"]}["rework"]
-    assert first["recommended"] is True
+    assert keys(data["actions"]) == ["integrate", "rework", "reject_all", "rerate"]
+    by_key = {o["key"]: o for o in data["actions"]}
+    assert by_key["integrate"]["recommended"] is True and by_key["rework"]["recommended"] is False
     by_code = dict(zip((f["code"] for f in run["code"]), data["findings"], strict=True))
     assert by_code["duplicate"][0]["key"] == "reject"
     ready = {**run, "state": "ready", "code": [], "failing": []}
@@ -51,7 +51,7 @@ def test_short_and_lines_for_code_findings_and_ratings(tmp_path):
 def test_options_for_each_kind_of_finding(tmp_path):
     pl, _ = make(tmp_path)
     cases = {
-        "orphan": ["link", "reject"],
+        "orphan": ["integrate", "link", "reject"],
         "duplicate": ["reject"],
         "uncovered": ["rework", "open"],
         "broken_chain": ["rework", "open"],
@@ -113,7 +113,7 @@ def test_hanging_records_are_found_rejected_and_explained(tmp_path):
     assert not [f for f in again["code"] if f["code"] in ("orphan", "duplicate")]
     text = advice.explain(pl, run, 3)
     assert text.startswith("ворота «Проверка проблем» не пройдены после 3 кругов:")
-    assert "Что можно сделать: Доработать агентом" in text
+    assert "Что можно сделать: Внедрить висящее агентом (1), Доработать агентом" in text
     many = {**run, "code": [{"code": "x", "message": f"m{i}", "ids": []} for i in range(5)]}
     assert "и ещё 2" in advice.explain(pl, many)
 
@@ -131,7 +131,7 @@ def test_fix_rejects_hanging_or_complains(tmp_path):
     assert err.value.code == "bad_action"
 
 
-def test_autopilot_rejects_hanging_records_on_its_own(tmp_path, monkeypatch):
+def test_autopilot_integrates_hanging_and_drops_repeats_on_its_own(tmp_path, monkeypatch):
     from fake_llm import full_rules
 
     registry, _ = agents_with(full_rules())
@@ -139,12 +139,13 @@ def test_autopilot_rejects_hanging_records_on_its_own(tmp_path, monkeypatch):
     returned_problems(pl)
     pl.settings.set_mode("autopilot")
     item = {"key": "gate_problems", "stage": 1, "num": "gate", "state": "available"}
-    queue = [item, item]
+    queue = [item, item, item]
     monkeypatch.setattr(flow, "next_step", lambda pl, skip=frozenset(): queue.pop(0) if queue else None)
     monkeypatch.setattr(flow, "run_step", lambda pl, stage, key: pl.run_gate("problems"))
     log = flow.autopilot(pl, limit=6)
-    assert log[0]["gate"] == "returned" and len(log[0]["fixed"]) == 2
-    assert log[1]["gate"] == "passed"  # без висящих записей ворота пройдены, человек не понадобился
+    assert log[0]["gate"] == "returned" and log[0]["integrated"]["rejected"]  # агент не нашёл места
+    assert len(log[1]["fixed"]) == 1  # повтор уходит без человека
+    assert log[2]["gate"] == "passed"  # без висящих записей ворота пройдены, человек не понадобился
     assert log[-1] == {"stop": "все шаги пройдены"}
 
 

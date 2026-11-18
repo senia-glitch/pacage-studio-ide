@@ -53,15 +53,15 @@ def short(run: dict | None) -> str:
     return "; ".join(parts) or "ждут решения"
 
 
-def hanging_ids(pl: Pipeline, run: dict) -> list[str]:
+def hanging_ids(pl: Pipeline, run: dict, codes: tuple[str, ...] = HANGING) -> list[str]:
     """Висящие и повторяющиеся черновики: их можно отклонить без последствий для принятого."""
     out: list[str] = []
     for item in run.get("code") or []:
         ids = list(item.get("ids") or [])
+        if item["code"] not in codes:
+            continue
         if item["code"] == "duplicate":
             ids = ids[1:]  # первая запись остаётся, повтор уходит
-        elif item["code"] != "orphan":
-            continue
         for rid in ids:
             try:
                 card = pl.bank.get(rid)
@@ -78,7 +78,8 @@ def finding_options(pl: Pipeline, item: dict, gate_key: str) -> list[dict]:
     step = FIX_STEP.get(gate_key, "соответствующий шаг")
     if code == "orphan":
         return [
-            _opt("link", "Внедрить", "привязать запись к родителю: она станет частью цепочки", True),
+            _opt("integrate", "Внедрить агентом", "агент привяжет запись к подходящему родителю или создаст родителя по цепочке; ненужное отклонит", True),
+            _opt("link", "Привязать вручную", "выбрать родителя самому"),
             _opt("reject", "Отклонить", "убрать запись в архив, если она не нужна"),
         ]
     if code == "duplicate":
@@ -138,7 +139,10 @@ def for_gate(pl: Pipeline, run: dict | None) -> dict:
         actions.append(_opt("rerate", "Оценить заново", "повторить независимую оценку", True))
         actions.append(_opt("settings", "Сменить модель оценщика", "в «Настройки → Роли агентов»; оценщик — другая модель, чем авторы"))
     elif code or failing:
-        actions.append(_opt("rework", "Доработать агентом", "автор поправит черновики и закроет пробелы, ворота пройдут заново", True))
+        orphans = [f for f in code if f["code"] == "orphan"]
+        if orphans:
+            actions.append(_opt("integrate", f"Внедрить висящее агентом ({len(orphans)})", "агент привяжет записи к подходящим родителям или создаст родителей по цепочке, ненужное отклонит; ворота пройдут заново", True))
+        actions.append(_opt("rework", "Доработать агентом", "автор поправит черновики и закроет пробелы, ворота пройдут заново", not orphans))
     if hang:
         actions.append(_opt("reject_all", f"Отклонить висящее ({len(hang)})", "убрать черновики без родителя и повторы"))
     if code and not evaluator_failed(run):
@@ -157,10 +161,10 @@ def for_gate(pl: Pipeline, run: dict | None) -> dict:
     }
 
 
-def auto_fix(pl: Pipeline, run: dict) -> list[str]:
-    """Автопилот: закрыть то, что можно без человека — отклонить висящие и повторяющиеся черновики."""
+def auto_fix(pl: Pipeline, run: dict, codes: tuple[str, ...] = HANGING) -> list[str]:
+    """Отклонить висящие и повторяющиеся черновики (автопилот: только повторы, висящее он внедряет)."""
     done = []
-    for rid in hanging_ids(pl, run):
+    for rid in hanging_ids(pl, run, codes):
         card = pl.bank.get(rid)
         pl.bank.reject(rid, "autopilot", "автопилот: висящая или повторяющаяся запись отклонена")
         done.append(f"отклонена «{card['title']}»")
@@ -184,7 +188,7 @@ def fix(pl: Pipeline, run_id: str, action: str) -> dict:
     """Действие над воротами одним нажатием (``reject_all``); остальные идут через свои маршруты."""
     run = pl.keeper.run(run_id)
     if action == "reject_all":
-        done = auto_fix(pl, run)
+        done = auto_fix(pl, run)  # «мусор»: отклонить всё висящее и повторы (с потомками)
         if not done:
             raise PipelineError("nothing_to_do", "Висящих и повторяющихся черновиков нет")
         return {"rejected": len(done), "items": done}

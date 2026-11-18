@@ -23,6 +23,7 @@ from studio.pipeline import (
     advice,
     entry,
     flow,
+    integrate,
     maps,
     stack,
     stage1,
@@ -72,6 +73,12 @@ def _summary(result) -> str:
         if result.get("gate"):
             why = advice.short(result)
             head = f"ворота «{GATES[result['gate']].title}»: {result['state']}"
+            done = result.get("integrated") or {}
+            if done:
+                head = (
+                    f"внедрено: {len(done['linked'])}, создано родителей: {len(done['created'])}, "
+                    f"отклонено: {len(done['rejected'])}; " + head
+                )
             return head + (f" — {why}" if why else "")
         created = result.get("created")
         if created is None:
@@ -425,6 +432,15 @@ class PipelineService:
         if route == "/gate/fix":
             run_id, action = str(data.get("run") or ""), str(data.get("action") or "")
             gate_key = pl.keeper.run(run_id)["gate"]
+            if action == "integrate":
+                label = "внедрение висящего и повторные ворота"
+
+                def integrate_and_rerun():
+                    done = integrate.run(pl)
+                    run = pl.run_gate(gate_key, flow.gate_facts(pl, gate_key))
+                    return {**run, "integrated": done}
+
+                return {"result": None, "job": self._start(label, integrate_and_rerun)}
             result = advice.fix(pl, run_id, action) if action != "rerate" else None
             facts = flow.gate_facts(pl, gate_key)
             label = "повторные ворота"

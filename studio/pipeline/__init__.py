@@ -14,7 +14,7 @@ from .kinds import KINDS, SOURCE, STAGE_NAMES
 from .roles import ROLES
 from .settings import MODE_NAMES, MODES, PipelineSettings
 
-from . import advice, entry, flow, maps, stage1, stage2, stage3, stage4, stage5, waves  # isort: skip  # noqa: E402
+from . import advice, entry, flow, integrate, maps, stage1, stage2, stage3, stage4, stage5, waves  # isort: skip  # noqa: E402
 
 __all__ = [
     "entry",
@@ -39,6 +39,7 @@ __all__ = [
     "stage1",
     "stage2",
     "advice",
+    "integrate",
     "stage3",
     "waves",
     "stage4",

@@ -161,7 +161,9 @@ class GateKeeper:
         кроме итоговой приёмки и случая, когда круги доработки закончились."""
         if self.settings.mode != "autopilot":
             return True
-        return gate(run["gate"]).final or bool(run.get("stuck"))
+        # чистым воротам израсходованные круги не мешают
+        stuck = bool(run.get("stuck")) and run.get("state") != "ready"
+        return gate(run["gate"]).final or stuck
 
     def decide(self, run_id: str, decision: str, by: str, note: str = "") -> dict:
         if decision not in DECISIONS:
