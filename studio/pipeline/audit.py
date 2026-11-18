@@ -53,7 +53,7 @@ def _prompt(pl: Pipeline, run: dict) -> str:
         'action: "improve" — запись можно довести правкой, "reject" — довести нельзя (лишняя, '
         "дублирует другую или противоречит цепочке): назови её в records, её отклонят. "
         'cause: "ask" — не хватает данных, которые знает только человек (автор их выдумал бы): дай '
-        "в questions 1–3 закрытых вопроса с вариантами (text, options, about — код записи).\n"
+        "в questions закрытые вопросы с вариантами (text, options, about — код записи).\n"
         + 'Ответ: {"summary": "главная причина в одной фразе", "items": [{"criterion": "<ключ или code>", '
         '"cause": "here", "records": ["c7"], "defect": "что не так", "fix": "что сделать автору", '
         '"action": "improve", "evaluator_ok": true}, {"criterion": "completeness", "cause": "upstream", "target": "c3", '
@@ -68,7 +68,7 @@ def _clean(pl: Pipeline, run: dict, data) -> dict:
     stage = GATES[run["gate"]].stage
     for raw in _items(data, "items")[:MAX_ITEMS]:
         defect, fix = _s(raw.get("defect"), 400), _s(raw.get("fix"), 400)
-        questions = [q for q in _items(raw, "questions") if _s(q.get("text"), 300)][:3]
+        questions = [q for q in _items(raw, "questions") if _s(q.get("text"), 300)]
         if not defect and not fix and not questions:
             continue
         item = {

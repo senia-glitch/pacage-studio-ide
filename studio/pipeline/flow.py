@@ -7,7 +7,20 @@
 
 from __future__ import annotations
 
-from . import advice, audit, clarify, debt, integrate, stage1, stage2, stage3, stage4, stage5, waves
+from . import (
+    advice,
+    audit,
+    clarify,
+    debt,
+    integrate,
+    review,
+    stage1,
+    stage2,
+    stage3,
+    stage4,
+    stage5,
+    waves,
+)
 from .engine import Pipeline
 from .errors import PipelineError
 from .gates import GATES, STAGE_GATES, gate
@@ -71,6 +84,7 @@ def run_step(pl: Pipeline, stage: int, key: str):
         return result
     result = _repair(pl, stage, key, result)
     made = clarify.after_step(pl, stage, key, before)  # критик и сомнения авторов → вопросы
+    review.after_step(pl, stage, key)  # «Идея»: после каждого шага — описание банка, в любом режиме
     if made and isinstance(result, dict):
         result["questions"] = [q["id"] for q in made]
     return result

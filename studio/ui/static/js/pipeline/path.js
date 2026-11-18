@@ -159,7 +159,7 @@ function gatesRow(ctx, stage) {
 
 function stagePanel(ctx, stage) {
   if (stage.n === 1) {
-    const parts = [areaPanel(ctx), questionsPanel(ctx)].filter(Boolean);
+    const parts = [areaPanel(ctx), questionsPanel(ctx), reviewPanel(ctx)].filter(Boolean);
     return parts.length ? h("div", {class: "pl-panel"}, parts) : null;
   }
   if (stage.n === 2) {
@@ -274,6 +274,50 @@ function questionsPanel(ctx) {
     );
   }
   if (questions.length > 1) wrap.append(h("div", {class: "acts"}, h("button", {class: "ghost", disabled: running, onclick: () => ctx.act("/api/pipeline/answer/auto", {ids: questions.map((q) => q.id)})}, "Решить за меня всё")));
+  return wrap;
+}
+
+let reviewDraft = "";
+const ACTION_NAMES = {revise: "Изменить", add: "Добавить", reject: "Отклонить"};
+
+function reviewPanel(ctx) {
+  const review = ctx.state.review;
+  if (!review || !review.digest) return null;
+  const running = ctx.state.job && ctx.state.job.running;
+  const wrap = h("div", {class: "pl-block pl-review"}, h("div", {class: "pl-label"}, "Что сейчас в «Идее» — простыми словами (обновляется после каждого шага)"));
+  if (review.digest.text) wrap.append(...review.digest.text.split(String.fromCharCode(10, 10)).map((part) => h("p", {class: "pl-quote"}, part)));
+  const details = h("details", null, h("summary", null, "Все записи по разделам"));
+  for (const section of review.digest.sections || []) {
+    details.append(h("div", {class: "pl-label"}, section.title), h("ul", {class: "lines"}, section.items.map((item) => h("li", null, `[${item.id}] ${item.text}`, item.criteria && item.criteria.length ? h("ul", null, item.criteria.map((c) => h("li", {class: "hint"}, `критерий [${c.id}]: ${c.text}`))) : null))));
+  }
+  wrap.append(details);
+  const send = async (text) => { if (await ctx.act("/api/pipeline/review/say", {text})) reviewDraft = ""; };
+  const thread = review.thread || [];
+  thread.forEach((message, index) => {
+    if (message.who === "user") {
+      wrap.append(h("div", {class: "pl-quote"}, h("b", null, "Вы: "), message.text));
+      return;
+    }
+    const box = h("div", {class: "pl-advice sub"});
+    if (message.understanding) box.append(h("div", null, h("b", null, "Как я вас понял: "), message.understanding));
+    if (message.impact.length) box.append(h("div", {class: "pl-label"}, "Как это повлияет на систему"), h("ul", {class: "lines"}, message.impact.map((i) => h("li", null, i))));
+    if (message.conflicts.length) box.append(h("div", {class: "pl-warn"}, h("b", null, "Противоречия, которые нужно снять: "), message.conflicts.map((c) => h("div", null, "• " + c.what + (c.records.length ? ` (${c.records.join(", ")})` : "")))));
+    for (const q of message.questions) {
+      box.append(h("div", {class: "pl-question"}, h("div", {class: "q"}, q.text), h("div", {class: "opts"}, q.options.map((option) => h("button", {disabled: running, onclick: () => send(`${q.text} — ${option}`)}, option)))));
+    }
+    if (message.plan.length) {
+      box.append(h("div", {class: "pl-label"}, "План правок (ничего не изменится без вашего «Применить»)"), h("ul", {class: "lines"}, message.plan.map((step) => h("li", null, h("b", null, ACTION_NAMES[step.action] + " "), step.action === "add" ? `${step.title} (под ${step.parent})` : `[${step.id}] ${step.label}${step.title ? " → " + step.title : ""}`, step.why ? h("div", {class: "hint"}, step.why) : null))));
+    }
+    if (index === thread.length - 1) {
+      box.append(h("div", {class: "acts"},
+        review.ready ? h("button", {class: "pl-primary", disabled: running, onclick: () => ctx.act("/api/pipeline/review/apply")}, "Применить правки") : h("span", {class: "hint"}, "Применить можно, когда противоречия сняты и вопросы закрыты: ответьте или уточните ещё."),
+        h("button", {class: "ghost", disabled: running, onclick: () => ctx.act("/api/pipeline/review/cancel")}, "Отменить обсуждение")));
+    }
+    wrap.append(box);
+  });
+  const area = h("textarea", {rows: 3, placeholder: "Свободное уточнение (необязательно): что бы вы изменили? Студия обсудит, как это повлияет на систему, и ничего не изменит без вашего согласия.", "data-focus": "review-note", oninput: () => { reviewDraft = area.value; }});
+  area.value = reviewDraft;
+  wrap.append(area, h("div", {class: "acts"}, h("button", {disabled: running, onclick: () => area.value.trim() && send(area.value.trim())}, thread.length ? "Ответить студии" : "Обсудить уточнение")));
   return wrap;
 }
 

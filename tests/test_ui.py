@@ -161,3 +161,9 @@ def test_вопросы_студии_и_режимы_в_интерфейсе():
     bank = (JS_DIR / "pipeline" / "bank.js").read_text(encoding="utf-8")
     assert 'ctx.state.mode !== "manual"' in bank and "допущение" not in bank
 
+
+def test_описание_идеи_и_обсуждение_уточнений_в_интерфейсе():
+    path = (JS_DIR / "pipeline" / "path.js").read_text(encoding="utf-8")
+    for part in ("reviewPanel", "/api/pipeline/review/say", "/api/pipeline/review/apply", "/api/pipeline/review/cancel", "Применить правки", "ничего не изменится без вашего"):
+        assert part in path, part
+

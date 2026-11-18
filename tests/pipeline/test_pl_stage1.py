@@ -10,7 +10,7 @@ from studio.pipeline.graph import ACCEPTED, PROPOSED
 def rules(pl_state=None):
     return [
         (
-            "Задай до",
+            "Задай НОВЫЕ",
             {
                 "questions": [
                     {"text": "Кто пользуется системой?", "options": ["пациенты", "врачи"]},

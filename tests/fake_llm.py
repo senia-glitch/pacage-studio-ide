@@ -217,7 +217,7 @@ def full_rules(evaluator=None):
 def stage1_rules_dynamic(requirements):
     return [
         (
-            "Задай до",
+            "Задай НОВЫЕ",
             {
                 "questions": [
                     {"text": "Кто пользуется системой?", "options": ["пациенты", "врачи"]},

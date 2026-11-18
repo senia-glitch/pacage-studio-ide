@@ -23,13 +23,12 @@ from .stage1 import _items, _s
 
 # Шаги, после которых критик сверяет результат. «Идея» — основа системы: проверяем после каждого шага.
 CLARIFY_STEPS = {
-    1: ("boundaries", "constraints", "domain", "problems", "requirements"),
+    1: ("boundaries", "constraints", "domain", "problems", "requirements", "review"),
     2: ("scenarios", "merge"),
     3: ("plan",),
     4: ("plan",),
 }
 SOURCES = ("clarify", "author", "audit")
-MAX_QUESTIONS = 3
 PARENTS = KINDS["question"].parents
 HEAD_GATE = "Замечания ворот к твоей работе"
 HEAD_ANSWERS = "Ответы человека на уточняющие вопросы"
@@ -70,13 +69,12 @@ def _parent(pl: Pipeline, about: str) -> str | None:
 
 
 def create(
-    pl: Pipeline, items: list[dict], *, source: str, batch: str, gate: str = "", limit: int = MAX_QUESTIONS
+    pl: Pipeline, items: list[dict], *, source: str, batch: str, gate: str = ""
 ) -> list[dict]:
-    """Записать вопросы в банк (закрытые, с вариантами). Повторы и пустые отбрасываются."""
+    """Записать вопросы в банк (закрытые, с вариантами). Повторы и пустые отбрасываются; сколько
+    вопросов задать — решает критик, лимита на их число нет."""
     made: list[dict] = []
     for raw in items:
-        if len(made) >= limit:
-            break
         text = _s(raw.get("text"), 300)
         if not text:
             continue
@@ -114,8 +112,8 @@ def _critic(pl: Pipeline, stage: int, key: str, new: list[dict]) -> list[dict]:
         + f"\n\nГраницы, ограничения и решения:\n{prompts.constitution(pl.bank)}\n\n"
         f"Заданное выше:\n{above}\n\n"
         f"Уже заданные вопросы и ответы:\n{prompts.render(pl.bank, 'question')}\n\n"
-        f"{focus} Не больше {MAX_QUESTIONS} вопросов, каждый закрытый, с 2–4 вариантами; about — код "
-        "записи, к которой он относится.\n"
+        f"{focus} Задай столько вопросов, сколько нужно для согласованности, но только существенных; "
+        "каждый закрытый, с 2–4 вариантами; about — код записи, к которой он относится.\n"
         'Ответ: {"questions": [{"text": "...", "options": ["...", "..."], "about": "c7"}]}'
     )
     try:
@@ -125,7 +123,9 @@ def _critic(pl: Pipeline, stage: int, key: str, new: list[dict]) -> list[dict]:
     return _items(data, "questions")
 
 
-def after_step(pl: Pipeline, stage: int, key: str, before: int) -> list[dict]:
+def after_step(
+    pl: Pipeline, stage: int, key: str, before: int, touched: list[str] | tuple[str, ...] = ()
+) -> list[dict]:
     """После шага: вопросы автора и критика. В «На воротах» они ждут человека, в автопилоте их закрывает
     студия сама, в «Вручную» вопросов нет."""
     asked = pl.llm.take_questions()
@@ -137,12 +137,12 @@ def after_step(pl: Pipeline, stage: int, key: str, before: int) -> list[dict]:
     new = [
         c
         for c in pl.bank.records()
-        if int(c["id"][1:]) > before and c["kind"] != "question"
+        if (int(c["id"][1:]) > before or c["id"] in touched) and c["kind"] != "question"
     ]
     if worth(stage, key) and new:
         made = create(pl, _critic(pl, stage, key, new), source="clarify", batch=batch)
-    if asked and len(made) < MAX_QUESTIONS:
-        made += create(pl, asked, source="author", batch=batch, limit=MAX_QUESTIONS - len(made))
+    if asked:
+        made += create(pl, asked, source="author", batch=batch)
     if made and mode == "autopilot":
         settle(pl, batch)
     return made

@@ -504,6 +504,45 @@ def test_an_answer_starts_the_studio_work_and_decide_for_me_is_a_job(tmp_path):
     assert svc.job["label"] == "учёт ваших ответов" and not svc.job_view()["error"]
 
 
+def test_review_routes_describe_discuss_apply_and_cancel(tmp_path):
+    from studio.pipeline import review
+
+    svc, agent = service(tmp_path)
+    svc.post(f"{P}/start", {})
+    pl = svc.pl()
+    area = pl.bank.add("area", "Запись к врачу")
+    boundary = pl.bank.add("boundary", "Только запись", parents=[area["id"]])
+    problem = pl.bank.add("problem", "Не дозвониться", parents=[boundary["id"]])
+    assert svc.state()["review"]["digest"] is None
+    plan = [{"action": "revise", "id": problem["id"], "title": "Не дозвониться пациенту", "why": "точнее"}]
+    answer = {"understanding": "Понял", "impact": ["поправим проблему"], "conflicts": [], "questions": [], "plan": plan}
+    agent.rules.insert(0, ("Разбери последнее сообщение человека", answer))
+    agent.rules.insert(0, ("Вот всё, что студия знает об идее", {"text": "Строим запись к врачу."}))
+    review.describe(pl, "problems")
+    state = svc.state()["review"]
+    assert state["digest"]["text"] == "Строим запись к врачу." and state["thread"] == []
+    out = svc.post(f"{P}/review/say", {"text": "Уточню проблему"})
+    assert "обсуждение" in out["job"]["label"]
+    svc.wait()
+    assert "план правок согласован" in svc.job_view()["result"]
+    assert svc.state()["review"]["ready"] is True
+    svc.post(f"{P}/review/cancel", {})
+    assert svc.state()["review"]["thread"] == []
+    with pytest.raises(PipelineError) as err:
+        svc.post(f"{P}/review/apply", {})
+    assert err.value.code == "not_ready"
+    svc.post(f"{P}/review/say", {"text": "Уточню проблему"})
+    svc.wait()
+    svc.post(f"{P}/review/apply", {})
+    svc.wait()
+    job = svc.job_view()
+    assert not job["error"] and "изменено записей: 1" in job["result"]
+    assert pl.bank.get(problem["id"])["title"] == "Не дозвониться пациенту"
+    svc.post(f"{P}/review/say", {"text": ""})  # пустое уточнение — понятная ошибка работы
+    svc.wait()
+    assert "Напишите" in svc.job_view()["error"]
+
+
 def test_settings_describe_the_improvement_rounds_and_have_no_accept_below_switch(tmp_path):
     svc, _ = service(tmp_path)
     svc.post(f"{P}/start", {})

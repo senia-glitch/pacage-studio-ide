@@ -29,6 +29,7 @@ from studio.pipeline import (
     integrate,
     maps,
     reset,
+    review,
     stack,
     stage1,
     stage2,
@@ -87,6 +88,23 @@ def _summary(result) -> str:
                     f"отклонено: {len(done['rejected'])}; " + head
                 )
             return head + (f" — {why}" if why else "")
+        if "discussed" in result:
+            reply = result["discussed"]
+            if reply["questions"] or reply["conflicts"]:
+                note = ": есть вопросы"
+            else:
+                note = ": план правок согласован" if reply["ready"] else ""
+            return "студия обсудила уточнение" + note
+        if "revised" in result:
+            text = (
+                f"изменено записей: {len(result['revised'])}, добавлено: {len(result['added'])}, "
+                f"отклонено: {len(result['rejected'])}"
+            )
+            if result.get("skipped"):
+                text += f"; не внесено: {len(result['skipped'])}"
+            if result.get("questions"):
+                text += f"; вопросов к вам: {len(result['questions'])}"
+            return text
         created = result.get("created")
         if created is None:
             created = result.get("designed")
@@ -204,6 +222,7 @@ class PipelineService:
             "warnings": pl.settings.evaluator_warnings(),
             "waves": waves.info(pl),
             "debt": debt.summary(pl),
+            "review": review.view(pl),
             "questions": [_brief(q) for q in stage1.unanswered(pl)],
             "unchosen": [
                 {
@@ -439,6 +458,17 @@ class PipelineService:
             if batch and clarify.batch_ready(pl, batch):  # все ответили: студия сама меняет систему
                 with contextlib.suppress(PipelineError):  # занято — применится при следующем ответе
                     self._start("учёт ваших ответов", lambda: flow.apply_answers(pl, batch))
+            return self.state()
+        if route == "/review/say":
+            text = str(data.get("text") or "")
+            label = "обсуждение уточнения"
+            return {"job": self._start(label, lambda: {"discussed": review.say(pl, text)})}
+        if route == "/review/apply":
+            if not review.view(pl)["ready"]:
+                raise PipelineError("not_ready", "План ещё не согласован со студией")
+            return {"job": self._start("применение уточнения", lambda: review.apply(pl))}
+        if route == "/review/cancel":
+            review.cancel(pl)
             return self.state()
         if route == "/answer/auto":
             ids = [str(i) for i in data.get("ids") or [data.get("id")] if i]

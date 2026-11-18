@@ -83,20 +83,20 @@ def area(pl: Pipeline) -> dict:
 # ---------------------------------------------------------------------- 1.2 Вопросы
 
 
-def propose_questions(pl: Pipeline, count: int = 5) -> list[dict]:
-    """1.2 Уточняющие вопросы: закрытые, с вариантами ответа."""
+def propose_questions(pl: Pipeline) -> list[dict]:
+    """1.2 Уточняющие вопросы: закрытые, с вариантами ответа (сколько нужно — решает аналитик)."""
     root = area(pl)
     prompt = (
         f"Идея:\n{root['body']}\n\n"
         f"Уже заданные вопросы и ответы:\n{prompts.render(pl.bank, 'question')}\n\n"
-        f"Задай до {count} НОВЫХ закрытых вопросов, которые определят границы системы: кто "
+        "Задай НОВЫЕ закрытые вопросы (столько, сколько нужно), которые определят границы системы: кто "
         "пользователи, что входит и что не входит, какие данные, какие внешние системы. Вопрос — "
         "один, с 2–4 вариантами ответа.\n"
         'Ответ: {"questions": [{"text": "...", "options": ["...", "..."]}]}'
     )
     data = pl.llm.ask_json("analyst", prompts.SYSTEM["analyst"], prompt)
     created = []
-    for item in _items(data, "questions")[:count]:
+    for item in _items(data, "questions"):
         text = _s(item.get("text"), 300)
         if not text or pl.bank.find("question", text):
             continue
