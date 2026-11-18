@@ -142,7 +142,8 @@ def dialogue(pl: Pipeline) -> str:
     for card in pl.bank.records("question"):
         attrs = card.get("attrs") or {}
         if attrs.get("answer"):
-            lines.append(f"- {card['id']} Вопрос: {card['title']} → Ответ человека: {attrs['answer']}")
+            question = card.get("body") or card["title"]
+            lines.append(f"- {card['id']} Вопрос: {question} → Ответ человека: {attrs['answer']}")
     return "\n".join(lines) or "(пока нет)"
 
 
@@ -154,7 +155,7 @@ def dossier(pl: Pipeline) -> str:
     areas = pl.bank.records("area")
     head = f"Идея человека:\n{areas[0]['body'] or areas[0]['title']}" if areas else "Идея не записана."
     waiting = [
-        f"- {q['title']}"
+        f"- {q.get('body') or q['title']}"
         for q in pl.bank.records("question")
         if not (q.get("attrs") or {}).get("answer")
     ]
@@ -259,6 +260,16 @@ def skip_open(pl: Pipeline, topic: str) -> int:
 # ---------------------------------------------------------------------- подтверждение найденного
 
 
+def unconfirmed(pl: Pipeline, kind: str) -> list[dict]:
+    """Черновики вида ``kind``, о которых человека ещё не спросили (например, шаг упал на полпути)."""
+    asked = {
+        (q.get("attrs") or {}).get("record")
+        for q in pl.bank.records("question")
+        if (q.get("attrs") or {}).get("source") == "confirm"
+    }
+    return [c for c in pl.bank.records(kind, status="proposed") if c["id"] not in asked]
+
+
 def confirm(pl: Pipeline, cards: list[dict], what: str, topic: str) -> list[dict]:
     """Найденное в сети человек подтверждает по одному: «Нет» убирает запись."""
     made = []
@@ -355,6 +366,7 @@ __all__ = [
     "confirm",
     "dialogue",
     "discuss",
+    "unconfirmed",
     "dossier",
     "is_done",
     "mark_done",

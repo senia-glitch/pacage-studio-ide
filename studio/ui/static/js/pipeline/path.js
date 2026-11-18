@@ -267,7 +267,7 @@ function questionsPanel(ctx) {
       h(
         "div",
         {class: "pl-question"},
-        h("div", {class: "q"}, q.title),
+        h("div", {class: "q"}, q.body || q.title),
         h(
           "div",
           {class: "opts"},

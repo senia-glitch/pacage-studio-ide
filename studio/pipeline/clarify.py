@@ -30,6 +30,7 @@ CLARIFY_STEPS = {
     4: ("plan",),
 }
 SOURCES = ("clarify", "author", "audit", "interview", "confirm")
+TITLE_LIMIT = 200  # предел заголовка записи в банке
 PARENTS = KINDS["question"].parents
 HEAD_GATE = "Замечания ворот к твоей работе"
 HEAD_ANSWERS = "Ответы человека на уточняющие вопросы"
@@ -103,10 +104,11 @@ def create(
     (так «Идея» спрашивает по одному: следующий вопрос зависит от ответа на этот)."""
     made: list[dict] = []
     for raw in items:
-        text = _s(raw.get("text"), 300)
+        text = _s(raw.get("text"), 600)
         if not text:
             continue
-        existing = pl.bank.find("question", text)
+        title = text if len(text) <= TITLE_LIMIT else text[: TITLE_LIMIT - 1].rstrip() + "…"
+        existing = pl.bank.find("question", title)
         if existing and existing["status"] != "rejected":
             continue
         options = [_s(o, 120) for o in (raw.get("options") or []) if _s(o, 120)][:4]
@@ -122,7 +124,8 @@ def create(
         for field in ("upstream", "reject"):
             if raw.get(field):
                 attrs[field] = raw[field]
-        card = pl.bank.add("question", text, parents=[parent], attrs=attrs, author="critic")
+        body = text if title != text else ""  # заголовок записи ограничен: длинный вопрос лежит целиком в тексте
+        card = pl.bank.add("question", title, parents=[parent], body=body, attrs=attrs, author="critic")
         if own_batch:
             pl.bank.mark(card["id"], "studio", batch=card["id"])
             card = pl.bank.get(card["id"])

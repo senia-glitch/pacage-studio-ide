@@ -298,3 +298,32 @@ def test_the_server_shows_idea_questions_one_by_one_and_enough_continues(tmp_pat
     assert out["job"]["label"] == "продолжение по сказанному"
     with pytest.raises(PipelineError):
         svc.post(f"{PREFIX}/interview/finish", {})
+
+
+# ---------------------------------------------------------------------- длинные вопросы и сбой на полпути
+
+
+def test_a_long_question_is_kept_whole_and_does_not_break_the_step(tmp_path):
+    long_text = "Это конкурент: «ДокторПлюс» — " + "очень длинное описание сервиса онлайн-записи. " * 8 + "?"
+    assert len(long_text) > 300
+    pl, _ = build(tmp_path, [])
+    stage1.set_area(pl, "Запись к врачу")
+    (made,) = clarify.create(pl, [{"text": long_text, "options": ["Да, верно", "Нет, убрать"]}], source="confirm", batch="", extra={"stage": 1}, own_batch=True)
+    assert len(made["title"]) <= 200 and made["title"].endswith("…")
+    assert made["body"] == long_text  # вопрос целиком — в тексте записи, человек видит его полностью
+    assert clarify.create(pl, [{"text": long_text, "options": []}], source="confirm", batch="") == []  # повтор не плодится
+    assert long_text in interview.dossier(pl)  # студия тоже видит вопрос целиком
+
+
+def test_competitors_found_before_a_failure_are_still_confirmed_on_the_next_run(tmp_path):
+    found = {"competitors": [{"name": "ДокторПлюс", "url": "https://a.example", "why": "очень длинное описание " * 20}]}
+    rules = [("реальных конкурентов", found), ("Проанализируй конкурентов", {"analysis": []})]
+    pl, _ = build(tmp_path, rules)
+    stage1.set_area(pl, "Запись к врачу")
+    (competitor,) = stage1.research_competitors(pl)
+    assert [q["attrs"]["record"] for q in clarify.pending(pl)] == [competitor["id"]]
+    for q in clarify.pending(pl):  # как будто вопрос не создался: шаг упал, запись осталась без подтверждения
+        pl.bank.reject(q["id"], "test", "потерян", cascade=False)
+    assert interview.unconfirmed(pl, "competitor") == [pl.bank.get(competitor["id"])]
+    assert stage1.research_competitors(pl) == []  # новых нет, но спросить о найденном раньше студия обязана
+    assert [q["attrs"]["record"] for q in clarify.pending(pl)] == [competitor["id"]]

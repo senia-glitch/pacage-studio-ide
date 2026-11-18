@@ -295,7 +295,8 @@ def research_competitors(pl: Pipeline, count: int = 5) -> list[dict]:
                         k: _s(item.get(k), 400) for k in ("strengths", "weaknesses", "takeaway")
                     },
                 )
-        interview.confirm(pl, [pl.bank.get(c["id"]) for c in created], "конкурент", "confirm.competitors")
+    # подтверждения просим и у тех, кого нашли раньше, но не спросили (шаг мог упасть на полпути)
+    interview.confirm(pl, interview.unconfirmed(pl, "competitor"), "конкурент", "confirm.competitors")
     return [pl.bank.get(c["id"]) for c in created]
 
 
@@ -334,7 +335,9 @@ def analyze_domain(pl: Pipeline) -> list[dict]:
                 author="researcher",
             )
         )
-    interview.confirm(pl, created, "факт предметной области", "confirm.domain")
+    interview.confirm(
+        pl, interview.unconfirmed(pl, "domain"), "факт предметной области", "confirm.domain"
+    )
     return created
 
 
