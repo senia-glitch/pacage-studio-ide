@@ -271,10 +271,11 @@ function questionsPanel(ctx) {
         h(
           "div",
           {class: "opts"},
-          (q.attrs.options || []).map((option) => h("button", {onclick: () => send(option)}, option)),
+          (q.attrs.options || []).map((option) => h("button", {class: q.attrs.recommended === option ? "rec" : "", title: q.attrs.recommended === option ? "студия считает этот вариант наиболее вероятным по вашему диалогу" : "", onclick: () => send(option)}, option)),
           input,
           h("button", {class: "ghost", onclick: () => input.value.trim() && send(input.value.trim())}, "Ответить"),
           h("button", {class: "ghost", disabled: running, title: "Студия ответит сама по своим правилам", onclick: () => ctx.act("/api/pipeline/answer/auto", {ids: [q.id]})}, "Решить за меня"),
+          q.attrs.topic && !q.attrs.topic.startsWith("confirm.") ? h("button", {class: "ghost", disabled: running, title: "По этому пункту требований нет: студия не будет о нём спрашивать", onclick: () => send("Не важно")}, "Не важно") : null,
           finish,
         ),
       ),

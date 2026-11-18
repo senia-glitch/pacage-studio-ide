@@ -66,6 +66,7 @@ input.pl-num{width:64px}
 .pl-question{margin:6px 0;padding:6px 10px;background:#1e1f22;border-radius:8px}
 .pl-question .q{font-weight:600;margin-bottom:4px}
 .pl-question .opts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.pl-question .opts button.rec{border-color:#4f8cff;box-shadow:0 0 0 1px #4f8cff55;font-weight:600}
 .pl-gatepanel{margin-top:8px;padding:10px;border:1px solid #8a6b22;border-radius:10px;background:#2a2820}
 .pl-ghead{display:flex;align-items:center;gap:10px;cursor:default}
 .pl-layers{display:flex;gap:6px;margin:8px 0}

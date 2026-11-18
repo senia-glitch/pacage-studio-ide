@@ -156,7 +156,7 @@ def test_настройки_умеют_сносить_проект_с_подтв
 
 def test_вопросы_студии_и_режимы_в_интерфейсе():
     path = (JS_DIR / "pipeline" / "path.js").read_text(encoding="utf-8")
-    for part in ("Решить за меня", "/api/pipeline/answer/auto", "Вопрос студии", "/api/pipeline/interview/finish", "Достаточно", "dedupe", 'ctx.state.mode === "manual"'):
+    for part in ("Решить за меня", "/api/pipeline/answer/auto", "Вопрос студии", "/api/pipeline/interview/finish", "Достаточно", "Не важно", "rec", "dedupe", 'ctx.state.mode === "manual"'):
         assert part in path, part
     bank = (JS_DIR / "pipeline" / "bank.js").read_text(encoding="utf-8")
     assert 'ctx.state.mode !== "manual"' in bank and "допущение" not in bank

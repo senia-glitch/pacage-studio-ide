@@ -327,3 +327,39 @@ def test_competitors_found_before_a_failure_are_still_confirmed_on_the_next_run(
     assert interview.unconfirmed(pl, "competitor") == [pl.bank.get(competitor["id"])]
     assert stage1.research_competitors(pl) == []  # новых нет, но спросить о найденном раньше студия обязана
     assert [q["attrs"]["record"] for q in clarify.pending(pl)] == [competitor["id"]]
+
+
+# ---------------------------------------------------------------------- скорость «Идеи» (вопросы остаются по одному)
+
+
+def test_the_interviewer_has_its_own_model_and_inherits_the_analysts_until_chosen(tmp_path):
+    pl, agent = build(tmp_path, [(TOPIC, ask("Кто клиент?", ["Пациент", "Врач"], recommended="Пациент"))])
+    pl.settings.set_role("analyst", "claude", "sonnet")
+    assert pl.llm.resolve("interviewer")[1] == "sonnet"  # своя модель не выбрана: как у аналитика
+    pl.settings.set_role("interviewer", "claude", "haiku")
+    assert pl.llm.resolve("interviewer")[1] == "haiku" and pl.llm.resolve("analyst")[1] == "sonnet"
+    stage1.set_area(pl, "Запись к врачу")
+    out = interview.step(pl, "competitors")
+    assert agent.calls[0]["model"] == "haiku"  # вопросы задаёт быстрая модель
+    question = pl.bank.get(out["asked"][0])
+    assert question["attrs"]["recommended"] == "Пациент"  # подсказка человеку; решает он
+
+
+def test_a_recommendation_outside_the_options_is_ignored_and_skip_is_explained_to_the_model(tmp_path):
+    pl, agent = build(tmp_path, [(TOPIC, ask("Кто клиент?", ["Пациент", "Врач"], recommended="Кто-то ещё"))])
+    stage1.set_area(pl, "Запись к врачу")
+    out = interview.step(pl, "competitors")
+    assert "recommended" not in pl.bank.get(out["asked"][0])["attrs"]
+    assert "Ответ «Не важно» означает, что по этому пункту требований нет" in agent.calls[0]["prompt"]
+
+
+def test_domain_facts_that_only_retell_the_dialogue_are_not_asked_about(tmp_path):
+    facts = {"facts": [
+        {"type": "role", "name": "Пациент", "text": "из ответов", "source": ""},
+        {"type": "norm", "name": "152-ФЗ", "text": "персональные данные", "source": "https://consultant.ru"},
+    ]}
+    pl, _ = build(tmp_path, [("Опиши предметную область", facts)])
+    stage1.set_area(pl, "Запись к врачу")
+    stage1.analyze_domain(pl)
+    asked = [q for q in pl.bank.records("question") if q["attrs"].get("source") == "confirm"]
+    assert len(asked) == 1 and "152-ФЗ" in asked[0]["title"]  # подтверждаем только найденное в сети

@@ -196,7 +196,7 @@ def test_record_edit_reject_link_and_changes(tmp_path):
 def test_settings_criteria_and_roles(tmp_path):
     svc, _ = service(tmp_path)
     data = svc.get(f"{P}/settings", {})
-    assert data["mode"] == "gates" and len(data["roles"]) == 11 and len(data["gates"]) == 7
+    assert data["mode"] == "gates" and len(data["roles"]) == 12 and len(data["gates"]) == 7
     assert {a["id"] for a in data["agents"]} >= {"claude", "opencode"}
     analyst = next(r for r in data["roles"] if r["key"] == "analyst")
     assert analyst["tier_name"].startswith("топ") and analyst["recommended"] == "opus"

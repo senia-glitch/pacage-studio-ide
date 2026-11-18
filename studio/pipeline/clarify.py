@@ -121,7 +121,7 @@ def create(
             attrs["gate"] = gate
         if about:
             attrs["refs"] = [about]
-        for field in ("upstream", "reject", "adds"):
+        for field in ("upstream", "reject", "adds", "recommended"):
             if raw.get(field):
                 attrs[field] = raw[field]
         body = text if title != text else ""  # заголовок записи ограничен: длинный вопрос лежит целиком в тексте

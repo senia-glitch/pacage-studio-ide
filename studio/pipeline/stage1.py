@@ -335,9 +335,9 @@ def analyze_domain(pl: Pipeline) -> list[dict]:
                 author="researcher",
             )
         )
-    interview.confirm(
-        pl, interview.unconfirmed(pl, "domain"), "факт предметной области", "confirm.domain"
-    )
+    # человека спрашиваем только о найденном в сети (с источником): остальное — пересказ его ответов
+    found = [c for c in interview.unconfirmed(pl, "domain") if (c.get("attrs") or {}).get("source")]
+    interview.confirm(pl, found, "факт предметной области", "confirm.domain")
     return created
 
 

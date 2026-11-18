@@ -91,7 +91,7 @@ def test_validation(tmp_path):
 
 
 def test_roles_catalog_and_assignment(tmp_path):
-    assert len(ROLES) == 11
+    assert len(ROLES) == 12
     assert ROLES["coordinator"].tier == TIER_TOP and ROLES["assistant"].tier == 1
     assert set(AGENT_LABELS.values()) == {"Claude Code Pro", "OpenCode Go Plus"}
     settings = PipelineSettings(tmp_path)

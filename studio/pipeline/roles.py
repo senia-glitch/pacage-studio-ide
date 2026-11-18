@@ -57,6 +57,16 @@ _ROLES = (
         (1,),
     ),
     Role(
+        "interviewer",
+        "Интервьюер",
+        "этап 1",
+        "задаёт вопросы «Идеи» по одному и обсуждает провал ворот; пока своя модель не выбрана, "
+        "работает на модели аналитика. Быстрая модель сокращает ожидание после каждого ответа",
+        TIER_FAST,
+        "вопросов много, каждый ждёт ответа человека",
+        (1,),
+    ),
+    Role(
         "researcher",
         "Исследователь",
         "этап 1",
@@ -132,9 +142,12 @@ _ROLES = (
 
 ROLES: dict[str, Role] = {role.key: role for role in _ROLES}
 
+# Роль без выбранной модели работает на модели другой роли.
+INHERITS = {"interviewer": "analyst"}
+
 # Кто «автор» для независимого оценщика на воротах каждого этапа.
 AUTHORS_BY_STAGE = {
-    1: ("analyst", "researcher"),
+    1: ("analyst", "interviewer", "researcher"),
     2: ("scenarist", "db_designer"),
     3: ("ui_designer", "executor", "test_author"),
     4: ("backend_designer", "executor", "test_author"),

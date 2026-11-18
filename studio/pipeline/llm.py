@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import PipelineError
-from .roles import AGENT_LABELS, ROLES, TIER_FAST, TIER_STRONG, TIER_TOP
+from .roles import AGENT_LABELS, INHERITS, ROLES, TIER_FAST, TIER_STRONG, TIER_TOP
 from .settings import PipelineSettings
 
 OPENCODE_PROVIDER = "opencode-go"  # модели подписки OpenCode Go / Go Plus
@@ -361,6 +361,9 @@ class Llm:
         if role_key not in ROLES:
             raise PipelineError("unknown_role", f"Такой роли нет: {role_key!r}")
         chosen = self.settings.role(role_key)
+        # своя модель не выбрана: роль работает на модели родственной
+        if not chosen["agent"] and not chosen["model"] and role_key in INHERITS:
+            return self.resolve(INHERITS[role_key])
         name = chosen["agent"]
         if not name:
             name = next((n for n in self.agents.names() if self.agents.get(n).found()), "")

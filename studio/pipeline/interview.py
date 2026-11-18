@@ -208,6 +208,9 @@ def _make(
     if not isinstance(raw, dict) or not _s(raw.get("text"), 300):
         return None
     item = {k: raw.get(k) for k in ("text", "options", "about")}
+    options = [_s(o, 120) for o in raw.get("options") or [] if isinstance(o, str)]
+    if _s(raw.get("recommended"), 120) in options:
+        item["recommended"] = _s(raw.get("recommended"), 120)  # подсказка человеку; решает он
     upstream = _upstream(pl, raw.get("upstream"))
     if upstream:
         item["upstream"] = upstream
@@ -238,7 +241,9 @@ def _next_prompt(pl: Pipeline, topic: str) -> str:
             "Задай ОДИН следующий вопрос по этой теме или скажи, что по ней всё ясно. Если ответ "
             "человека противоречит уже ПРИНЯТОЙ записи — спроси об этом, а не молчи: вопрос «Ответ "
             "противоречит [код]. Изменить её так: …?» с вариантами «Да, изменить» и «Нет, оставить как "
-            "есть» и полем upstream.",
+            "есть» и полем upstream. Ответ «Не важно» означает, что по этому пункту требований нет: "
+            "второй раз о нём не спрашивай. recommended — необязательное поле: вариант, который по "
+            "диалогу наиболее вероятен (человек видит его отмеченным, решает сам).",
             'Ответ: {"done": false, "question": {"text": "...", "options": ["...", "..."], "about": '
             '"c3", "upstream": {"target": "c5", "patch": {"title": "...", "body": "..."}}}} либо '
             '{"done": true, "why": "почему вопросов больше не нужно"}',
@@ -248,7 +253,7 @@ def _next_prompt(pl: Pipeline, topic: str) -> str:
 
 def ask_next(pl: Pipeline, topic: str) -> dict | None:
     """Следующий вопрос темы; ``None`` — по теме всё ясно."""
-    data = pl.llm.ask_json("analyst", SYSTEM, _next_prompt(pl, topic))
+    data = pl.llm.ask_json("interviewer", SYSTEM, _next_prompt(pl, topic))
     return _make(pl, data, source="interview", topic=topic)
 
 
@@ -384,7 +389,7 @@ def discuss(pl: Pipeline, run: dict) -> dict | None:
             'либо {"done": true, "why": "..."} (reject, upstream и add — только если нужны)',
         ]
     )
-    data = pl.llm.ask_json("analyst", SYSTEM, prompt)
+    data = pl.llm.ask_json("interviewer", SYSTEM, prompt)
     return _make(
         pl,
         data,
