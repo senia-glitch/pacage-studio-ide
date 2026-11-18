@@ -3,7 +3,7 @@
 import json
 
 import pytest
-from fake_llm import agents_with
+from fake_llm import agents_with, drive
 from pl_helpers import idea
 
 from studio.pipeline import Pipeline, PipelineError, advice, flow
@@ -155,7 +155,7 @@ def test_autopilot_integrates_hanging_and_drops_repeats_on_its_own(tmp_path, mon
     queue = [item, item, item]
     monkeypatch.setattr(flow, "next_step", lambda pl, skip=frozenset(): queue.pop(0) if queue else None)
     monkeypatch.setattr(flow, "run_step", lambda pl, stage, key: pl.run_gate("problems"))
-    log = flow.autopilot(pl, limit=6)
+    log = drive(pl, limit=6)
     assert log[0]["gate"] == "returned" and log[0]["integrated"]["rejected"]  # агент не нашёл места
     assert len(log[1]["fixed"]) == 1  # повтор уходит без человека
     assert log[2]["gate"] == "passed"  # без висящих записей ворота пройдены, человек не понадобился

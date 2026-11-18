@@ -12,6 +12,17 @@ CRITIC = "создал записи:"
 REFINE = "Ответы человека на уточняющие вопросы"
 AUTO = "Ответь на вопросы по правилам студии"
 ASK_AUDIT = "не пройдены.\nЗамечания:"
+DISCUSS = "Критерии ворот расплывчаты"
+
+
+def discuss_rule(prompt):
+    """Обсуждение ворот «Идеи»: один вопрос, а когда на него ответили — вопросов больше нет."""
+    if "Для кого эта система? → Ответ человека" in prompt:
+        return {"done": True, "why": "всё выяснили"}
+    return {
+        "done": False,
+        "question": {"text": "Для кого эта система?", "options": ["Пациенты", "Врачи"], "about": "c2"},
+    }
 
 
 def question_for(code, text="Кто пользуется системой?"):
@@ -77,16 +88,27 @@ def test_decide_for_me_answers_by_the_studio_rules_without_marks(tmp_path):
     card = pl.bank.get(q["id"])
     assert out["answered"] == 1 and card["attrs"]["answer"] == "Пациенты"
     assert card["attrs"]["answered_by"] == "analyst" and "assumed" not in card["attrs"]
-    assert "applied" in out and clarify.pending(pl) == []
+    assert out["next"]["decided"] == {"changed": [], "rejected": []} and clarify.pending(pl) == []
     prompt = next(c["prompt"] for c in agent.calls if AUTO in c["prompt"])
     assert "границы, ограничения" in prompt and "здравый смысл" in prompt  # правила студии
 
 
-def test_autopilot_answers_its_own_questions_and_goes_on(tmp_path):
+def test_autopilot_leaves_the_idea_questions_to_the_human(tmp_path):
+    rules = [(CRITIC, question_for("c3")), (AUTO, auto_rule), (REFINE, {"revise": [], "reject": []})]
+    pl, agent = make(tmp_path, rules, mode="autopilot")
+    idea(pl.bank)
+    (q,) = clarify.after_step(pl, 1, "problems", 0)
+    assert "answer" not in pl.bank.get(q["id"])["attrs"]  # «Идея» строится на диалоге: студия за человека не отвечает
+    assert clarify.waiting_human(pl) == [pl.bank.get(q["id"])]
+    clarify.settle(pl, q["attrs"]["batch"])
+    assert "answer" not in pl.bank.get(q["id"])["attrs"] and not any(AUTO in c["prompt"] for c in agent.calls)
+
+
+def test_autopilot_answers_its_own_questions_after_the_idea(tmp_path):
     rules = [(CRITIC, question_for("c3")), (AUTO, auto_rule), (REFINE, {"revise": [], "reject": []})]
     pl, _ = make(tmp_path, rules, mode="autopilot")
     idea(pl.bank)
-    (q,) = clarify.after_step(pl, 1, "problems", 0)
+    (q,) = clarify.after_step(pl, 2, "scenarios", 0)
     attrs = pl.bank.get(q["id"])["attrs"]
     assert attrs["answer"] == "Пациенты" and attrs["applied"] and clarify.pending(pl) == []
 
@@ -108,13 +130,17 @@ def test_authors_return_questions_instead_of_inventing(tmp_path):
             {"text": "", "options": []},
         ],
     }
-    pl, _ = make(tmp_path, [("Придумай", answer), (CRITIC, {"questions": []})])
+    def critic(prompt):  # сомнения авторов идут к критику, и он спрашивает один раз, а не пачкой
+        assert "Авторы записей сами усомнились" in prompt and "- Нужна ли оплата?" in prompt
+        return {"questions": [{"text": "Нужна ли оплата?", "options": ["Да", "Нет"], "about": "c2"}]}
+
+    pl, _ = make(tmp_path, [("Придумай", answer), (CRITIC, critic)])
     idea(pl.bank)
     data = pl.llm.ask_json("analyst", "s", "Придумай проблемы")
     assert "open_questions" not in data  # служебное поле не попадает в разбор шага
     made = clarify.after_step(pl, 1, "boundaries", 0)
     assert [q["title"] for q in made] == ["Нужна ли оплата?"]
-    assert made[0]["attrs"]["source"] == "author"
+    assert made[0]["attrs"]["source"] == "clarify" and made[0]["attrs"]["topic"] == "check.boundaries"
     pl.llm.ask_json("evaluator", "s", "Придумай проблемы")  # оценщик вопросов-сомнений не копит
     assert pl.llm.take_questions() == []
 
@@ -176,45 +202,56 @@ def small_idea(pl):
     pl.bank.add("problem", "Не дозвониться", parents=[boundary["id"]])
 
 
-def test_the_audit_asks_the_human_instead_of_a_report_and_rework_uses_the_answer(tmp_path):
-    rules = [(ASK_AUDIT, ASK), (AUTO, auto_rule), *full_rules(failing_problems([3, 9]))]
+def test_the_failed_idea_gate_is_discussed_with_the_human_and_rework_uses_the_answer(tmp_path):
+    rules = [(DISCUSS, discuss_rule), (ASK_AUDIT, ASK), *full_rules(failing_problems([3, 9]))]
     pl, agent = make(tmp_path, rules)
     small_idea(pl)
     run = pl.run_gate("problems")
-    assert run["state"] == "returned" and run["audit"]["asked"]
+    assert run["state"] == "returned"
     (q,) = clarify.pending(pl)
-    assert q["title"] == "Для кого эта система?"
-    assert q["attrs"]["source"] == "audit" and q["attrs"]["gate"] == "problems"
+    assert q["title"] == "Для кого эта система?"  # студия обсуждает замечания, а не решает за человека
+    assert q["attrs"]["source"] == "audit" and q["attrs"]["gate"] == "problems" and q["attrs"]["dialog"]
     assert q["attrs"]["batch"] == run["id"] and "не хватает данных" in audit.lines(run)[0]
     stage1.answer_question(pl, q["id"], "Пациенты")
-    assert clarify.batch_ready(pl, run["id"])
-    again = flow.apply_answers(pl, run["id"])  # доработка с ответом и ворота заново
-    assert again["state"] in ("ready", "passed", "returned")
+    out = flow.on_answer(pl, q["id"])  # вопросов больше нет: доработка с ответом и ворота заново
+    assert out["state"] in ("ready", "passed", "returned")
     assert not clarify.batch_ready(pl, run["id"])
     assert any("Для кого эта система? → Пациенты" in c["prompt"] for c in agent.calls)
+    prompt = next(c["prompt"] for c in agent.calls if DISCUSS in c["prompt"])
+    assert "не придумывай свои стандарты приёмки" in prompt and "Проверка проблем" in prompt
 
 
-def test_a_new_round_drops_the_old_unanswered_audit_questions(tmp_path):
-    rules = [(ASK_AUDIT, ASK), *full_rules(failing_problems([3]))]
+def test_a_new_round_drops_the_old_unanswered_discussion_questions(tmp_path):
+    rules = [(DISCUSS, discuss_rule), (ASK_AUDIT, ASK), *full_rules(failing_problems([3]))]
     pl, _ = make(tmp_path, rules)
     small_idea(pl)
     first = pl.run_gate("problems")
     assert len(clarify.pending(pl)) == 1
-    second = pl.run_gate("problems")  # нового вопроса с тем же текстом нет, старый потерял смысл
+    second = pl.run_gate("problems")  # старый вопрос потерял смысл, обсуждение начинается заново
     assert second["id"] != first["id"]
     assert [q for q in clarify.pending(pl) if q["attrs"]["batch"] == first["id"]] == []
+    assert [q["attrs"]["batch"] for q in clarify.pending(pl)] == [second["id"]]
 
 
-def test_the_autopilot_answers_the_audit_questions_and_reworks(tmp_path):
-    rules = [(ASK_AUDIT, ASK), (AUTO, auto_rule), *full_rules(failing_problems([3, 9]))]
+def test_the_autopilot_does_not_answer_the_idea_gate_discussion(tmp_path):
+    rules = [(DISCUSS, discuss_rule), (ASK_AUDIT, ASK), (AUTO, auto_rule), *full_rules(failing_problems([3, 9]))]
     pl, agent = make(tmp_path, rules, mode="autopilot")
     small_idea(pl)
     run = pl.run_gate("problems")
-    assert run["audit"]["asked"]
     clarify.settle(pl, run["id"])
-    assert clarify.pending(pl) == []
-    flow.rework(pl, "problems", run)
-    assert any("Для кого эта система? → Пациенты" in c["prompt"] for c in agent.calls)
+    assert len(clarify.waiting_human(pl)) == 1  # решать, что считать приёмкой, будет человек
+    assert not any(AUTO in c["prompt"] for c in agent.calls)
+
+
+def test_the_discussion_can_be_cut_short_and_the_gate_goes_on_with_what_was_said(tmp_path):
+    rules = [(DISCUSS, discuss_rule), (ASK_AUDIT, ASK), *full_rules(failing_problems([3, 9]))]
+    pl, agent = make(tmp_path, rules)
+    small_idea(pl)
+    run = pl.run_gate("problems")
+    (q,) = clarify.pending(pl)
+    again = flow.finish_topic(pl, q["attrs"]["topic"])  # «Достаточно, дорабатывай»
+    assert again["id"] != run["id"] and clarify.pending(pl) == []
+    assert pl.bank.get(q["id"])["status"] == "rejected"
 
 
 UPSTREAM = {

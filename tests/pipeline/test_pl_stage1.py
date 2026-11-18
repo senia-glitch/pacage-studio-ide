@@ -1,24 +1,15 @@
 import re
 
 import pytest
-from fake_llm import ALL_KEYS, agents_with
+from fake_llm import ALL_KEYS, agents_with, drive, interview_questions, interview_rule
 
-from studio.pipeline import Pipeline, PipelineError, stage1
+from studio.pipeline import Pipeline, PipelineError, flow, interview, stage1
 from studio.pipeline.graph import ACCEPTED, PROPOSED
 
 
 def rules(pl_state=None):
     return [
-        (
-            "Задай НОВЫЕ",
-            {
-                "questions": [
-                    {"text": "Кто пользуется системой?", "options": ["пациенты", "врачи"]},
-                    {"text": "Нужна ли оплата?", "options": ["да", "нет"]},
-                    {"text": "Кто пользуется системой?", "options": []},  # повтор отбрасывается
-                ]
-            },
-        ),
+        ("Тема сейчас:", interview_rule),
         (
             "Ответь на вопросы по правилам студии",
             {
@@ -49,16 +40,6 @@ def rules(pl_state=None):
                     },
                     {"topic": "Не тема", "text": "игнор"},
                 ]
-            },
-        ),
-        (
-            "Опиши БИЗНЕС этой идеи",
-            {
-                "client": "пациент",
-                "need": "записаться к врачу",
-                "category": "онлайн-запись к врачу",
-                "queries": ["запись к врачу онлайн", "", "как записаться к врачу"],
-                "not_competitors": "конструкторы сайтов",
             },
         ),
         (
@@ -105,9 +86,6 @@ def rules(pl_state=None):
                         "from": ["c4"],
                     },
                     {"title": "Висящая проблема", "from": ["c999"]},
-                ],
-                "questions": [
-                    {"text": "Нужны ли ночные записи?", "options": ["да", "нет"], "about": "c4"}
                 ],
             },
         ),
@@ -175,13 +153,18 @@ def test_stage1_end_to_end_with_human_decisions(tmp_path):
     assert area["title"] == "Сайт записи пациентов к врачу."
     assert stage1.set_area(pl, "Сайт записи к врачу")["id"] == area["id"]  # правка черновика
 
-    questions = stage1.propose_questions(pl)
-    assert [q["title"] for q in questions] == ["Кто пользуется системой?", "Нужна ли оплата?"]
-    assert stage1.propose_questions(pl) == []  # дубли не плодятся
+    first = stage1.run_step(pl, "questions")  # студия спрашивает ПО ОДНОМУ вопросу
+    assert pl.bank.get(first["asked"][0])["title"] == "Кто пользуется системой?"
+    assert stage1.run_step(pl, "questions")["waiting"] == first["asked"]  # пока ответа нет — ждёт
     with pytest.raises(PipelineError):
         stage1.build_boundaries(pl)  # без ответов границ нет
-    stage1.answer_question(pl, questions[0]["id"], "пациенты")
-    stage1.answer_question(pl, questions[1]["id"], "нет")
+    stage1.answer_question(pl, first["asked"][0], "пациенты")
+    second = stage1.run_step(pl, "questions")  # следующий вопрос — после ответа на первый
+    assert pl.bank.get(second["asked"][0])["title"] == "Нужна ли оплата?"
+    stage1.answer_question(pl, second["asked"][0], "нет")
+    assert stage1.run_step(pl, "questions") == {"created": []}  # студия: по теме всё ясно
+    assert interview.is_done(pl, "questions")
+    questions = [pl.bank.get(first["asked"][0]), pl.bank.get(second["asked"][0])]
     with pytest.raises(PipelineError):
         stage1.answer_question(pl, questions[1]["id"], " ")
     with pytest.raises(PipelineError):
@@ -205,16 +188,18 @@ def test_stage1_end_to_end_with_human_decisions(tmp_path):
     assert [c["title"] for c in comps] == ["ДокторПлюс"]  # без адреса — не принимается
     assert comps[0]["attrs"]["analysis"]["takeaway"] == "простота"
     assert any(call["web"] for call in agent.calls)
-    search = next(c["prompt"] for c in agent.calls if c["web"])  # поиск идёт по бизнесу, а не по технологии
-    assert "клиент — пациент" in search and "запись к врачу онлайн; как записаться к врачу" in search
-    assert "Конкурентами НЕ считать: конструкторы сайтов" in search and "НЕ инструменты" in search
+    search = next(c["prompt"] for c in agent.calls if c["web"])  # поиск — по словам человека, без своих догадок
+    assert "СТРОГО в этих рамках" in search and "Кто пользуется системой? → Ответ человека: пациенты" in search
+    assert "НЕ инструменты" in search
+    asked = [q for q in pl.bank.records("question") if q["attrs"].get("source") == "confirm"]
+    assert [q["attrs"]["record"] for q in asked] == [comps[0]["id"]]  # конкурента подтверждает человек
     facts = stage1.analyze_domain(pl)
     assert [f["title"] for f in facts] == ["Пациент"]
 
     found = stage1.find_problems(pl)
     assert [p["title"] for p in found["created"]] == ["Не дозвониться в регистратуру"]
     assert "Висящая проблема" in found["skipped"][0]
-    assert found["questions"][0]["title"] == "Нужны ли ночные записи?"
+    assert found["questions"] == []  # вопросы задаёт интервью, а не автор шага
     problem = found["created"][0]
 
     with pytest.raises(PipelineError) as err:
@@ -272,20 +257,22 @@ def test_autopilot_walks_the_stage_and_stops_for_the_human(tmp_path):
     agent.rules = [
         (k, _inject(v, "c9") if k.startswith("Для каждой") else v) for k, v in agent.rules
     ]
-    log = stage1.autopilot(pl)
+    log = stage1.autopilot(pl)  # «Идея» строится на диалоге: автопилот спрашивает и ждёт человека
+    assert [e.get("step") for e in log] == ["questions", None]
+    assert "ваш ответ" in log[-1]["stop"] and not pl.bank.records("boundary")
+    assert not any(q["attrs"].get("answered_by") == "analyst" for q in pl.bank.records("question"))
+    log = drive(pl)  # человек отвечает (в тесте — первым вариантом), автопилот идёт дальше
     steps_done = [e.get("step") for e in log]
-    assert steps_done[0] == "questions" and "boundaries" in steps_done
-    assert "gate_problems" in steps_done
+    assert "boundaries" in steps_done and "gate_problems" in steps_done
     # в автопилоте ворота проходят без человека; на требованиях id проблемы другой — пропуск
     assert pl.bank.records("problem", status=ACCEPTED)
-    assert any(q["attrs"].get("answered_by") == "analyst" for q in pl.bank.records("question")[:2])
+    assert all(q["attrs"].get("answered_by") == "human" for q in pl.bank.records("question")[:2])
 
 
 def test_gate_returns_on_low_score_and_evaluator_prompt(tmp_path):
     pl, agent = build(tmp_path)
     stage1.set_area(pl, "Сайт")
-    stage1.propose_questions(pl)
-    stage1.answer_question(pl, "c2", "пациенты")
+    interview_questions(pl)
     stage1.build_boundaries(pl)
     stage1.find_problems(pl)
     low = dict(ALL_KEYS)
@@ -299,10 +286,20 @@ def test_gate_returns_on_low_score_and_evaluator_prompt(tmp_path):
     assert pl.bank.records("problem")[0]["status"] == PROPOSED
 
 
-def test_competitors_work_even_if_the_business_profile_is_empty(tmp_path):
+def test_competitors_are_searched_in_the_frame_the_human_gave_and_confirmed_one_by_one(tmp_path):
     pl, agent = build(tmp_path)
-    stage1.set_area(pl, "Личный блог")
-    agent.rules.insert(0, ("Опиши БИЗНЕС этой идеи", {}))
-    stage1.research_competitors(pl)
+    area = stage1.set_area(pl, "Личный блог")
+    asked = pl.bank.add(
+        "question", "Кого считаем конкурентом?", parents=[area["id"]],
+        attrs={"options": [], "answer": "другие личные блоги про путешествия", "topic": "competitors"},
+    )  # fmt: skip
+    comps = stage1.research_competitors(pl)
     search = next(c["prompt"] for c in agent.calls if c["web"])
-    assert "Бизнес: клиент" not in search and "реальных конкурентов" in search
+    assert "другие личные блоги про путешествия" in search and "СТРОГО в этих рамках" in search
+    assert "Опиши БИЗНЕС" not in " ".join(c["prompt"] for c in agent.calls)  # своих догадок о бизнесе нет
+    (question,) = [q for q in pl.bank.records("question") if q["attrs"].get("source") == "confirm"]
+    assert asked["id"] != question["id"] and "ДокторПлюс" in question["title"]
+    assert question["attrs"]["options"][0].startswith("Да")
+    stage1.answer_question(pl, question["id"], "Нет, убрать")
+    flow.on_answer(pl, question["id"])  # «нет» — запись уходит, а не остаётся «на всякий случай»
+    assert pl.bank.get(comps[0]["id"])["status"] == "rejected"

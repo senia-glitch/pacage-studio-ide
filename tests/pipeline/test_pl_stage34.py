@@ -6,6 +6,7 @@ from fake_llm import (
     FakeCoder,
     FakeTests,
     agents_with,
+    drive,
     fake_stack,
     full_rules,
     red_then_green,
@@ -36,7 +37,7 @@ def build(tmp_path, tamper=None, red=("frontend/tests/pipeline/t_c.test.ts",)):
 def through_stage2(pl):
     pl.settings.set_mode("autopilot")
     stage1.set_area(pl, "Сайт записи к врачу")
-    flow.autopilot(pl, stop_after=2)
+    drive(pl, stop_after=2)
     assert pl.keeper.last("schema")["state"] == "passed"
     pl.settings.set_mode("gates")
 
@@ -206,7 +207,7 @@ def test_autopilot_walks_all_four_stages(tmp_path):
     pl, agent = build(tmp_path, red=())
     pl.settings.set_mode("autopilot")
     stage1.set_area(pl, "Сайт записи к врачу")
-    log = flow.autopilot(pl, stop_after=4)
+    log = drive(pl, stop_after=4)
     assert log[-1] == {"stop": "этап 4 пройден"}, log[-3:]
     for key in ("gate_frontend", "gate_backend", "style", "implement", "mocks"):
         assert any(e.get("step") == key for e in log), key

@@ -1,5 +1,13 @@
 import pytest
-from fake_llm import ALL_KEYS, GATE_KEYS_2, agents_with, full_rules
+from fake_llm import (
+    ALL_KEYS,
+    GATE_KEYS_2,
+    agents_with,
+    confirm_all,
+    drive,
+    full_rules,
+    interview_questions,
+)
 
 from studio.pipeline import Pipeline, PipelineError, flow, stage1, stage2
 from studio.pipeline.diagrams import normalize_columns, normalize_diagram, schema_problems, snake
@@ -14,11 +22,12 @@ def accept(pl, gate_key):
 
 def finish_stage1(pl):
     stage1.set_area(pl, "Сайт записи к врачу")
-    stage1.propose_questions(pl)
+    interview_questions(pl)
     stage1.answer_question(pl, "c2", "пациенты")
     stage1.answer_question(pl, "c3", "нет")
     stage1.build_boundaries(pl)
     stage1.analyze_domain(pl)
+    confirm_all(pl)
     stage1.find_problems(pl)
     accept(pl, "problems")
     stage1.write_requirements(pl)
@@ -176,9 +185,9 @@ def test_diagram_and_schema_helpers():
 def test_autopilot_runs_both_stages_without_human(tmp_path):
     pl, agent = build(tmp_path)
     pl.settings.set_mode("autopilot")
-    assert flow.autopilot(pl) == [{"step": "area", "stop": "нужна идея"}]
+    assert drive(pl) == [{"step": "area", "stop": "нужна идея"}]
     stage1.set_area(pl, "Сайт записи к врачу")
-    log = flow.autopilot(pl, stop_after=2)
+    log = drive(pl, stop_after=2)
     steps = [e.get("step") for e in log]
     assert steps[-1] is None and log[-1] == {"stop": "этап 2 пройден"}
     for needed in (
@@ -218,7 +227,7 @@ def test_autopilot_reworks_after_low_score_then_passes(tmp_path):
     pl, agent = build(tmp_path, evaluator)
     pl.settings.set_mode("autopilot")
     stage1.set_area(pl, "Сайт записи к врачу")
-    log = flow.autopilot(pl, stop_after=2)
+    log = drive(pl, stop_after=2)
     reworked = [e for e in log if e.get("rework")]
     assert reworked and reworked[0]["step"] == "gate_scenarios"
     assert calls["n"] == 2 and log[-1] == {"stop": "этап 2 пройден"}
@@ -247,7 +256,7 @@ def test_autopilot_keeps_improving_until_the_threshold_is_passed(tmp_path):
     pl, agent = build(tmp_path, low_problems([3, 5, 7, 9]))
     pl.settings.set_mode("autopilot")
     stage1.set_area(pl, "Сайт")
-    log = flow.autopilot(pl, stop_after=1)
+    log = drive(pl, stop_after=1)
     assert len([e for e in log if e.get("rework")]) == 3  # три круга улучшения, оценка росла
     last = pl.keeper.last("problems")
     assert last["state"] == "passed" and not last["below"] and last["by"] == "autopilot"
@@ -260,7 +269,7 @@ def test_autopilot_stops_when_the_score_stops_growing_and_never_accepts_below(tm
     pl, _ = build(tmp_path, low_problems([3]))
     pl.settings.set_mode("autopilot")
     stage1.set_area(pl, "Сайт")
-    log = flow.autopilot(pl)
+    log = drive(pl)
     stop = log[-1]["stop"]
     assert stop.startswith("ворота «Проверка проблем» не пройдены после 4 кругов доработки, оценка перестала расти")
     assert "Критерий «" in stop and "Причина по аудиту: формулировки расплывчаты" in stop

@@ -1,6 +1,6 @@
 """Ничего не висит: запись без родителя агент встраивает в цепочку или отклоняет."""
 
-from fake_llm import agents_with
+from fake_llm import agents_with, drive
 from pl_helpers import idea
 
 from studio.pipeline import Pipeline, flow, integrate
@@ -143,6 +143,6 @@ def test_autopilot_integrates_when_the_gate_reports_a_hanging_record(tmp_path, m
     queue = [item]
     monkeypatch.setattr(flow, "next_step", lambda pl, skip=frozenset(): queue.pop(0) if queue else None)
     monkeypatch.setattr(flow, "run_step", lambda pl, stage, key: pl.keeper.open("requirements"))
-    log = flow.autopilot(pl, limit=3)
+    log = drive(pl, limit=3)
     assert log[0]["gate"] == "returned" and log[0]["integrated"]["linked"]
     assert integrate.orphans(pl) == []

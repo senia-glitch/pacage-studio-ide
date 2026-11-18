@@ -88,6 +88,10 @@ def _summary(result) -> str:
                     f"отклонено: {len(done['rejected'])}; " + head
                 )
             return head + (f" — {why}" if why else "")
+        if result.get("asked") or result.get("waiting"):
+            return "студия задала вопрос: ответьте на него, и она спросит дальше или запишет"
+        if "refined" in result and "created" not in result:
+            return f"ответ учтён, изменено записей: {result['refined']}"
         if "discussed" in result:
             reply = result["discussed"]
             if reply["questions"] or reply["conflicts"]:
@@ -223,7 +227,8 @@ class PipelineService:
             "waves": waves.info(pl),
             "debt": debt.summary(pl),
             "review": review.view(pl),
-            "questions": [_brief(q) for q in stage1.unanswered(pl)],
+            "questions": [_brief(q) for q in self._visible_questions(pl)],
+            "queued": max(0, len(stage1.unanswered(pl)) - len(self._visible_questions(pl))),
             "unchosen": [
                 {
                     **_brief(r),
@@ -234,6 +239,18 @@ class PipelineService:
                 for r in stage2.unchosen(pl)
             ],
         }
+
+    @staticmethod
+    def _visible_questions(pl: Pipeline) -> list[dict]:
+        """Вопросы «Идеи» человек видит по одному: следующий зависит от ответа на этот."""
+        out, shown = [], False
+        for q in stage1.unanswered(pl):
+            if clarify.human_only(q) and (q.get("attrs") or {}).get("source"):
+                if shown:
+                    continue
+                shown = True
+            out.append(q)
+        return out
 
     def overview(self) -> dict:
         """Для обзора «Система»: начат ли конвейер, идея проекта и сколько принятых сценариев."""
@@ -328,7 +345,7 @@ class PipelineService:
             "stall_rounds": s.stall_rounds,
             "max_rounds": s.max_rounds,
             "gates": [
-                {"key": k, "title": g.title, "stage": g.stage, "criteria": s.criteria(k)}
+                {"key": k, "title": g.title, "stage": g.stage, "threshold": s.gate_threshold(k), "criteria": s.criteria(k)}
                 for k, g in GATES.items()
             ],
             "roles": roles,
@@ -454,11 +471,18 @@ class PipelineService:
             card = stage1.answer_question(
                 pl, str(data.get("id") or ""), str(data.get("answer") or "")
             )
-            batch = (card.get("attrs") or {}).get("batch")
-            if batch and clarify.batch_ready(pl, batch):  # все ответили: студия сама меняет систему
+            question_id = card["id"]
+            if (card.get("attrs") or {}).get("source") == "confirm":
+                flow.on_answer(pl, question_id)  # «Нет» убирает найденную запись: без агента
+            elif flow.needs_work(pl, card):  # студия сама делает следующий шаг: вопрос, правка, ворота
                 with contextlib.suppress(PipelineError):  # занято — применится при следующем ответе
-                    self._start("учёт ваших ответов", lambda: flow.apply_answers(pl, batch))
+                    self._start("учёт вашего ответа", lambda: flow.on_answer(pl, question_id))
             return self.state()
+        if route == "/interview/finish":
+            topic = str(data.get("topic") or "")
+            if not topic:
+                raise PipelineError("nothing_to_do", "Не указана тема")
+            return {"job": self._start("продолжение по сказанному", lambda: flow.finish_topic(pl, topic))}
         if route == "/review/say":
             text = str(data.get("text") or "")
             label = "обсуждение уточнения"
@@ -595,12 +619,14 @@ class PipelineService:
 
     def _criterion_post(self, pl: Pipeline, data: dict) -> dict:
         gate, action = str(data.get("gate") or ""), str(data.get("action") or "set")
-        if action == "add":
+        if action == "threshold":
+            pl.settings.set_gate_threshold(gate, data.get("threshold"))
+        elif action == "add":
             pl.settings.add_criterion(
                 gate,
                 str(data.get("title") or ""),
                 str(data.get("hint") or ""),
-                data.get("threshold", 8),
+                data.get("threshold"),
             )
         elif action == "remove":
             pl.settings.remove_criterion(gate, str(data.get("key") or ""))

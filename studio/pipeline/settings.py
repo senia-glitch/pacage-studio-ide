@@ -29,9 +29,9 @@ def _threshold(value) -> int:
     try:
         number = int(value)
     except (TypeError, ValueError):
-        raise PipelineError("bad_threshold", "Порог — целое число от 1 до 10") from None
-    if not 1 <= number <= 10:
-        raise PipelineError("bad_threshold", "Порог — целое число от 1 до 10")
+        raise PipelineError("bad_threshold", "Порог — целое число от 0 до 10") from None
+    if not 0 <= number <= 10:
+        raise PipelineError("bad_threshold", "Порог — целое число от 0 до 10")
     return number
 
 
@@ -96,11 +96,29 @@ class PipelineSettings:
 
     # ------------------------------------------------------------------ критерии ворот
 
+    def gate_threshold(self, gate_key: str) -> int:
+        """Порог приёмки ворот: оценка критерия не ниже этого числа (по умолчанию 8)."""
+        gate(gate_key)
+        over = (self.data.get("gates") or {}).get(gate_key) or {}
+        return _threshold(over.get("threshold", DEFAULT_THRESHOLD))
+
+    def set_gate_threshold(self, gate_key: str, value) -> None:
+        """Один порог на все критерии ворот: личные пороги критериев сбрасываются."""
+        number = _threshold(value)
+        over = self._gate_over(gate_key)
+        over["threshold"] = number
+        for edit in (over.get("criteria") or {}).values():
+            edit.pop("threshold", None)
+        for custom in over.get("custom") or []:
+            custom.pop("threshold", None)
+        self.save()
+
     def criteria(self, gate_key: str) -> list[dict]:
         """Критерии ворот: умолчания студии плюс ваши правки и ваши собственные критерии."""
         spec = gate(gate_key)
         over = (self.data.get("gates") or {}).get(gate_key) or {}
         edits = over.get("criteria") or {}
+        base = self.gate_threshold(gate_key)
         out = []
         for item in spec.criteria:
             edit = edits.get(item.key) or {}
@@ -109,13 +127,13 @@ class PipelineSettings:
                     "key": item.key,
                     "title": edit.get("title") or item.title,
                     "hint": edit.get("hint") or item.hint,
-                    "threshold": _threshold(edit.get("threshold", DEFAULT_THRESHOLD)),
+                    "threshold": _threshold(edit.get("threshold", base)),
                     "enabled": bool(edit.get("enabled", True)),
                     "custom": False,
                 }
             )
         for custom in over.get("custom") or []:
-            out.append({**custom, "custom": True})
+            out.append({**custom, "threshold": _threshold(custom.get("threshold", base)), "custom": True})
         return out
 
     def enabled_criteria(self, gate_key: str) -> list[dict]:
@@ -153,7 +171,7 @@ class PipelineSettings:
             target["hint"] = hint.strip()
         self.save()
 
-    def add_criterion(self, gate_key: str, title: str, hint: str = "", threshold=8) -> str:
+    def add_criterion(self, gate_key: str, title: str, hint: str = "", threshold=None) -> str:
         title = (title or "").strip()
         if not title:
             raise PipelineError("bad_criterion", "У критерия должно быть название")
@@ -167,7 +185,7 @@ class PipelineSettings:
                 "key": key,
                 "title": title[:120],
                 "hint": (hint or "").strip()[:300],
-                "threshold": _threshold(threshold),
+                **({} if threshold is None else {"threshold": _threshold(threshold)}),
                 "enabled": True,
             }
         )

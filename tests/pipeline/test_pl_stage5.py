@@ -8,6 +8,7 @@ from fake_llm import (
     FakeLauncher,
     FakeTests,
     agents_with,
+    drive,
     fake_stack,
     full_rules,
     red_then_green,
@@ -15,7 +16,7 @@ from fake_llm import (
     rules_stage34,
 )
 
-from studio.pipeline import Pipeline, PipelineError, entry, flow, stage1, stage3, stage5
+from studio.pipeline import Pipeline, PipelineError, entry, stage1, stage3, stage5
 from studio.pipeline.coder import TestResult
 from studio.pipeline.graph import ACCEPTED, STALE
 
@@ -41,7 +42,7 @@ def build(tmp_path, e2e=None):
 def through_stage4(pl):
     pl.settings.set_mode("autopilot")
     stage1.set_area(pl, "Сайт записи к врачу")
-    log = flow.autopilot(pl, stop_after=4)
+    log = drive(pl, stop_after=4)
     assert log[-1] == {"stop": "этап 4 пройден"}
     pl.settings.set_mode("gates")
 
@@ -112,7 +113,7 @@ def test_autopilot_still_asks_the_human_for_final_acceptance(tmp_path):
     pl, _ = build(tmp_path, e2e=[TestResult(True, True, [], "всё зелёное")])
     pl.settings.set_mode("autopilot")
     stage1.set_area(pl, "Сайт записи к врачу")
-    log = flow.autopilot(pl)
+    log = drive(pl)
     steps = [e.get("step") for e in log]
     assert "launch" in steps and "e2e" in steps
     gate_entries = [e for e in log if e.get("step") == "gate_final"]
@@ -120,7 +121,7 @@ def test_autopilot_still_asks_the_human_for_final_acceptance(tmp_path):
     run = pl.keeper.last("final")
     assert run["state"] == "ready"
     pl.decide_gate(run["id"], "accept")
-    assert any(e.get("step") == "finish" for e in flow.autopilot(pl))
+    assert any(e.get("step") == "finish" for e in drive(pl))
 
 
 def test_detect_entries(tmp_path):

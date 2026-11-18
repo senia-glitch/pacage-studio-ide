@@ -17,6 +17,7 @@ from __future__ import annotations
 from . import prompts
 from .engine import Pipeline
 from .errors import PipelineError
+from .gates import GATES
 from .integrate import ROLE_BY_STAGE
 from .kinds import KINDS, stage_of
 from .stage1 import _items, _s
@@ -28,7 +29,7 @@ CLARIFY_STEPS = {
     3: ("plan",),
     4: ("plan",),
 }
-SOURCES = ("clarify", "author", "audit")
+SOURCES = ("clarify", "author", "audit", "interview", "confirm")
 PARENTS = KINDS["question"].parents
 HEAD_GATE = "Замечания ворот к твоей работе"
 HEAD_ANSWERS = "Ответы человека на уточняющие вопросы"
@@ -68,11 +69,38 @@ def _parent(pl: Pipeline, about: str) -> str | None:
     return areas[0]["id"] if areas else None
 
 
+def stage_of_question(q: dict) -> int:
+    """Этап вопроса студии: свой, указанный при создании, или этап ворот, к которым он относится."""
+    attrs = q.get("attrs") or {}
+    if attrs.get("stage"):
+        return int(attrs["stage"])
+    gate = attrs.get("gate")
+    return GATES[gate].stage if gate in GATES else 0
+
+
+def human_only(q: dict) -> bool:
+    """Вопросы «Идеи» решает только человек: ни автопилот, ни студия за него не отвечают."""
+    return stage_of_question(q) == 1
+
+
+def waiting_human(pl: Pipeline) -> list[dict]:
+    """Открытые вопросы «Идеи»: пока они есть, автопилот стоит и ждёт ответа человека."""
+    return [q for q in pending(pl) if human_only(q)]
+
+
 def create(
-    pl: Pipeline, items: list[dict], *, source: str, batch: str, gate: str = ""
+    pl: Pipeline,
+    items: list[dict],
+    *,
+    source: str,
+    batch: str,
+    gate: str = "",
+    extra: dict | None = None,
+    own_batch: bool = False,
 ) -> list[dict]:
     """Записать вопросы в банк (закрытые, с вариантами). Повторы и пустые отбрасываются; сколько
-    вопросов задать — решает критик, лимита на их число нет."""
+    вопросов задать — решает критик, лимита на их число нет. ``own_batch`` — вопрос сам себе пачка
+    (так «Идея» спрашивает по одному: следующий вопрос зависит от ответа на этот)."""
     made: list[dict] = []
     for raw in items:
         text = _s(raw.get("text"), 300)
@@ -86,15 +114,19 @@ def create(
         parent = _parent(pl, about)
         if parent is None:
             continue
-        attrs: dict = {"options": options, "source": source, "batch": batch}
+        attrs: dict = {"options": options, "source": source, "batch": batch, **(extra or {})}
         if gate:
             attrs["gate"] = gate
         if about:
             attrs["refs"] = [about]
-        for extra in ("upstream", "reject"):
-            if raw.get(extra):
-                attrs[extra] = raw[extra]
-        made.append(pl.bank.add("question", text, parents=[parent], attrs=attrs, author="critic"))
+        for field in ("upstream", "reject"):
+            if raw.get(field):
+                attrs[field] = raw[field]
+        card = pl.bank.add("question", text, parents=[parent], attrs=attrs, author="critic")
+        if own_batch:
+            pl.bank.mark(card["id"], "studio", batch=card["id"])
+            card = pl.bank.get(card["id"])
+        made.append(card)
     return made
 
 
@@ -123,22 +155,67 @@ def _critic(pl: Pipeline, stage: int, key: str, new: list[dict]) -> list[dict]:
     return _items(data, "questions")
 
 
+def _critic_idea(pl: Pipeline, key: str, new: list[dict], hints=()) -> list[dict]:
+    """«Идея»: критик смотрит на весь банк и весь диалог и называет ОДИН самый важный вопрос."""
+    from . import interview
+
+    nl = chr(10)
+    doubts = ""
+    if hints:
+        doubts = nl + "Авторы записей сами усомнились:" + nl
+        doubts += nl.join(f"- {_s(h.get('text'), 300)}" for h in hints if isinstance(h, dict))
+    prompt = (
+        f"{interview.dossier(pl)}{nl}{nl}Шаг «{key}» этапа 1 создал записи:{nl}"
+        + nl.join(prompts.line(c) for c in new[:40])
+        + f"{doubts}{nl}{nl}Задай ОДИН самый важный вопрос человеку: противоречие записей между собой, "
+        "с границами, ограничениями или принятым; двусмысленность; то, что студии пришлось бы "
+        "выдумывать. Не спрашивай то, что человек уже сказал (см. диалог) и что можно не уточнять. "
+        "Вопрос закрытый, с 2–4 вариантами; about — код записи. Если всё согласовано — пустой список."
+        + nl
+        + 'Ответ: {"questions": [{"text": "...", "options": ["...", "..."], "about": "c7"}]}'
+    )
+    try:
+        data = pl.llm.ask_json("evaluator", SYSTEM, prompt)
+    except PipelineError:
+        return []  # сбой критика не должен останавливать работу
+    return _items(data, "questions")[:1]
+
+
+def _new_records(pl: Pipeline, since: int, touched=()) -> list[dict]:
+    return [
+        c
+        for c in pl.bank.records()
+        if (int(c["id"][1:]) > since or c["id"] in touched) and c["kind"] != "question"
+    ]
+
+
+def check(
+    pl: Pipeline, key: str, since: int, touched=(), new: list[dict] | None = None, hints=()
+) -> list[dict]:
+    """«Идея»: после шага критик задаёт человеку один вопрос; ответ может изменить записи и породить
+    следующий вопрос (``flow.continue_check``), пока согласовывать нечего."""
+    new = _new_records(pl, since, touched) if new is None else new
+    if not new:
+        return []
+    items = _critic_idea(pl, key, new, hints)
+    extra = {"stage": 1, "step": key, "since": since, "touched": list(touched), "topic": f"check.{key}"}
+    return create(pl, items, source="clarify", batch="", extra=extra, own_batch=True)
+
+
 def after_step(
     pl: Pipeline, stage: int, key: str, before: int, touched: list[str] | tuple[str, ...] = ()
 ) -> list[dict]:
     """После шага: вопросы автора и критика. В «На воротах» они ждут человека, в автопилоте их закрывает
-    студия сама, в «Вручную» вопросов нет."""
+    студия сама (кроме «Идеи»: там отвечает только человек), в «Вручную» вопросов нет."""
     asked = pl.llm.take_questions()
     mode = pl.settings.mode
     if mode == "manual":
         return []
     batch = f"s{stage}.{key}.{before}"
     made: list[dict] = []
-    new = [
-        c
-        for c in pl.bank.records()
-        if (int(c["id"][1:]) > before or c["id"] in touched) and c["kind"] != "question"
-    ]
+    new = _new_records(pl, before, touched)
+    if stage == 1:  # сомнения авторов тоже идут через критика: вопросы не пачкой, а по одному
+        return check(pl, key, before, touched, new, hints=asked) if worth(stage, key) else []
     if worth(stage, key) and new:
         made = create(pl, _critic(pl, stage, key, new), source="clarify", batch=batch)
     if asked:
@@ -204,12 +281,18 @@ def decide(pl: Pipeline, ids: list[str] | None = None) -> list[dict]:
 
 def settle(pl: Pipeline, batch: str) -> None:
     """Автопилот: ответить на вопросы пачки и применить ответы."""
-    ids = [q["id"] for q in batch_questions(pl, batch) if not q["attrs"].get("answer")]
+    ids = [
+        q["id"]
+        for q in batch_questions(pl, batch)
+        if not q["attrs"].get("answer") and not human_only(q)
+    ]
     try:
         if ids:
             decide(pl, ids)
     except PipelineError:
         return  # не ответили — вопросы остаются открытыми, автопилот их не ждёт
+    if any(human_only(q) for q in batch_questions(pl, batch)):
+        return  # «Идея»: ждём ответов человека, сами не отвечаем
     if batch.startswith("s"):
         refine(pl, batch)
         mark_applied(pl, batch)
@@ -303,6 +386,10 @@ def apply_decisions(pl: Pipeline, batch: str) -> dict:
 
 __all__ = [
     "CLARIFY_STEPS",
+    "check",
+    "human_only",
+    "stage_of_question",
+    "waiting_human",
     "after_step",
     "answers_text",
     "apply_decisions",

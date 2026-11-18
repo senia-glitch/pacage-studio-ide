@@ -1,6 +1,6 @@
 """Долг качества: записи ниже порога возвращаются на улучшение с самых ранних ворот."""
 
-from fake_llm import agents_with, full_rules
+from fake_llm import agents_with, drive, full_rules
 from pl_helpers import idea
 
 from studio.pipeline import Pipeline, audit, debt, flow, stage1
@@ -83,12 +83,12 @@ def test_autopilot_brings_the_debt_back_and_passes_the_gates_honestly(tmp_path):
     pl, _ = make(tmp_path)
     pl.settings.set_mode("autopilot")
     stage1.set_area(pl, "Сайт записи к врачу")
-    first = flow.autopilot(pl, stop_after=1)
+    first = drive(pl, stop_after=1)
     assert first[-1] == {"stop": "этап 1 пройден"}
     accepted = pl.bank.records("problem", status="accepted")
     assert accepted
     pl.bank.mark(accepted[0]["id"], "human", below_threshold=True)  # долг: принято ниже порога
-    log = flow.autopilot(pl, stop_after=1)
+    log = drive(pl, stop_after=1)
     assert log[0]["debt"]["gate"] == "problems" and log[0]["debt"]["records"] == [accepted[0]["id"]]
     assert pl.keeper.last("problems")["state"] == "passed" and not pl.keeper.last("problems")["below"]
     assert debt.records(pl) == [] and pl.bank.get(accepted[0]["id"])["status"] == "accepted"
@@ -108,11 +108,11 @@ def test_autopilot_does_not_accept_the_debt_below_threshold_again(tmp_path):
     pl, _ = make(tmp_path, full_rules(evaluator))
     pl.settings.set_mode("autopilot")
     stage1.set_area(pl, "Сайт записи к врачу")
-    assert flow.autopilot(pl, stop_after=1)[-1] == {"stop": "этап 1 пройден"}
+    assert drive(pl, stop_after=1)[-1] == {"stop": "этап 1 пройден"}
     problem = pl.bank.records("problem", status="accepted")[0]
     pl.bank.mark(problem["id"], "human", below_threshold=True)
     mode["bad"] = True
-    log = flow.autopilot(pl, stop_after=1)
+    log = drive(pl, stop_after=1)
     assert log[0]["debt"]["records"] == [problem["id"]]
     assert "оценка перестала расти" in log[-1]["stop"]
     last = pl.keeper.last("problems")
@@ -125,7 +125,7 @@ def test_autopilot_reports_an_error_of_a_special_step(tmp_path):
     pl, _ = make(tmp_path, [])
     idea(pl.bank)
     pl.settings.set_mode("autopilot")
-    log = flow.autopilot(pl, limit=30)
+    log = drive(pl, limit=30)
     assert log[-1]["step"] == "questions" and "нет заготовленного ответа" in log[-1]["stop"]
 
 
@@ -134,6 +134,7 @@ def test_autopilot_stops_instead_of_spinning_on_a_step_that_does_not_move(tmp_pa
     idea(pl.bank)
     pl.settings.set_mode("autopilot")
     monkeypatch.setattr(flow, "_special", lambda pl, key: None)
-    log = flow.autopilot(pl, limit=30)
+    monkeypatch.setattr(flow, "SPECIAL", ("questions", "style", "variants"))
+    log = drive(pl, limit=30)
     assert log[-1] == {"step": "questions", "stop": "шаг «questions» не продвигается: проверьте его вручную"}
     assert len(log) <= 4

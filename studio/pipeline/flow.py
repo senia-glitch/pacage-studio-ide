@@ -13,6 +13,7 @@ from . import (
     clarify,
     debt,
     integrate,
+    interview,
     review,
     stage1,
     stage2,
@@ -25,7 +26,7 @@ from .engine import Pipeline
 from .errors import PipelineError
 from .gates import GATES, STAGE_GATES, gate
 
-SPECIAL = ("questions", "style", "variants")  # шаги, которые автопилот делает в обход run_step
+SPECIAL = ("style", "variants")  # шаги, которые автопилот делает в обход run_step
 LIMIT = 600  # предел шагов за один запуск (защита от зацикливания; доработка и так ограничена)
 STAGES = {1: stage1, 2: stage2, 3: stage3, 4: stage4, 5: stage5}
 
@@ -82,6 +83,8 @@ def run_step(pl: Pipeline, stage: int, key: str):
     result = STAGES[stage].run_step(pl, key)
     if key.startswith("gate_") or key == "questions":
         return result
+    if isinstance(result, dict) and ("asked" in result or "waiting" in result):
+        return result  # «Идея»: студия спросила (или ждёт ответа) — записей ещё нет
     result = _repair(pl, stage, key, result)
     made = clarify.after_step(pl, stage, key, before)  # критик и сомнения авторов → вопросы
     review.after_step(pl, stage, key)  # «Идея»: после каждого шага — описание банка, в любом режиме
@@ -186,14 +189,110 @@ def apply_answers(pl: Pipeline, batch: str):
 
 
 def answer_for_me(pl: Pipeline, ids: list[str]):
-    """«Решить за меня»: студия отвечает на вопросы по своим правилам и применяет ответы."""
+    """«Решить за меня»: студия по просьбе человека отвечает на вопросы по своим правилам и продолжает."""
     done = clarify.decide(pl, ids)
-    batches = list(dict.fromkeys(q["attrs"].get("batch") for q in done if q["attrs"].get("batch")))
     out: dict = {"answered": len(done)}
-    for batch in batches:
-        if clarify.batch_ready(pl, batch):
-            out["applied"] = apply_answers(pl, batch)
+    for question in done:
+        step = on_answer(pl, question["id"])
+        if step:
+            out["next"] = step
     return out
+
+
+# ---------------------------------------------------------------------- диалог «Идеи»
+
+
+def needs_work(pl: Pipeline, question: dict) -> bool:
+    """После ответа нужна работа студии (следующий вопрос, правка записей, доработка ворот)?"""
+    attrs = question.get("attrs") or {}
+    source = attrs.get("source")
+    if source == "interview" or (source == "clarify" and attrs.get("step")):
+        return True
+    if source == "audit" and attrs.get("dialog"):
+        return True
+    batch = attrs.get("batch")
+    return bool(batch and source != "confirm" and clarify.batch_ready(pl, batch))
+
+
+def on_answer(pl: Pipeline, question_id: str):
+    """Человек ответил на вопрос студии: она сама делает следующий шаг.
+
+    * интервью шага «Идеи» — следующий вопрос, а когда по теме всё ясно — запись из ответов;
+    * проверка записей критиком — правка записей и следующий вопрос, если есть что согласовывать;
+    * обсуждение ворот — следующий вопрос, а потом доработка по ответам и ворота заново;
+    * подтверждение найденного — «Нет» убирает запись;
+    * вопросы других этапов — когда ответили на всю пачку, студия меняет систему."""
+    card = pl.bank.get(question_id)
+    attrs = card.get("attrs") or {}
+    source, batch = attrs.get("source"), attrs.get("batch")
+    if not attrs.get("answer"):
+        return None
+    if source == "confirm":
+        return interview.apply_confirm(pl, card)
+    if source == "interview":
+        decided = clarify.apply_decisions(pl, batch) if batch else {}  # «менять принятое?» → да
+        clarify.mark_applied(pl, batch)
+        out = continue_interview(pl, attrs.get("topic", ""))
+        out = out if isinstance(out, dict) else {"created": out or []}  # шаги-списки: созданные записи
+        return {**out, "decided": decided}
+    if source == "clarify" and attrs.get("step"):
+        return continue_check(pl, card)
+    if source == "audit" and attrs.get("dialog"):
+        return continue_dialog(pl, batch)
+    if batch and clarify.batch_ready(pl, batch):
+        return apply_answers(pl, batch)
+    return None
+
+
+def continue_interview(pl: Pipeline, topic: str):
+    """Следующий вопрос темы или, если по ней всё ясно, запись из ответов (с проверкой критиком)."""
+    asked = interview.step(pl, topic)
+    if asked is not None:
+        return asked
+    if topic == "questions":
+        return {"done": topic}
+    return run_step(pl, 1, topic)
+
+
+def continue_check(pl: Pipeline, question: dict):
+    """Ответ на вопрос критика: правим записи, о которых спрашивали, и спрашиваем дальше."""
+    attrs, batch = question["attrs"], question["id"]
+    changed = clarify.refine(pl, batch)
+    decided = clarify.apply_decisions(pl, batch)
+    clarify.mark_applied(pl, batch)
+    made = clarify.check(pl, attrs["step"], int(attrs.get("since") or 0), attrs.get("touched") or ())
+    if not made:
+        review.after_step(pl, 1, attrs["step"])  # согласовано: описание «Идеи» заново
+    return {"refined": changed, "decided": decided, "asked": [q["id"] for q in made]}
+
+
+def continue_dialog(pl: Pipeline, run_id: str):
+    """Обсуждение не прошедших ворот: пока есть о чём спросить — спрашиваем, потом дорабатываем."""
+    run = pl.keeper.run(run_id)
+    made = interview.discuss(pl, run)
+    if made:
+        return {"asked": [made["id"]], "gate": run["gate"]}
+    return apply_answers(pl, run_id)
+
+
+def finish_topic(pl: Pipeline, topic: str):
+    """«Достаточно»: человек закончил обсуждение темы, студия идёт дальше по тому, что уже сказано."""
+    if topic == "questions" and not any(
+        (q.get("attrs") or {}).get("answer") for q in pl.bank.records("question")
+    ):
+        raise PipelineError("no_answers", "Ответьте хотя бы на один вопрос: тогда можно сказать «Достаточно»")
+    interview.skip_open(pl, topic)
+    if topic.startswith("check."):
+        review.after_step(pl, 1, topic[len("check.") :])
+        return {"finished": topic}
+    if topic.startswith("gate."):
+        run = pl.keeper.run(topic[len("gate.") :])
+        if run["gate"] in REWORK and run["state"] == "returned":
+            rework(pl, run["gate"], run)
+        clarify.mark_applied(pl, run["id"])
+        return pl.run_gate(run["gate"], gate_facts(pl, run["gate"]))
+    interview.mark_done(pl, topic)
+    return continue_interview(pl, topic)
 
 
 # ---------------------------------------------------------------------- автопилот
@@ -201,11 +300,7 @@ def answer_for_me(pl: Pipeline, ids: list[str]):
 
 def _special(pl: Pipeline, key: str) -> None:
     """Шаги, которые автопилот делает сам, без вопросов человеку."""
-    if key == "questions":
-        if not pl.bank.records("question"):
-            stage1.propose_questions(pl)
-        stage1.auto_answer(pl)
-    elif key == "style":
+    if key == "style":
         stage3.build_style(pl, "light")  # в автопилоте — стандартная тема без вопросов
     elif key == "variants":
         stage2.propose_variants(pl)
@@ -229,6 +324,10 @@ def autopilot(pl: Pipeline, limit: int = LIMIT, stop_after: int | None = None) -
         reopened = debt.reopen(pl)  # долг «ниже порога» — на улучшение, с ранних ворот
         if reopened:
             log.append({"debt": reopened})
+        waiting = clarify.waiting_human(pl)
+        if waiting:  # «Идея» строится только на диалоге с человеком: автопилот ждёт его ответа
+            log.append({"stop": "нужен ваш ответ на вопрос студии (этап «Идея»)"})
+            break
         item = next_step(pl, tried)
         if item is None:
             log.append({"stop": "все шаги пройдены"})
@@ -281,6 +380,11 @@ def autopilot(pl: Pipeline, limit: int = LIMIT, stop_after: int | None = None) -
                     entry["fixed"] = fixed
                     log.append(entry)
                     continue  # ворота пройдут заново уже без них
+                if clarify.waiting_human(pl):
+                    # «Идея»: замечания ворот студия обсуждает с человеком, а не решает за него
+                    entry["stop"] = "ворота не пройдены: студия ждёт вашего ответа в обсуждении замечаний"
+                    log.append(entry)
+                    break
                 if result.get("stuck") or gate_key not in REWORK:
                     # ниже порога автопилот не принимает: оценка перестала расти — зовём человека
                     entry["stop"] = advice.explain(pl, result)

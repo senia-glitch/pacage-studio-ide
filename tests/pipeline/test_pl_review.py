@@ -175,7 +175,10 @@ def test_cancel_drops_the_discussion(tmp_path):
 
 def test_there_is_no_limit_on_the_number_of_questions(tmp_path):
     many = {"questions": [{"text": f"Вопрос {i}?", "options": ["Да", "Нет"], "about": "c3"} for i in range(7)]}
-    pl, _ = make(tmp_path, [(CRITIC, many)])
+    pl, _ = make(tmp_path / "later", [(CRITIC, many)])
     idea(pl.bank)
-    assert len(clarify.after_step(pl, 1, "problems", 0)) == 7
+    assert len(clarify.after_step(pl, 2, "scenarios", 0)) == 7  # других этапов: критик спрашивает всё нужное
     assert not hasattr(clarify, "MAX_QUESTIONS")
+    pl, _ = make(tmp_path / "idea", [(CRITIC, many)])
+    idea(pl.bank)
+    assert len(clarify.after_step(pl, 1, "problems", 0)) == 1  # в «Идее» — по одному, следующий зависит от ответа

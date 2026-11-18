@@ -53,8 +53,12 @@ def reach_gate(svc):
     svc.post(f"{P}/start", {})
     svc.post(f"{P}/area", {"text": "Сайт записи к врачу"})
     run_job(svc, 1, "questions")
-    for q in svc.state()["questions"]:
-        svc.post(f"{P}/answer", {"id": q["id"], "answer": "пациенты"})
+    for _ in range(10):  # студия спрашивает по одному: следующий вопрос — после ответа на этот
+        questions = svc.state()["questions"]
+        if not questions:
+            break
+        svc.post(f"{P}/answer", {"id": questions[0]["id"], "answer": "пациенты"})
+        svc.wait()
     run_job(svc, 1, "boundaries")
     run_job(svc, 1, "problems")
 
@@ -139,6 +143,15 @@ def test_autopilot_job_and_record_tools(tmp_path):
     svc.post(f"{P}/area", {"text": "Сайт записи к врачу"})
     result = svc.post(f"{P}/autopilot", {})
     svc.wait(60)
+    for _ in range(10):  # «Идея» строится на диалоге: автопилот ждёт ответов человека
+        questions = svc.state()["questions"]
+        if not questions:
+            break
+        assert "ответ" in svc.job_view()["result"]
+        svc.post(f"{P}/answer", {"id": questions[0]["id"], "answer": questions[0]["attrs"]["options"][0]})
+        svc.wait(60)
+        svc.post(f"{P}/autopilot", {})
+        svc.wait(60)
     job = svc.job_view()
     assert job["error"] == "" and job["result"].startswith("выполнено шагов")
     state = svc.state()
@@ -238,7 +251,7 @@ def test_http_routes_are_human_only_and_errors_are_plain(demo: Path) -> None:
             status, body = call(srv, "GET", f"{P}/state", srv.token)
             if not body["job"]["running"]:
                 break
-        assert body["job"]["result"] == "создано записей: 2" and len(body["questions"]) == 2
+        assert body["job"]["result"].startswith("студия задала вопрос") and len(body["questions"]) == 1  # по одному
         assert (demo / ".studio" / "bank").is_dir()
 
 
@@ -501,7 +514,7 @@ def test_an_answer_starts_the_studio_work_and_decide_for_me_is_a_job(tmp_path):
     third = clarify.create(pl, [{"text": "Ещё?", "options": ["Да"], "about": problem["id"]}], source="clarify", batch="s1.problems.9")[0]
     svc.post(f"{P}/answer", {"id": third["id"], "answer": "Да"})  # последний ответ пачки сам запускает работу
     svc.wait()
-    assert svc.job["label"] == "учёт ваших ответов" and not svc.job_view()["error"]
+    assert svc.job["label"] == "учёт вашего ответа" and not svc.job_view()["error"]
 
 
 def test_review_routes_describe_discuss_apply_and_cancel(tmp_path):

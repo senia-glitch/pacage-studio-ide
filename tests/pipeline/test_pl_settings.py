@@ -30,6 +30,29 @@ def test_criteria_are_independent_per_gate_and_persist(tmp_path):
     assert all(c["threshold"] == 8 for c in again.criteria("problems"))
 
 
+def test_the_gate_has_one_threshold_that_can_be_any_number_from_0_to_10(tmp_path):
+    settings = PipelineSettings(tmp_path)
+    assert settings.gate_threshold("problems") == 8
+    settings.set_criterion("schema", "extensibility", threshold=9)
+    key = settings.add_criterion("schema", "Простота", "", threshold=3)
+    settings.set_gate_threshold("schema", 5)
+    again = PipelineSettings(tmp_path)
+    assert again.gate_threshold("schema") == 5 and again.gate_threshold("problems") == 8
+    assert all(c["threshold"] == 5 for c in again.criteria("schema"))  # личные пороги сброшены
+    again.set_criterion("schema", "extensibility", threshold=9)  # а потом можно задать свой
+    assert next(c for c in again.criteria("schema") if c["key"] == "extensibility")["threshold"] == 9
+    new = again.add_criterion("schema", "Своё")
+    assert next(c for c in again.criteria("schema") if c["key"] == new)["threshold"] == 5
+    assert key.startswith("custom")
+    for bad in (-1, 11, "x"):
+        with pytest.raises(PipelineError):
+            again.set_gate_threshold("schema", bad)
+    again.set_gate_threshold("schema", 0)  # любую: хоть «принимаем что угодно»
+    assert again.gate_threshold("schema") == 0
+    again.reset_gate("schema")
+    assert again.gate_threshold("schema") == 8
+
+
 def test_custom_criteria_add_edit_remove_and_reset(tmp_path):
     settings = PipelineSettings(tmp_path)
     key = settings.add_criterion("schema", "Простота миграций", "легко менять", threshold=9)

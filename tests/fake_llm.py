@@ -214,17 +214,71 @@ def full_rules(evaluator=None):
     return rules
 
 
+def interview_rule(prompt):
+    """Интервью «Идеи» в тестах: два вопроса о границах, по остальным темам вопросов нет."""
+    if "Тема сейчас: «Границы системы»" in prompt:
+        if "Кто пользуется системой?" not in prompt:
+            return {
+                "done": False,
+                "question": {"text": "Кто пользуется системой?", "options": ["пациенты", "врачи"]},
+            }
+        if "Нужна ли оплата?" not in prompt:
+            return {
+                "done": False,
+                "question": {"text": "Нужна ли оплата?", "options": ["нет", "да"]},
+            }
+    return {"done": True, "why": "всё ясно"}
+
+
+def interview_questions(pl, topic="questions"):
+    """Пройти интервью темы: отвечаем первым вариантом, пока студия не скажет «всё ясно»."""
+    from studio.pipeline import flow, interview
+
+    for _ in range(30):
+        out = interview.step(pl, topic)
+        if out is None:
+            return
+        for qid in out.get("asked") or out.get("waiting") or []:
+            options = pl.bank.get(qid)["attrs"].get("options") or ["да"]
+            pl.bank.mark(qid, "human", answer=options[0], answered_by="human")
+            flow.on_answer(pl, qid)
+
+
+def confirm_all(pl):
+    """Человек подтверждает всё найденное в сети («Да, верно»)."""
+    from studio.pipeline import clarify, flow
+
+    for q in [q for q in clarify.pending(pl) if q["attrs"].get("source") == "confirm"]:
+        pl.bank.mark(q["id"], "human", answer=q["attrs"]["options"][0], answered_by="human")
+        flow.on_answer(pl, q["id"])
+
+
+def drive(pl, **kwargs):
+    """Автопилот «Идеи» ждёт ответов человека: отвечаем первым вариантом и запускаем дальше."""
+    from studio.pipeline import clarify, flow
+
+    log = []
+    for _ in range(60):
+        part = flow.autopilot(pl, **kwargs)
+        waiting = clarify.waiting_human(pl)
+        log += [
+            e
+            for e in part
+            if not (e.get("stop") or "").startswith(("нужен ваш ответ", "ворота не пройдены: студия ждёт"))
+        ]
+        if not waiting:
+            return log
+        question = waiting[0]
+        options = question["attrs"].get("options") or ["да"]
+        pl.bank.mark(question["id"], "human", answer=options[0], answered_by="human")
+        flow.on_answer(pl, question["id"])
+    return log
+
+
 def stage1_rules_dynamic(requirements):
     return [
-        (
-            "Задай НОВЫЕ",
-            {
-                "questions": [
-                    {"text": "Кто пользуется системой?", "options": ["пациенты", "врачи"]},
-                    {"text": "Нужна ли оплата?", "options": ["да", "нет"]},
-                ]
-            },
-        ),
+        ("Тема сейчас:", interview_rule),
+        ("Критерии ворот расплывчаты", {"done": True, "why": "вопросов нет"}),
         (
             "Ответь на вопросы по правилам студии",
             {"answers": [{"id": "c2", "answer": "пациенты"}, {"id": "c3", "answer": "нет"}]},
@@ -245,7 +299,6 @@ def stage1_rules_dynamic(requirements):
                 ]
             },
         ),
-        ("Опиши БИЗНЕС этой идеи", {"client": "пациент", "need": "записаться", "category": "запись к врачу", "queries": ["запись к врачу онлайн"], "not_competitors": "конструкторы сайтов"}),
         ("реальных конкурентов", {"competitors": []}),
         (
             "Опиши предметную область",

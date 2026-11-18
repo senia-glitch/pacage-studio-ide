@@ -64,12 +64,13 @@ function numbersBlock(ctx, data) {
 }
 
 function gatesBlock(ctx, data) {
-  const sec = h("section", {class: "pl-sec"}, h("h3", null, "Критерии ворот"), h("p", {class: "hint"}, "У каждых ворот свой список. Оценка 0–10 ставится по КАЖДОМУ критерию, ворота пройдены, только если каждый не ниже своего порога (по умолчанию 8). Всё уже заполнено — править необязательно."));
+  const sec = h("section", {class: "pl-sec"}, h("h3", null, "Критерии ворот"), h("p", {class: "hint"}, "У каждых ворот свой список. Оценка 0–10 ставится по КАЖДОМУ критерию, ворота пройдены, только если каждый не ниже порога. Порог задаётся для ворот целиком (любое число от 0 до 10, по умолчанию 8); при желании отдельному критерию можно поставить свой. Всё уже заполнено — править необязательно."));
   for (const gate of data.gates) {
     const isOpen = open.has(gate.key);
     const box = h("div", {class: "pl-gcrit" + (isOpen ? " open" : "")});
     box.append(h("div", {class: "pl-ghead", onclick: () => { isOpen ? open.delete(gate.key) : open.add(gate.key); ctx.go("settings"); }}, h("span", null, isOpen ? "▾" : "▸"), h("b", null, ` Этап ${gate.stage} · ${gate.title}`), h("span", {class: "hint"}, ` ${gate.criteria.filter((c) => c.enabled).length} из ${gate.criteria.length} критериев включено`)));
     if (isOpen) {
+      box.append(gateThresholdRow(ctx, gate));
       for (const c of gate.criteria) box.append(criterionRow(ctx, gate, c));
       box.append(addRow(ctx, gate), h("button", {class: "ghost", onclick: () => save(ctx, "/api/pipeline/criterion", {gate: gate.key, action: "reset"})}, "вернуть по умолчанию"));
     }
@@ -78,8 +79,21 @@ function gatesBlock(ctx, data) {
   return sec;
 }
 
+function gateThresholdRow(ctx, gate) {
+  const threshold = h("input", {type: "number", min: 0, max: 10, value: gate.threshold, class: "pl-num", "data-focus": gate.key + ":threshold"});
+  return h(
+    "div",
+    {class: "pl-crit gate"},
+    h("b", null, "Порог приёмки этих ворот"),
+    h("span", {class: "hint"}, "оценка по каждому критерию не ниже этого числа; сбрасывает личные пороги критериев"),
+    h("span", {class: "spacer"}),
+    threshold,
+    h("button", {onclick: () => save(ctx, "/api/pipeline/criterion", {gate: gate.key, action: "threshold", threshold: Number(threshold.value)})}, "ок"),
+  );
+}
+
 function criterionRow(ctx, gate, c) {
-  const threshold = h("input", {type: "number", min: 1, max: 10, value: c.threshold, class: "pl-num"});
+  const threshold = h("input", {type: "number", min: 0, max: 10, value: c.threshold, class: "pl-num"});
   return h(
     "div",
     {class: "pl-crit" + (c.enabled ? "" : " off")},
@@ -97,7 +111,7 @@ function criterionRow(ctx, gate, c) {
 function addRow(ctx, gate) {
   const title = h("input", {type: "text", placeholder: "свой критерий"});
   const hint = h("input", {type: "text", placeholder: "что значит высокая оценка"});
-  const threshold = h("input", {type: "number", min: 1, max: 10, value: 8, class: "pl-num"});
+  const threshold = h("input", {type: "number", min: 0, max: 10, value: gate.threshold, class: "pl-num"});
   return h("div", {class: "pl-crit add"}, title, hint, "порог ", threshold, h("button", {onclick: () => title.value.trim() && save(ctx, "/api/pipeline/criterion", {gate: gate.key, action: "add", title: title.value, hint: hint.value, threshold: Number(threshold.value)})}, "+ добавить"));
 }
 

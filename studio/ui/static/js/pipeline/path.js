@@ -109,8 +109,8 @@ function stepsRow(ctx, stage) {
     "div",
     {class: "pl-steps"},
     items.map((step) => {
-      const agent = step.role && !["area"].includes(step.key) && step.key !== "questions";
-      const runnable = !["area", "questions"].includes(step.key) && !step.key.startsWith("planned_");
+      const agent = step.role && !["area"].includes(step.key) && step.key !== "questions";  // «1.2» — диалог, не повторяется
+      const runnable = step.key !== "area" && !step.key.startsWith("planned_");
       const clickable = step.state === "available" && runnable && !running;
       return h(
         "div",
@@ -253,10 +253,16 @@ function questionsPanel(ctx) {
   if (!questions.length) return null;
   const studio = questions.some((q) => q.attrs && q.attrs.source);
   const running = ctx.state.job && ctx.state.job.running;
-  const wrap = h("div", {class: "pl-block"}, h("div", {class: "pl-label"}, studio ? "Вопросы студии — ответьте, и она сама доработает систему" : "1.2 Уточняющие вопросы — ответьте"));
+  const queued = ctx.state.queued || 0;
+  const label = studio ? "Вопрос студии — следующий вопрос зависит от вашего ответа" + (queued ? ` (в очереди ещё: ${queued})` : "") : "1.2 Уточняющие вопросы — ответьте";
+  const wrap = h("div", {class: "pl-block"}, h("div", {class: "pl-label"}, label));
   for (const q of questions) {
     const input = h("input", {type: "text", placeholder: "или свой ответ"});
     const send = (answer) => ctx.act("/api/pipeline/answer", {id: q.id, answer});
+    const topic = q.attrs.topic || "";
+    const finish = topic && !topic.startsWith("confirm.") && q.attrs.source !== "author"
+      ? h("button", {class: "ghost", disabled: running, title: "Хватит вопросов по этой теме: студия пойдёт дальше по тому, что уже сказано", onclick: () => ctx.act("/api/pipeline/interview/finish", {topic})}, topic.startsWith("gate.") ? "Достаточно, дорабатывай" : "Достаточно")
+      : null;
     wrap.append(
       h(
         "div",
@@ -269,11 +275,11 @@ function questionsPanel(ctx) {
           input,
           h("button", {class: "ghost", onclick: () => input.value.trim() && send(input.value.trim())}, "Ответить"),
           h("button", {class: "ghost", disabled: running, title: "Студия ответит сама по своим правилам", onclick: () => ctx.act("/api/pipeline/answer/auto", {ids: [q.id]})}, "Решить за меня"),
+          finish,
         ),
       ),
     );
   }
-  if (questions.length > 1) wrap.append(h("div", {class: "acts"}, h("button", {class: "ghost", disabled: running, onclick: () => ctx.act("/api/pipeline/answer/auto", {ids: questions.map((q) => q.id)})}, "Решить за меня всё")));
   return wrap;
 }
 

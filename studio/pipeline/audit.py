@@ -17,7 +17,6 @@ from . import clarify, prompts
 from .engine import Pipeline
 from .errors import PipelineError
 from .gates import GATES
-from .kinds import stage_of
 from .stage1 import _items, _s
 
 SYSTEM = (
@@ -43,6 +42,10 @@ def _prompt(pl: Pipeline, run: dict) -> str:
         lines.append(f"- проверка кодом ({found['code']}): {found['message']}")
     subject = prompts.render(pl.bank, *spec.subject)
     above = prompts.render(pl.bank, "area", "boundary", "constraint", "problem", "requirement")
+    if spec.stage == 1:
+        from . import interview
+
+        above = interview.dossier(pl)  # «Идея»: весь банк и весь диалог, а не выборка
     return (
         f"Ворота «{spec.title}» (этап {spec.stage}) не пройдены.\n"
         + "Замечания:\n"
@@ -65,7 +68,6 @@ def _prompt(pl: Pipeline, run: dict) -> str:
 
 def _clean(pl: Pipeline, run: dict, data) -> dict:
     items = []
-    stage = GATES[run["gate"]].stage
     for raw in _items(data, "items")[:MAX_ITEMS]:
         defect, fix = _s(raw.get("defect"), 400), _s(raw.get("fix"), 400)
         questions = [q for q in _items(raw, "questions") if _s(q.get("text"), 300)]
@@ -86,7 +88,7 @@ def _clean(pl: Pipeline, run: dict, data) -> dict:
         change = raw.get("change") if isinstance(raw.get("change"), dict) else {}
         if raw.get("cause") == "upstream" and _exists(pl, target):
             card = pl.bank.get(target)
-            if card["status"] == "accepted" and stage_of(card["kind"]) < stage:
+            if card["status"] == "accepted" and card["kind"] not in GATES[run["gate"]].subject:
                 title, body = _s(change.get("title"), 200), _s(change.get("body"), 800)
                 if title or body:
                     item.update(cause="upstream", target=target, change={"title": title, "body": body})
@@ -129,6 +131,12 @@ def _ask(pl: Pipeline, run: dict, result: dict) -> None:
     ручной работы. Автопилот отвечает на эти вопросы сам (``clarify.settle``)."""
     gate = run["gate"]
     clarify.drop_pending(pl, gate)
+    if GATES[gate].stage == 1:
+        # «Идея»: критерии ворот расплывчаты, поэтому замечания обсуждаются с человеком по одному вопросу
+        from . import interview
+
+        interview.discuss(pl, run)
+        return
     items: list[dict] = []
     for item in result["items"]:
         if item.get("cause") == "ask":

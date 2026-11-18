@@ -83,32 +83,6 @@ def area(pl: Pipeline) -> dict:
 # ---------------------------------------------------------------------- 1.2 Вопросы
 
 
-def propose_questions(pl: Pipeline) -> list[dict]:
-    """1.2 Уточняющие вопросы: закрытые, с вариантами ответа (сколько нужно — решает аналитик)."""
-    root = area(pl)
-    prompt = (
-        f"Идея:\n{root['body']}\n\n"
-        f"Уже заданные вопросы и ответы:\n{prompts.render(pl.bank, 'question')}\n\n"
-        "Задай НОВЫЕ закрытые вопросы (столько, сколько нужно), которые определят границы системы: кто "
-        "пользователи, что входит и что не входит, какие данные, какие внешние системы. Вопрос — "
-        "один, с 2–4 вариантами ответа.\n"
-        'Ответ: {"questions": [{"text": "...", "options": ["...", "..."]}]}'
-    )
-    data = pl.llm.ask_json("analyst", prompts.SYSTEM["analyst"], prompt)
-    created = []
-    for item in _items(data, "questions"):
-        text = _s(item.get("text"), 300)
-        if not text or pl.bank.find("question", text):
-            continue
-        options = [_s(o, 120) for o in (item.get("options") or []) if _s(o, 120)][:4]
-        created.append(
-            pl.bank.add(
-                "question", text, parents=[root["id"]], attrs={"options": options}, author="analyst"
-            )
-        )
-    return created
-
-
 def answer_question(pl: Pipeline, question_id: str, answer: str, by: str = "human") -> dict:
     card = pl.bank.get(question_id)
     if card["kind"] != "question":
@@ -125,22 +99,23 @@ def unanswered(pl: Pipeline) -> list[dict]:
 
 
 def auto_answer(pl: Pipeline, ids: list[str] | None = None) -> list[dict]:
-    """Студия сама отвечает на вопросы (автопилот и «Решить за меня») по своим правилам."""
+    """Студия отвечает на вопросы по просьбе человека («Решить за меня») или в автопилоте по своим
+    правилам. «Идею» в автопилоте студия за человека не решает (см. ``clarify.human_only``)."""
+    from . import interview
+
     todo = [q for q in unanswered(pl) if ids is None or q["id"] in ids]
     if not todo:
         return []
-    root = area(pl)
     listing = "\n".join(
         f"{q['id']}: {q['title']} варианты: {', '.join((q.get('attrs') or {}).get('options') or [])}"
         for q in todo
     )
     prompt = (
-        f"Идея:\n{root['body']}\n\n"
+        f"{interview.dossier(pl)}\n\n"
         "Ответь на вопросы по правилам студии. Опирайся по порядку: 1) границы, ограничения и уже "
         "принятые решения; 2) предметная область и конкуренты; 3) здравый смысл и обычная практика "
         "для такого продукта. Ответы не должны противоречить друг другу и границам.\n\n"
         f"Границы, ограничения и решения:\n{prompts.constitution(pl.bank)}\n\n"
-        f"Предметная область и конкуренты:\n{prompts.render(pl.bank, 'domain', 'competitor')}\n\n"
         f"Вопросы:\n{listing}\n"
         'Ответ: {"answers": [{"id": "c1", "answer": "..."}]}'
     )
@@ -164,11 +139,13 @@ def build_boundaries(pl: Pipeline) -> list[dict]:
     answered = [q for q in pl.bank.records("question") if (q.get("attrs") or {}).get("answer")]
     if not answered:
         raise PipelineError("no_answers", "Сначала ответьте хотя бы на один вопрос (шаг 1.2)")
+    from . import interview
+
     prompt = (
-        f"Идея:\n{root['body']}\n\nВопросы и ответы:\n{prompts.render(pl.bank, 'question')}\n\n"
-        f"Уже записанные границы:\n{prompts.render(pl.bank, 'boundary')}\n\n"
-        "Сформулируй границы системы: каждая — одно короткое утверждение, начинающееся со слов "
-        "«Входит:» или «Не входит:». Укажи коды вопросов, из ответов на которые она следует.\n"
+        f"{interview.dossier(pl)}\n\n"
+        "Сформулируй границы системы ТОЛЬКО из ответов человека (ничего не додумывай): каждая — одно "
+        "короткое утверждение, начинающееся со слов «Входит:» или «Не входит:». Укажи коды вопросов, из "
+        "ответов на которые она следует. Уже записанные границы не повторяй.\n"
         'Ответ: {"boundaries": [{"text": "Входит: ...", "from": ["c2"]}]}'
     )
     data = pl.llm.ask_json("analyst", prompts.SYSTEM["analyst"], prompt)
@@ -209,10 +186,13 @@ def propose_constraints(pl: Pipeline) -> list[dict]:
             author="studio",
         )
         created.append(preset)
+    from . import interview
+
     prompt = (
-        f"Идея:\n{root['body']}\n\nГраницы:\n{prompts.render(pl.bank, 'boundary')}\n\n"
-        "По каждой теме чек-листа предложи разумное ограничение с измеримым значением по "
-        f"умолчанию. Темы: {'; '.join(TOPICS[1:])}.\n"
+        f"{interview.dossier(pl)}\n\n"
+        "Запиши ограничения ТОЛЬКО из ответов человека: по каждой теме, по которой он назвал значение. "
+        "Темы, по которым он сказал «не важно» или ничего не сказал, пропусти; значения не придумывай. "
+        f"Темы: {'; '.join(TOPICS[1:])}.\n"
         'Ответ: {"constraints": [{"topic": "...", "text": "...", "criterion": "Когда ..., система ..."}]}'
     )
     data = pl.llm.ask_json("analyst", prompts.SYSTEM["analyst"], prompt)
@@ -251,58 +231,28 @@ NOT_BUSINESS = (
 NL = chr(10)
 
 
-def business_profile(pl: Pipeline, root: dict) -> dict:
-    """Кто клиент, что он получает и в какой нише работает бизнес: по этому ищут конкурентов."""
-    prompt = NL.join(
-        [
-            f"Идея:{NL}{root['body']}{NL}",
-            "Опиши БИЗНЕС этой идеи, а не её техническую реализацию: кто клиент (кто пользуется "
-            "результатом: читатель, гость, покупатель), какую задачу клиента решает продукт, к "
-            "какой категории бизнеса он относится (кто ещё даёт клиенту то же самое), и 3–5 "
-            "поисковых запросов, которыми клиент искал бы такого поставщика. Отдельно назови, что "
-            "конкурентом НЕ является: инструменты, конструкторы, платформы и сервисы, на которых "
-            "это можно построить.",
-            'Ответ: {"client": "...", "need": "...", "category": "...", "queries": ["..."], '
-            '"not_competitors": "..."}',
-        ]
-    )
-    data = pl.llm.ask_json("researcher", prompts.SYSTEM["researcher"], prompt)
-    if not isinstance(data, dict):
-        return {}
-    queries = [_s(q, 120) for q in (data.get("queries") or []) if _s(q, 120)][:5]
-    return {
-        "client": _s(data.get("client"), 300),
-        "need": _s(data.get("need"), 300),
-        "category": _s(data.get("category"), 200),
-        "queries": queries,
-        "not_competitors": _s(data.get("not_competitors"), 300),
-    }
-
-
 def research_competitors(pl: Pipeline, count: int = 5) -> list[dict]:
-    """1.5 Конкуренты: бизнес идеи → поиск → проверка → анализ. Один раз, дальше — по желанию.
+    """1.5 Конкуренты: ищем ТОЛЬКО в рамках, которые человек задал в диалоге, и каждого найденного
+    человек подтверждает отдельным вопросом (до подтверждения запись остаётся черновиком).
 
     Конкурент — тот, кто даёт клиенту то же самое и занимает ту же нишу. Инструменты, конструкторы
     и платформы, на которых продукт можно собрать, — это технологии, а не конкуренты.
     """
+    from . import interview
+
     root = area(pl)
-    profile = business_profile(pl, root)
-    about = ""
-    if profile.get("category") or profile.get("need"):
-        about = (
-            f"Бизнес: клиент — {profile['client']}; задача клиента — {profile['need']}; "
-            f"категория — {profile['category']}.{NL}"
-            f"Поисковые запросы: {'; '.join(profile['queries'])}.{NL}"
-            f"Конкурентами НЕ считать: {profile['not_competitors']}.{NL}{NL}"
-        )
     prompt = NL.join(
         [
-            f"Идея:{NL}{root['body']}{NL}",
-            f"{about}Найди до {count} реальных конкурентов или аналогов (веб-поиск): те, кто даёт "
-            "тому же клиенту то же самое и работает в той же нише — готовые сайты, сервисы и люди, "
-            "а НЕ инструменты и конструкторы для их создания. Для каждого: название, адрес сайта, "
-            "чем занимается, тип (business — поставщик того же результата; tool — инструмент, "
-            "конструктор или платформа).",
+            interview.dossier(pl),
+            "",
+            "Человек сам определил в диалоге (тема «Конкуренты»), кого искать: кто клиент, что считать "
+            "конкурентом, каких конкурентов он знает и что конкурентом не является. Найди до "
+            f"{count} реальных конкурентов или аналогов (веб-поиск) СТРОГО в этих рамках: названных "
+            "человеком проверь и опиши, остальных ищи среди тех, кто даёт тому же клиенту то же самое. "
+            "Не добавляй исключённое человеком и не выдумывай рамок, которых он не называл. Это готовые "
+            "сайты, сервисы и люди, а НЕ инструменты и конструкторы для их создания. Для каждого: "
+            "название, адрес сайта, чем занимается, тип (business — поставщик того же результата; tool "
+            "— инструмент, конструктор или платформа).",
             'Ответ: {"competitors": [{"name": "...", "url": "https://...", "why": "...", '
             '"kind": "business"}]}',
         ]
@@ -345,6 +295,7 @@ def research_competitors(pl: Pipeline, count: int = 5) -> list[dict]:
                         k: _s(item.get(k), 400) for k in ("strengths", "weaknesses", "takeaway")
                     },
                 )
+        interview.confirm(pl, [pl.bank.get(c["id"]) for c in created], "конкурент", "confirm.competitors")
     return [pl.bank.get(c["id"]) for c in created]
 
 
@@ -352,12 +303,17 @@ def research_competitors(pl: Pipeline, count: int = 5) -> list[dict]:
 
 
 def analyze_domain(pl: Pipeline) -> list[dict]:
-    """1.6 Предметная область: роли, сущности, процессы, нормы. Один раз, дальше — по желанию."""
+    """1.6 Предметная область: роли, сущности, процессы, нормы в рамках диалога; каждый найденный
+    факт человек подтверждает отдельным вопросом."""
+    from . import interview
+
     root = area(pl)
     prompt = (
-        f"Идея:\n{root['body']}\n\nГраницы:\n{prompts.render(pl.bank, 'boundary')}\n\n"
-        "Опиши предметную область: кто участвует (роли), с чем работают (сущности), какие "
-        "процессы и нормы важны. Каждый факт — коротко, с источником, если он есть.\n"
+        f"{interview.dossier(pl)}\n\n"
+        "Опиши предметную область СТРОГО в рамках, которые человек назвал в диалоге (тема «Предметная "
+        "область»): кто участвует (роли), с чем работают (сущности), какие процессы и нормы важны. "
+        "Каждый факт — коротко, с источником, если он есть; чего человек не называл и что не следует "
+        "из диалога, не добавляй.\n"
         'Ответ: {"facts": [{"type": "role|entity|process|norm", "name": "...", "text": "...", "source": ""}]}'
     )
     data = pl.llm.ask_json("researcher", prompts.SYSTEM["researcher"], prompt, web=True)
@@ -378,6 +334,7 @@ def analyze_domain(pl: Pipeline) -> list[dict]:
                 author="researcher",
             )
         )
+    interview.confirm(pl, created, "факт предметной области", "confirm.domain")
     return created
 
 
@@ -386,24 +343,24 @@ def analyze_domain(pl: Pipeline) -> list[dict]:
 
 def find_problems(pl: Pipeline) -> dict:
     """1.7 Проблемы: на основе границ, предметной области и конкурентов + вопросы к границам."""
-    root = area(pl)
+    from . import interview
+
+    area(pl)  # без идеи искать проблемы не из чего
     sources = ("boundary", "domain", "competitor")
     if not pl.bank.records("boundary"):
         raise PipelineError("no_boundaries", "Сначала сформулируйте границы системы (шаг 1.3)")
     prompt = (
-        f"Идея:\n{root['body']}\n\nГраницы:\n{prompts.render(pl.bank, 'boundary')}\n\n"
-        f"Предметная область:\n{prompts.render(pl.bank, 'domain')}\n\n"
-        f"Конкуренты:\n{prompts.render(pl.bank, 'competitor')}\n\n"
-        f"Уже найденные проблемы:\n{prompts.render(pl.bank, 'problem')}\n\n"
-        "Найди проблемы пользователей, которые решает эта система. Каждая — с важностью "
+        f"{interview.dossier(pl)}\n\n"
+        "Найди проблемы пользователей, которые решает эта система, ТОЛЬКО из того, что человек сказал "
+        "в диалоге (тема «Проблемы» и ответы выше): проблем, о которых он не говорил и которые не "
+        "следуют из его ответов, не добавляй. Каждая — с важностью "
         f"({', '.join(IMPORTANCE)}) и кодами записей-источников (границы, предметная область, "
-        "конкуренты), на которых она основана. Если для проблемы нужно уточнить границы, задай "
-        "закрытый вопрос.\n"
+        "конкуренты), на которых она основана. Уже найденные проблемы не повторяй.\n"
         'Ответ: {"problems": [{"title": "...", "body": "...", "importance": "высокая", '
-        '"from": ["c3"]}], "questions": [{"text": "...", "options": ["..."], "about": "c3"}]}'
+        '"from": ["c3"]}]}'
     )
     data = pl.llm.ask_json("analyst", prompts.SYSTEM["analyst"], prompt)
-    created, skipped, questions = [], [], []
+    created, skipped, questions = [], [], []  # вопросы задаёт интервью, а не автор шага
     for item in _items(data, "problems"):
         title = _s(item.get("title"), 200)
         if not title or pl.bank.find("problem", title):
@@ -421,17 +378,6 @@ def find_problems(pl: Pipeline) -> dict:
                 body=_s(item.get("body"), 800),
                 attrs={"importance": importance if importance in IMPORTANCE else "средняя"},
                 author="analyst",
-            )
-        )
-    for item in _items(data, "questions"):
-        text = _s(item.get("text"), 300)
-        if not text or pl.bank.find("question", text):
-            continue
-        about = _ids(pl, item.get("about"), ("boundary",)) or [root["id"]]
-        options = [_s(o, 120) for o in (item.get("options") or []) if _s(o, 120)][:4]
-        questions.append(
-            pl.bank.add(
-                "question", text, parents=about, attrs={"options": options}, author="analyst"
             )
         )
     return {"created": created, "skipped": skipped, "questions": questions}
@@ -456,9 +402,13 @@ def write_requirements(pl: Pipeline) -> dict:
     if not todo:
         return {"created": [], "skipped": []}
     listing = "\n".join(f"{p['id']}: {p['title']} — {p['body']}" for p in todo)
+    from . import interview
+
     prompt = (
-        f"Границы и ограничения:\n{prompts.constitution(pl.bank)}\n\n"
+        f"{interview.dossier(pl)}\n\n"
         f"Проблемы, для которых нужны требования:\n{listing}\n\n"
+        "Опирайся только на диалог с человеком (тема «Функциональные требования» и ответы выше), "
+        "ничего не додумывай. "
         "Для каждой проблемы сформулируй функциональные требования («Система должна…», описывай ЧТО, "
         "а не КАК), с приоритетом (обязательно или предлагаем) и критериями приёмки («Когда …, "
         "система …»). Если способов решить несколько — options=true. Критерий, который тестом не "
@@ -519,28 +469,42 @@ def steps(pl: Pipeline) -> list[dict]:
     req_gate = last("requirements")
     problems_ok = bool(problems_gate and problems_gate["state"] == "passed")
     req_ok = bool(req_gate and req_gate["state"] == "passed")
+    from . import interview
+
+    def asking(key):  # шаг в диалоге: студия ждёт ответа
+        return "ответьте на вопрос студии" if interview.open_questions(pl, key) else ""
+
+    legacy = any(not (q.get("attrs") or {}).get("topic") for q in answered)  # вопросы без интервью
     out = [
         _step("1.1", "area", "Область", has("area"), True, None, "опишите идею своими словами"),
         _step(
             "1.2",
             "questions",
             "Уточняющие вопросы",
-            bool(answered),
+            (interview.is_done(pl, "questions") and bool(answered)) or legacy,
             has("area"),
             "analyst",
-            "ответьте на вопросы" if unanswered(pl) else "",
+            asking("questions") or "студия спросит по одному вопросу",
         ),
         _step(
             "1.3", "boundaries", "Границы системы", has("boundary"), bool(answered), "analyst", ""
         ),
-        _step("1.4", "constraints", "Ограничения", has("constraint"), has("area"), "analyst", ""),
         _step(
-            "1.5", "competitors", "Конкуренты", has("competitor"), has("boundary"), "researcher", ""
-        ),
+            "1.4", "constraints", "Ограничения", has("constraint"), has("area"), "analyst",
+            asking("constraints"),
+        ),  # fmt: skip
         _step(
-            "1.6", "domain", "Предметная область", has("domain"), has("boundary"), "researcher", ""
-        ),
-        _step("1.7", "problems", "Проблемы", has("problem"), has("boundary"), "analyst", ""),
+            "1.5", "competitors", "Конкуренты", has("competitor"), has("boundary"), "researcher",
+            asking("competitors"),
+        ),  # fmt: skip
+        _step(
+            "1.6", "domain", "Предметная область", has("domain"), has("boundary"), "researcher",
+            asking("domain"),
+        ),  # fmt: skip
+        _step(
+            "1.7", "problems", "Проблемы", has("problem"), has("boundary"), "analyst",
+            asking("problems"),
+        ),  # fmt: skip
         _step(
             "gate",
             "gate_problems",
@@ -557,7 +521,7 @@ def steps(pl: Pipeline) -> list[dict]:
             has("requirement"),
             problems_ok,
             "analyst",
-            "",
+            asking("requirements"),
         ),
         _step(
             "gate",
@@ -593,8 +557,10 @@ def next_step(pl: Pipeline) -> dict | None:
 
 def run_step(pl: Pipeline, key: str):
     """Выполнить шаг агентом (кроме шагов, где нужен человек: 1.1 и ответы на вопросы)."""
+    from . import interview
+
     table = {
-        "questions": propose_questions,
+        "questions": lambda p: {"created": []},  # вопросы задаёт интервью (ниже)
         "boundaries": build_boundaries,
         "constraints": propose_constraints,
         "competitors": research_competitors,
@@ -606,7 +572,14 @@ def run_step(pl: Pipeline, key: str):
     }
     if key not in table:
         raise PipelineError("unknown_step", f"Шаг {key!r} агентом не выполняется")
-    return table[key](pl)
+    if key in interview.GOALS:  # сначала диалог: студия спрашивает по одному вопросу, а не додумывает
+        asked = interview.step(pl, key)
+        if asked is not None:
+            return asked
+    result = table[key](pl)
+    if key != "questions":
+        interview.reopen(pl, key)  # запись сделана: в следующий раз спросим заново
+    return result
 
 
 def autopilot(pl: Pipeline, limit: int = 12) -> list[dict]:

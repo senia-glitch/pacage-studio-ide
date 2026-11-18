@@ -1,5 +1,5 @@
 import pytest
-from fake_llm import agents_with
+from fake_llm import agents_with, drive
 from pl_helpers import idea
 
 from studio.pipeline import GateKeeper, Pipeline, PipelineError, flow, stage3, tz, waves
@@ -279,14 +279,14 @@ def test_two_waves_run_one_after_another_through_autopilot(tmp_path):
     )
     pl.settings.set_mode("autopilot")
     stage1.set_area(pl, "Сайт записи к врачу")
-    flow.autopilot(pl, stop_after=2)
+    drive(pl, stop_after=2)
     assert flow.stage_open(pl, 3)
     pl.settings.set_number("wave_threshold", 1)
     assert len(waves.info(pl)["suggestion"] or {}) == 3
     info = waves.enable(pl)
     assert info["total"] == 2, info
     first = [p["title"] for p in info["packages"][0]["scenarios"]]
-    log = flow.autopilot(pl, stop_after=4)
+    log = drive(pl, stop_after=4)
     assert log[-1] == {"stop": "этап 4 пройден"}, log
     done = waves.info(pl)
     assert done["finished"] and [p["state"] for p in done["packages"]] == ["done", "done"]
