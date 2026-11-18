@@ -78,6 +78,7 @@ SYSTEM = (
 
 LABELS = {"accepted": "принято", "proposed": "черновик", "stale": "устарело"}
 SECTIONS = ("boundary", "constraint", "competitor", "domain", "problem", "requirement", "criterion")
+DESIGN_SECTIONS = ("term", "variant", "scenario", "table")
 
 
 # ---------------------------------------------------------------------- состояние
@@ -124,9 +125,17 @@ def open_questions(pl: Pipeline, topic: str) -> list[dict]:
 # ---------------------------------------------------------------------- досье
 
 
-def _line(card: dict) -> str:
+def _line(card: dict, pl: Pipeline | None = None) -> str:
     attrs = card.get("attrs") or {}
     text = f"{card['id']} {card['title']} [{LABELS.get(card['status'], card['status'])}]"
+    if card["kind"] == "criterion" and pl is not None:
+        parents = [p["id"] for p in pl.bank.parents(card["id"])]
+        if parents:
+            text += f" (критерий к {', '.join(parents)})"
+    if card["kind"] == "scenario":
+        covers = attrs.get("covers")
+        if covers:
+            text += f" (проверяет критерии: {', '.join(covers)})"
     if card.get("body") and card["body"] != card["title"]:
         text += f"\n    {card['body'][:500]}"
     if attrs.get("url"):
@@ -147,11 +156,12 @@ def dialogue(pl: Pipeline) -> str:
     return "\n".join(lines) or "(пока нет)"
 
 
-def dossier(pl: Pipeline) -> str:
+def dossier(pl: Pipeline, design: bool = False) -> str:
     """Всё, что студия знает об идее: идея, весь диалог, ожидающие вопросы и ВСЕ записи «Идеи».
 
     Каждая подсказка «Идеи» начинается с досье, а не с выборки по видам записей: так студия не теряет
-    контекст и не смотрит на «случайную часть»."""
+    контекст и не смотрит на «случайную часть». ``design`` добавляет записи этапа 2 (словарь, варианты,
+    сценарии, таблицы): их видят подсказки этапа 2 и обсуждение его ворот."""
     areas = pl.bank.records("area")
     head = f"Идея человека:\n{areas[0]['body'] or areas[0]['title']}" if areas else "Идея не записана."
     waiting = [
@@ -162,10 +172,10 @@ def dossier(pl: Pipeline) -> str:
     parts = [head, "Диалог с человеком (по порядку):\n" + dialogue(pl)]
     if waiting:
         parts.append("Вопросы, на которые человек ещё не ответил (не повторяй их):\n" + "\n".join(waiting))
-    for kind in SECTIONS:
+    for kind in SECTIONS + (DESIGN_SECTIONS if design else ()):
         cards = pl.bank.records(kind)
         if cards:
-            parts.append(f"{KINDS[kind].title} (записи банка):\n" + "\n".join(_line(c) for c in cards))
+            parts.append(f"{KINDS[kind].title} (записи банка):\n" + "\n".join(_line(c, pl) for c in cards))
     return "\n\n".join(parts)
 
 
@@ -188,7 +198,9 @@ def _upstream(pl: Pipeline, raw) -> dict | None:
     return {"target": target, "patch": patch}
 
 
-def _make(pl: Pipeline, data, *, source: str, topic: str, batch: str = "", gate: str = "", extra=None):
+def _make(
+    pl: Pipeline, data, *, source: str, topic: str, batch: str = "", gate: str = "", extra=None, stage: int = 1
+):
     """Один вопрос из ответа аналитика. ``None`` — вопросов больше нет (или он повторяется)."""
     if not isinstance(data, dict) or data.get("done") is True:
         return None
@@ -202,7 +214,13 @@ def _make(pl: Pipeline, data, *, source: str, topic: str, batch: str = "", gate:
     ids = [r for r in raw.get("reject") or [] if isinstance(r, str)] if gate else []
     if ids:
         item["reject"] = ids
-    attrs = {"stage": 1, "topic": topic, **(extra or {})}
+    if gate:
+        from . import conveyor
+
+        adds = conveyor.clean_adds(pl, raw.get("add"))
+        if adds:
+            item["adds"] = adds  # правка «Идеи», которую подаст этап, если человек согласится
+    attrs = {"stage": stage, "topic": topic, **(extra or {})}
     made = clarify.create(
         pl, [item], source=source, batch=batch, gate=gate, extra=attrs, own_batch=not batch
     )
@@ -325,26 +343,45 @@ def _gate_lines(pl: Pipeline, run: dict) -> str:
 
 
 def discuss(pl: Pipeline, run: dict) -> dict | None:
-    """Ворота «Идеи» не пройдены: студия обсуждает замечания с человеком по одному вопросу, а не
-    решает сама, что считать приёмкой. ``None`` — вопросов больше нет, можно дорабатывать по ответам."""
+    """Ворота не пройдены: студия обсуждает замечания с человеком по одному вопросу и предлагает
+    варианты решения, а не решает сама, что считать приёмкой. ``None`` — вопросов больше нет, можно
+    дорабатывать по ответам.
+
+    На этапе 2 и дальше, если причина в «Идее» (не хватает требования, критерия, ограничения), вариант
+    решения — заявка в «Идею» (``add``): человек соглашается, и заявка уходит туда как его правка."""
     spec = GATES[run["gate"]]
     nl = chr(10)
+    idea_stage = spec.stage == 1
+    head = (
+        "Критерии ворот расплывчаты: не придумывай свои стандарты приёмки и не требуй идеала. Реши, "
+        "что человеку нужно решить, чтобы замечание ушло (чего не хватает, что лишнее, что "
+        "противоречит), и задай ОДИН следующий вопрос, опираясь на весь диалог."
+        if idea_stage
+        else "Реши, как исправить провал ворот, и предложи человеку ВАРИАНТЫ решения (2–4, первый — "
+        "рекомендуемый) ОДНИМ вопросом, опираясь на весь диалог и записи. Не придумывай своих "
+        "стандартов приёмки. Если причина в самом этапе — варианты правки сценариев или схемы. Если "
+        "причина в «Идее» (не хватает требования, критерия или ограничения, которое следует из слов "
+        "человека) — вариант «Да, передать в «Идею»» с полем add: новая запись (kind: requirement, "
+        "criterion, constraint, boundary или problem; parent — код существующей записи-родителя; title; "
+        "body; criteria — критерии приёмки; basis — коды записей и ответов диалога, из которых это "
+        "следует). Нового факта, которого человек не говорил, не придумывай — спроси."
+    )
     prompt = nl.join(
         [
-            dossier(pl),
+            dossier(pl, design=not idea_stage),
             "",
             f"Ворота «{spec.title}» не пройдены. Замечания:",
             _gate_lines(pl, run),
             "",
-            "Критерии ворот расплывчаты: не придумывай свои стандарты приёмки и не требуй идеала. Реши, "
-            "что человеку нужно решить, чтобы замечание ушло (чего не хватает, что лишнее, что "
-            "противоречит), и задай ОДИН следующий вопрос, опираясь на весь диалог. Если запись нужно "
-            "убрать — добавь reject (коды черновиков), если мешает принятая запись — upstream с "
-            "правкой; вариантами тогда «Да, …» и «Нет, …». Если вопросов больше нет и доработку можно "
-            "делать по ответам — скажи об этом.",
+            head
+            + " Если запись нужно убрать — добавь reject (коды черновиков), если мешает принятая запись — "
+            "upstream с правкой; вариантами тогда «Да, …» и «Нет, …». Если вопросов больше нет и доработку "
+            "можно делать по ответам — скажи об этом.",
             'Ответ: {"done": false, "question": {"text": "...", "options": ["...", "..."], "about": '
             '"c3", "reject": ["c7"], "upstream": {"target": "c5", "patch": {"title": "...", '
-            '"body": "..."}}}} либо {"done": true, "why": "..."} (reject и upstream — только если нужны)',
+            '"body": "..."}}, "add": [{"kind": "requirement", "parent": "c113", "title": "Система '
+            'должна ...", "body": "", "criteria": ["Когда ..., система ..."], "basis": ["c15"]}]}} '
+            'либо {"done": true, "why": "..."} (reject, upstream и add — только если нужны)',
         ]
     )
     data = pl.llm.ask_json("analyst", SYSTEM, prompt)
@@ -356,6 +393,7 @@ def discuss(pl: Pipeline, run: dict) -> dict | None:
         batch=run["id"],
         gate=run["gate"],
         extra={"dialog": True},
+        stage=spec.stage,
     )
 
 

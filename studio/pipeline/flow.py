@@ -11,6 +11,7 @@ from . import (
     advice,
     audit,
     clarify,
+    conveyor,
     debt,
     integrate,
     interview,
@@ -181,6 +182,11 @@ def apply_answers(pl: Pipeline, batch: str):
         return {"refined": changed}
     run = pl.keeper.run(batch)
     decided = clarify.apply_decisions(pl, batch)  # правка принятого выше и отклонения — по ответам
+    if decided.get("added"):  # заявка в «Идею» принята: она проходит свои ворота, потом — этап заново
+        idea = conveyor.settle_idea(pl, auto=pl.settings.mode == "autopilot")
+        if idea.get("blocked") or clarify.waiting_human(pl):
+            clarify.mark_applied(pl, batch)
+            return {"decided": decided, "idea": idea}  # «Идее» нужно ваше решение; этап подождёт
     if gate_key in REWORK:
         rework(pl, gate_key, run)
     clarify.mark_applied(pl, batch)
@@ -380,6 +386,15 @@ def autopilot(pl: Pipeline, limit: int = LIMIT, stop_after: int | None = None) -
                     entry["fixed"] = fixed
                     log.append(entry)
                     continue  # ворота пройдут заново уже без них
+                sent = conveyor.autopilot(pl, result) if GATES[gate_key].stage >= 2 else {}
+                if sent:  # этапу не хватает данных из «Идеи»: заявка уходит туда как правка человека
+                    entry["conveyor"] = sent
+                    if sent.get("stop"):
+                        entry["stop"] = sent["stop"]
+                        log.append(entry)
+                        break
+                    log.append(entry)
+                    continue  # «Идея» приняла заявку, ворота этапа пройдут заново
                 if clarify.waiting_human(pl):
                     # «Идея»: замечания ворот студия обсуждает с человеком, а не решает за него
                     entry["stop"] = "ворота не пройдены: студия ждёт вашего ответа в обсуждении замечаний"

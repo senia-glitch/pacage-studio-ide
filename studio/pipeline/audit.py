@@ -42,10 +42,19 @@ def _prompt(pl: Pipeline, run: dict) -> str:
         lines.append(f"- проверка кодом ({found['code']}): {found['message']}")
     subject = prompts.render(pl.bank, *spec.subject)
     above = prompts.render(pl.bank, "area", "boundary", "constraint", "problem", "requirement")
-    if spec.stage == 1:
-        from . import interview
+    from . import interview
 
-        above = interview.dossier(pl)  # «Идея»: весь банк и весь диалог, а не выборка
+    above = interview.dossier(pl, design=spec.stage >= 2)  # весь банк и весь диалог, а не выборка
+    gap = (
+        ' cause: "upstream" может быть и не правкой, а нехваткой в «Идее» (нет требования, критерия, '
+        'ограничения, которое следует из слов человека): тогда вместо change дай add — список новых '
+        'записей {"kind": "requirement|criterion|constraint|boundary|problem", "parent": "код '
+        'существующей записи-родителя", "title": "...", "body": "...", "criteria": ["Когда ..., '
+        'система ..."], "basis": ["коды записей и ответов диалога, из которых это следует"]}. Без '
+        "basis (нет опоры в диалоге) не предлагай add: используй cause ask."
+        if spec.stage >= 2
+        else ""
+    )
     return (
         f"Ворота «{spec.title}» (этап {spec.stage}) не пройдены.\n"
         + "Замечания:\n"
@@ -56,7 +65,9 @@ def _prompt(pl: Pipeline, run: dict) -> str:
         'action: "improve" — запись можно довести правкой, "reject" — довести нельзя (лишняя, '
         "дублирует другую или противоречит цепочке): назови её в records, её отклонят. "
         'cause: "ask" — не хватает данных, которые знает только человек (автор их выдумал бы): дай '
-        "в questions закрытые вопросы с вариантами (text, options, about — код записи).\n"
+        "в questions закрытые вопросы с вариантами (text, options, about — код записи)."
+        + gap
+        + "\n"
         + 'Ответ: {"summary": "главная причина в одной фразе", "items": [{"criterion": "<ключ или code>", '
         '"cause": "here", "records": ["c7"], "defect": "что не так", "fix": "что сделать автору", '
         '"action": "improve", "evaluator_ok": true}, {"criterion": "completeness", "cause": "upstream", "target": "c3", '
@@ -84,6 +95,12 @@ def _clean(pl: Pipeline, run: dict, data) -> dict:
         }
         if raw.get("cause") == "ask" and questions:
             item.update(cause="ask", questions=questions)
+        if raw.get("cause") == "upstream" and GATES[run["gate"]].stage >= 2:
+            from . import conveyor
+
+            adds = conveyor.clean_adds(pl, raw.get("add") or raw.get("adds"))
+            if adds:  # в «Идее» чего-то не хватает: этап подаст заявку
+                item.update(cause="upstream", adds=adds)
         target = _s(raw.get("target"), 20)
         change = raw.get("change") if isinstance(raw.get("change"), dict) else {}
         if raw.get("cause") == "upstream" and _exists(pl, target):
@@ -131,8 +148,9 @@ def _ask(pl: Pipeline, run: dict, result: dict) -> None:
     ручной работы. Автопилот отвечает на эти вопросы сам (``clarify.settle``)."""
     gate = run["gate"]
     clarify.drop_pending(pl, gate)
-    if GATES[gate].stage == 1:
-        # «Идея»: критерии ворот расплывчаты, поэтому замечания обсуждаются с человеком по одному вопросу
+    if GATES[gate].stage == 1 or pl.settings.mode == "gates":
+        # «Идея» и «На воротах»: критерии ворот расплывчаты, замечания обсуждаются с человеком по одному
+        # вопросу, с вариантами решения (в том числе заявкой в «Идею»)
         from . import interview
 
         interview.discuss(pl, run)
@@ -141,29 +159,6 @@ def _ask(pl: Pipeline, run: dict, result: dict) -> None:
     for item in result["items"]:
         if item.get("cause") == "ask":
             items += item.get("questions") or []
-    if pl.settings.mode == "gates":  # в «На воротах» человек решает, а не правит руками
-        for item in result["items"]:
-            if item.get("cause") == "upstream":
-                what = item["change"].get("title") or item["change"].get("body")
-                items.append(
-                    {
-                        "text": f"Принятая запись {item['target']} мешает: {item['defect']}. Исправить её так: «{what}»?",
-                        "options": ["Да, исправить", "Нет, оставить как есть"],
-                        "about": item["target"],
-                        "upstream": {"target": item["target"], "patch": item["change"]},
-                    }
-                )
-        drop = rejectable(pl, {**run, "audit": result})
-        if drop:
-            titles = ", ".join(f"«{pl.bank.get(r)['title']}»" for r in drop)
-            items.append(
-                {
-                    "text": f"Записи {titles} довести до порога нельзя. Отклонить?",
-                    "options": ["Да, отклонить", "Нет, оставить"],
-                    "about": drop[0],
-                    "reject": drop,
-                }
-            )
     made = clarify.create(pl, items, source="audit", batch=run["id"], gate=gate)
     if made:
         pl.keeper.annotate(run["id"], audit={**result, "asked": [q["id"] for q in made]})
@@ -177,6 +172,9 @@ def lines(run: dict) -> list[str]:
         where = f" (записи {', '.join(item['records'])})" if item.get("records") else ""
         if item["cause"] == "ask":
             out.append(f"- {item['criterion']}: не хватает данных — {item['defect'] or 'нужны ответы человека'}")
+        elif item["cause"] == "upstream" and item.get("adds"):
+            what = "; ".join(f"{a['kind']} «{a['title']}» под {a['parent']}" for a in item["adds"])
+            out.append(f"- {item['criterion']}: в «Идее» не хватает: {what} — {item['defect']}")
         elif item["cause"] == "upstream":
             out.append(f"- {item['criterion']}: причина выше — запись {item['target']}: {item['defect']}")
         elif item.get("action") == "reject":

@@ -121,7 +121,7 @@ def create(
             attrs["gate"] = gate
         if about:
             attrs["refs"] = [about]
-        for field in ("upstream", "reject"):
+        for field in ("upstream", "reject", "adds"):
             if raw.get(field):
                 attrs[field] = raw[field]
         body = text if title != text else ""  # заголовок записи ограничен: длинный вопрос лежит целиком в тексте
@@ -361,7 +361,7 @@ def refine(pl: Pipeline, batch: str) -> int:
 
 def apply_decisions(pl: Pipeline, batch: str) -> dict:
     """Ответы «да» на предложенную правку выше по цепочке и на отклонение: студия делает это сама."""
-    out: dict = {"changed": [], "rejected": []}
+    out: dict = {"changed": [], "rejected": [], "added": []}
     for q in batch_questions(pl, batch):
         attrs = q["attrs"]
         options = attrs.get("options") or []
@@ -377,6 +377,12 @@ def apply_decisions(pl: Pipeline, batch: str) -> dict:
                 out["changed"].append(upstream["target"])
             except PipelineError:
                 continue
+        if attrs.get("adds"):  # «Да, передать в «Идею»»: заявка уходит как правка человека
+            from . import conveyor
+
+            out["added"] += conveyor.send(
+                pl, attrs["adds"], by="studio", gate=attrs.get("gate", ""), run=batch
+            )
         for rid in attrs.get("reject") or []:
             try:
                 if pl.bank.get(rid)["status"] in ("proposed", "stale"):

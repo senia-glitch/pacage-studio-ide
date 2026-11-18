@@ -88,6 +88,10 @@ def _summary(result) -> str:
                     f"отклонено: {len(done['rejected'])}; " + head
                 )
             return head + (f" — {why}" if why else "")
+        if (result.get("decided") or {}).get("added"):
+            idea = result.get("idea") or {}
+            where = f"ворота «Идеи» ждут вашего решения: {idea['blocked']}" if idea.get("blocked") else "«Идея» приняла"
+            return f"заявка этапа отправлена в «Идею» (записей: {len(result['decided']['added'])}); {where}"
         if result.get("asked") or result.get("waiting"):
             return "студия задала вопрос: ответьте на него, и она спросит дальше или запишет"
         if "refined" in result and "created" not in result:
@@ -126,6 +130,9 @@ def _summary(result) -> str:
             returned = sum(len(e["debt"]["records"]) for e in steps if e.get("debt"))
             if returned:
                 text += f"; возвращено на улучшение записей ниже порога: {returned}"
+            tickets = sum(len((e.get("conveyor") or {}).get("sent") or []) for e in steps)
+            if tickets:
+                text += f"; заявок этапа в «Идею»: {tickets}"
             dropped = sum(len((e.get("rework") or {}).get("dropped") or []) for e in steps)
             if dropped:
                 text += f"; отклонено по аудиту: {dropped}"

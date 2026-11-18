@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from studio.pipeline.graph import ACCEPTED
 
+from . import coverage as cov
 from . import prompts
 from .diagrams import normalize_columns, normalize_diagram, schema_problems, snake
 from .engine import Pipeline
@@ -41,16 +42,16 @@ def _requirements(pl: Pipeline) -> list[dict]:
 
 def build_dictionary(pl: Pipeline) -> list[dict]:
     """2.1 Роли и словарь: единый список имён (роли, компоненты, сущности) с источником."""
+    from . import interview
+
     _need_entry(pl)
     reqs = _requirements(pl)
     prompt = (
-        f"Границы и ограничения:\n{prompts.constitution(pl.bank)}\n\n"
-        f"Предметная область:\n{prompts.render(pl.bank, 'domain')}\n\n"
-        f"Принятые требования:\n{prompts.render(pl.bank, 'requirement', status=(ACCEPTED,))}\n\n"
-        f"Уже есть в словаре:\n{prompts.render(pl.bank, 'term')}\n\n"
+        f"{interview.dossier(pl, design=True)}\n\n"
         "Составь единый словарь имён: роли (люди), компоненты (системы, в том числе внешние), "
-        "сущности (термины предметной области). У каждого — тип, определение в одну фразу и коды "
-        "записей, откуда оно взято.\n"
+        "сущности (термины предметной области). Только то, что есть в требованиях и диалоге с "
+        "человеком: ролей, систем и понятий, о которых там не говорится, не добавляй. У каждого — тип, "
+        "определение в одну фразу и коды записей, откуда оно взято. Уже есть в словаре — не повторяй.\n"
         'Ответ: {"terms": [{"name": "Пациент", "type": "role", "text": "...", "from": ["c5"]}]}'
     )
     data = pl.llm.ask_json("scenarist", prompts.SYSTEM["scenarist"], prompt)
@@ -91,9 +92,11 @@ def propose_variants(pl: Pipeline) -> list[dict]:
     ]
     if not todo:
         return []
+    from . import interview
+
     listing = "\n".join(f"{r['id']}: {r['title']}" for r in todo)
     prompt = (
-        f"Границы и ограничения:\n{prompts.constitution(pl.bank)}\n\n"
+        f"{interview.dossier(pl, design=True)}\n\n"
         f"Для каждого требования предложи 2–3 способа реализации с плюсами и минусами:\n{listing}\n"
         'Ответ: {"variants": [{"requirement": "c9", "title": "SMS", "body": "плюсы и минусы"}]}'
     )
@@ -174,8 +177,43 @@ def auto_choose(pl: Pipeline) -> list[dict]:
 # ---------------------------------------------------------------------- 2.3 Сценарии
 
 
-def write_scenarios(pl: Pipeline) -> dict:
-    """2.3 Сценарии: цель, роли, ход, ошибки, диаграмма с метками, критерии приёмки."""
+SCENARIO_GROUP = 3  # требований в одном вызове: группы пишутся параллельно
+
+
+def _needs_scenarios(pl: Pipeline) -> list[dict]:
+    """Требования без сценария или с критерием, который не проверяет ни один сценарий."""
+    covered: set[str] = set()
+    for scenario in pl.bank.records("scenario"):
+        covered |= cov.scenario_covers(pl.bank, scenario)
+    out = []
+    for req in _requirements(pl):
+        has = any(c["kind"] == "scenario" for c in pl.bank.children(req["id"]))
+        open_criteria = [
+            c
+            for c in pl.bank.children(req["id"])
+            if c["kind"] == "criterion" and not cov.visual(c) and c["id"] not in covered
+        ]
+        if not has or open_criteria:
+            out.append(req)
+    return out
+
+
+def _requirement_block(pl: Pipeline, req: dict) -> str:
+    text = f"{req['id']}: {req['title']}"
+    if req.get("body") and req["body"] != req["title"]:
+        text += f"\n    {req['body'][:400]}"
+    for crit in pl.bank.children(req["id"]):
+        if crit["kind"] == "criterion":
+            text += f"\n    критерий {crit['id']}: {crit['title']}"
+    return text
+
+
+def write_scenarios(pl: Pipeline, workers: int = 3) -> dict:
+    """2.3 Сценарии: строго из требований и их критериев; недостающие дописываются и при доработке.
+
+    Требования идут группами и пишутся параллельно: быстрее, и каждый вызов видит весь банк (досье)."""
+    from . import interview
+
     _need_entry(pl)
     if unchosen(pl):
         raise PipelineError(
@@ -183,36 +221,60 @@ def write_scenarios(pl: Pipeline) -> dict:
         )
     if not pl.bank.records("term"):
         raise PipelineError("no_dictionary", "Сначала составьте словарь (шаг 2.1)")
-    todo = [
-        r
-        for r in _requirements(pl)
-        if not any(c["kind"] == "scenario" for c in pl.bank.children(r["id"]))
-    ]
+    todo = _needs_scenarios(pl)
+    if not todo and pl.llm.feedback:
+        todo = _requirements(pl)  # доработка по замечаниям ворот: автор сам видит, каких сценариев не хватает
     if not todo:
         return {"created": [], "skipped": []}
-    listing = "\n".join(f"{r['id']}: {r['title']}" for r in todo)
     chosen = "\n".join(
         f"{v['id']} (для {p['id']}): {v['title']}"
         for v in pl.bank.records("variant")
         if (v.get("attrs") or {}).get("chosen")
         for p in pl.bank.parents(v["id"])
     )
-    prompt = (
-        f"Границы, ограничения, словарь:\n{prompts.constitution(pl.bank)}\n\n"
-        f"Выбранные варианты:\n{chosen or '(нет)'}\n\n"
-        f"Требования, которые нужно покрыть сценариями:\n{listing}\n\n"
-        "Опиши сценарии: одна цель на сценарий, участники — ТОЛЬКО имена из словаря. У каждого "
-        "шага диаграммы метка tag: screen (экран), call (вызов системы), data (данные). Каждое "
-        "требование должно войти хотя бы в один сценарий. Если сценарий не работает с данными — "
-        "no_data=true.\n"
-        'Ответ: {"scenarios": [{"title": "...", "requirements": ["c9"], "variant": "c12", '
-        '"no_data": false, "diagram": {"participants": ["Пациент", "Система"], "steps": '
-        '[{"from": "Пациент", "to": "Система", "text": "выбирает время", "tag": "screen"}]}, '
-        '"criteria": [{"text": "Когда ..., система ...", "check": "auto"}]}]}'
-    )
-    data = pl.llm.ask_json("scenarist", prompts.SYSTEM["scenarist"], prompt)
+    context = interview.dossier(pl, design=True)
+    groups = [todo[i : i + SCENARIO_GROUP] for i in range(0, len(todo), SCENARIO_GROUP)]
+
+    def prompt_for(group: list[dict]) -> str:
+        listing = "\n".join(_requirement_block(pl, r) for r in group)
+        return (
+            f"{context}\n\nВыбранные варианты:\n{chosen or '(нет)'}\n\n"
+            f"Требования, которые нужно покрыть сценариями:\n{listing}\n\n"
+            "Опиши сценарии строго из этих требований и их критериев: ничего, что из них и из диалога "
+            "не следует (регистрация, оплата, роли, которых нет), не добавляй; уже написанные "
+            "сценарии не повторяй, а дополни недостающими. Одна цель на сценарий: успешный ход — "
+            "отдельный сценарий, каждый отказ или ошибка из критериев — отдельный сценарий со своим "
+            "предусловием. Участники — ТОЛЬКО имена из словаря. У каждого шага диаграммы метка tag: "
+            "screen (экран), call (вызов системы), data (данные). Каждое требование и каждый его "
+            "критерий (код указан) должен войти хотя бы в один сценарий: коды критериев, которые "
+            "сценарий проверяет, перечисли в covers. Если сценарий не работает с данными — "
+            "no_data=true.\n"
+            'Ответ: {"scenarios": [{"title": "...", "requirements": ["c9"], "covers": ["c10"], '
+            '"variant": "c12", "no_data": false, "diagram": {"participants": ["Пациент", "Система"], '
+            '"steps": [{"from": "Пациент", "to": "Система", "text": "выбирает время", "tag": "screen"}]}, '
+            '"criteria": [{"text": "Когда ..., система ...", "check": "auto"}]}]}'
+        )
+
+    def one(group):
+        try:
+            return group, pl.llm.ask_json("scenarist", prompts.SYSTEM["scenarist"], prompt_for(group)), None
+        except PipelineError as error:
+            return group, None, error
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        results = list(pool.map(one, groups))
+    if all(error is not None for _, _, error in results):
+        raise results[0][2]
     created, skipped = [], []
-    valid = {r["id"] for r in todo}
+    for group, data, error in results:
+        if error is not None:
+            skipped.append(f"группа требований {', '.join(r['id'] for r in group)}: {error.message}")
+            continue
+        _apply_scenarios(pl, data, {r["id"] for r in group}, created, skipped)
+    return {"created": created, "skipped": skipped}
+
+
+def _apply_scenarios(pl: Pipeline, data, valid: set[str], created: list, skipped: list) -> None:
     for item in _items(data, "scenarios"):
         title = _s(item.get("title"), 200)
         if not title or pl.bank.find("scenario", title):
@@ -223,12 +285,24 @@ def write_scenarios(pl: Pipeline) -> dict:
             continue
         variants = _ids(pl, item.get("variant"), ("variant",))
         diagram = normalize_diagram(item.get("diagram"))
+        own = {
+            c["id"]
+            for r in reqs
+            for c in pl.bank.children(r)
+            if c["kind"] == "criterion"
+        }
+        covers = [c for c in _ids(pl, item.get("covers"), ("criterion",)) if c in own]
         scenario = pl.bank.add(
             "scenario",
             title,
             parents=reqs + variants,
             body=_s(item.get("goal"), 500),
-            attrs={"diagram": diagram, "no_data": bool(item.get("no_data"))},
+            attrs={
+                "diagram": diagram,
+                "no_data": bool(item.get("no_data")),
+                # без отметки сценарий считается покрывающим все критерии своих требований
+                **({"covers": covers} if covers else {}),
+            },
             author="scenarist",
         )
         created.append(scenario)
@@ -244,7 +318,6 @@ def write_scenarios(pl: Pipeline) -> dict:
                     attrs={"check": check, "layer": "frontend"},
                     author="scenarist",
                 )
-    return {"created": created, "skipped": skipped}
 
 
 # ---------------------------------------------------------------------- 2.4 Схема БД сценария
@@ -316,6 +389,24 @@ def _col(column: dict) -> str:
     return column["name"] + (":" + column["key"] if column["key"] else "")
 
 
+def _merge_answer(pl: Pipeline, prompt: str) -> list[dict]:
+    data = pl.llm.ask_json("db_designer", prompts.SYSTEM["db_designer"], prompt)
+    merged = []
+    for item in _items(data, "tables"):
+        name, cols = snake(item.get("name")), normalize_columns(item.get("columns"))
+        sources = _ids(pl, item.get("from"), ("scenario",))
+        if name and cols:
+            merged.append(
+                {
+                    "name": name,
+                    "description": _s(item.get("description"), 300),
+                    "columns": cols,
+                    "from": sources,
+                }
+            )
+    return merged
+
+
 def merge_schemas(pl: Pipeline) -> list[dict]:
     """2.5 Слияние схем в одну общую: таблица происходит из тех сценариев, что её требовали."""
     _need_entry(pl)
@@ -337,23 +428,23 @@ def merge_schemas(pl: Pipeline) -> list[dict]:
         'Ответ: {"tables": [{"name": "doctor", "description": "...", "columns": [{"name": "id", '
         '"type": "int", "key": "pk"}], "from": ["c20", "c21"]}]}'
     )
-    data = pl.llm.ask_json("db_designer", prompts.SYSTEM["db_designer"], prompt)
-    merged = []
-    for item in _items(data, "tables"):
-        name, cols = snake(item.get("name")), normalize_columns(item.get("columns"))
-        sources = _ids(pl, item.get("from"), ("scenario",))
-        if name and cols:
-            merged.append(
-                {
-                    "name": name,
-                    "description": _s(item.get("description"), 300),
-                    "columns": cols,
-                    "from": sources,
-                }
-            )
+    merged = _merge_answer(pl, prompt)
     problems = schema_problems(merged)
+    if problems:  # один автоповтор: студия сама исправляет, прежде чем звать человека
+        merged = _merge_answer(
+            pl,
+            prompt
+            + "\n\nПрошлая попытка не годится: "
+            + "; ".join(problems)
+            + ". Исправь именно это и верни схему целиком.",
+        )
+        problems = schema_problems(merged)
     if problems:
-        raise PipelineError("bad_schema", "Общая схема не годится: " + "; ".join(problems))
+        raise PipelineError(
+            "bad_schema",
+            "Общая схема не годится: " + "; ".join(problems) + ". Варианты: повторить шаг «Слияние "
+            "схем» или поправить схемы сценариев (шаг 2.4, ↻).",
+        )
     # прежние черновые таблицы (если слияние повторяют) уходят в архив
     for old in pl.bank.records("table", status="proposed"):
         pl.bank.reject(old["id"], "db_designer", "заменена новым слиянием")

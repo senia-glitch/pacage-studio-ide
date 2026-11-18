@@ -106,6 +106,41 @@ def duplicates(bank: ProjectBank, kinds: tuple[str, ...]) -> list[Finding]:
     return out
 
 
+def scenario_covers(bank: ProjectBank, scenario: dict) -> set[str]:
+    """Критерии требований, которые проверяет сценарий. Прежние сценарии без отметки ``covers``
+    считаются покрывающими все критерии своих требований."""
+    attrs = scenario.get("attrs") or {}
+    if "covers" in attrs:
+        return set(attrs["covers"] or [])
+    out: set[str] = set()
+    for parent in bank.parents(scenario["id"]):
+        if parent["kind"] == "requirement":
+            out |= {c["id"] for c in bank.children(parent["id"]) if c["kind"] == "criterion"}
+    return out
+
+
+def uncovered_criteria_in_scenarios(bank: ProjectBank) -> list[Finding]:
+    """Каждый критерий требования проверяет хотя бы один сценарий (ограничения сценариев не требуют:
+    платформа, язык и безопасность проверяются на других этапах)."""
+    covered: set[str] = set()
+    for scenario in bank.records("scenario"):
+        covered |= scenario_covers(bank, scenario)
+    out = []
+    for requirement in bank.records("requirement"):
+        for crit in bank.children(requirement["id"]):
+            if crit["kind"] != "criterion" or visual(crit) or crit["id"] in covered:
+                continue
+            out.append(
+                Finding(
+                    "uncovered",
+                    f"Критерий «{crit['title']}» требования «{requirement['title']}» не проверяет "
+                    "ни один сценарий: нужен сценарий (или отдельная ветка отказа)",
+                    (crit["id"], requirement["id"]),
+                )
+            )
+    return out
+
+
 def stale_in(bank: ProjectBank, kinds: tuple[str, ...]) -> list[Finding]:
     out = []
     for kind in kinds:

@@ -90,6 +90,7 @@ GATES: dict[str, GateDef] = {
             ("term", "variant", "scenario", "criterion"),
             (
                 "uncovered_scenario",
+                "uncovered_criterion_s",
                 "orphans_2a",
                 "duplicates_2a",
                 "variant_choice",
@@ -97,10 +98,10 @@ GATES: dict[str, GateDef] = {
                 "upstream_1",
             ),
             (
-                _c("completeness", "Полнота", "основной ход и ошибки, исключения учтены"),
+                _c("completeness", "Полнота", "каждое требование и его критерии покрыты сценариями: основной ход и отказы, которые есть в критериях"),
                 _c("clarity", "Ясность", "сценарий понятен и однозначен"),
-                _c("noncontradiction", "Непротиворечивость", "сценарии не противоречат друг другу"),
-                _c("size", "Размер", "один сценарий — одна цель"),
+                _c("noncontradiction", "Непротиворечивость", "сценарии не противоречат друг другу и своим предусловиям"),
+                _c("size", "Размер", "один сценарий — одна цель; отказ — отдельный сценарий"),
             ),
         ),
         GateDef(
@@ -114,11 +115,11 @@ GATES: dict[str, GateDef] = {
                 _c(
                     "standards",
                     "Соответствие стандартам индустрии",
-                    "ключи, имена, типы по общим правилам",
+                    "ключи, имена, типы по правилам студии: snake_case, первичный ключ, типы из списка",
                 ),
-                _c("extensibility", "Расширяемость", "схема выдержит ближайшие изменения"),
+                _c("extensibility", "Расширяемость", "новые поля и таблицы можно добавить, не переделывая существующие, в рамках описанных сценариев"),
                 _c(
-                    "data_rules", "Данные и хранение", "персональные данные и сроки хранения учтены"
+                    "data_rules", "Данные и хранение", "персональные данные и сроки хранения учтены, если они есть в требованиях"
                 ),
             ),
         ),
@@ -256,6 +257,7 @@ CHECKS: dict[str, Callable[[ProjectBank, dict], list[Finding]]] = {
     "orphans_req": lambda b, f: cov.orphans(b, ("requirement", "criterion")),
     "duplicates_req": lambda b, f: cov.duplicates(b, ("requirement",)),
     "uncovered_scenario": lambda b, f: cov.uncovered(b, "requirement", "scenario"),
+    "uncovered_criterion_s": lambda b, f: cov.uncovered_criteria_in_scenarios(b),
     "orphans_2a": lambda b, f: cov.orphans(b, ("term", "variant", "scenario")),
     "duplicates_2a": lambda b, f: cov.duplicates(b, ("term", "scenario")),
     "variant_choice": lambda b, f: cov.variant_choice(b),

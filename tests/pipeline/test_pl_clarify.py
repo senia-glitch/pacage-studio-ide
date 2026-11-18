@@ -88,7 +88,7 @@ def test_decide_for_me_answers_by_the_studio_rules_without_marks(tmp_path):
     card = pl.bank.get(q["id"])
     assert out["answered"] == 1 and card["attrs"]["answer"] == "Пациенты"
     assert card["attrs"]["answered_by"] == "analyst" and "assumed" not in card["attrs"]
-    assert out["next"]["decided"] == {"changed": [], "rejected": []} and clarify.pending(pl) == []
+    assert out["next"]["decided"] == {"changed": [], "rejected": [], "added": []} and clarify.pending(pl) == []
     prompt = next(c["prompt"] for c in agent.calls if AUTO in c["prompt"])
     assert "границы, ограничения" in prompt and "здравый смысл" in prompt  # правила студии
 
@@ -277,26 +277,36 @@ UPSTREAM = {
 }
 
 
-def test_in_gates_mode_upstream_changes_and_rejects_become_questions_the_studio_applies(tmp_path):
-    pl, _ = make(tmp_path, [(ASK_AUDIT, UPSTREAM)])
+def test_in_gates_mode_a_failed_gate_is_discussed_and_the_studio_applies_the_agreed_fix(tmp_path):
+    variants = {
+        "done": False,
+        "question": {
+            "text": "Принятое требование c4 мешает. Что делаем?",
+            "options": ["Да, исправить c4 и убрать дубль", "Нет, оставить как есть"],
+            "about": "c4",
+            "upstream": {"target": "c4", "patch": {"title": "Система должна записывать пациента на приём", "body": "по времени"}},
+            "reject": ["c6"],
+        },
+    }
+    pl, _ = make(tmp_path, [(ASK_AUDIT, UPSTREAM), ("предложи человеку ВАРИАНТЫ", variants)])
     ids = idea(pl.bank)
     pl.bank.add("criterion", "Дубль критерия", parents=[ids["req"]["id"]])  # c6
     pl.bank.set_status([ids["req"]["id"]], "accepted", "human")
     run = pl.keeper.open("scenarios")
     audit.make(pl, run)
     run = pl.keeper.run(run["id"])
-    questions = clarify.batch_questions(pl, run["id"])
-    upstream = [q for q in questions if q["attrs"].get("upstream")]
-    assert len(upstream) == 1  # запрос выше — вопрос человеку, а не заявка на одобрение
-    assert audit.escalate(pl, run) == [] and pl.changes.open_requests() == []
-    assert upstream[0]["title"].startswith("Принятая запись c4 мешает")
-    stage1.answer_question(pl, upstream[0]["id"], upstream[0]["attrs"]["options"][0])
+    (question,) = clarify.batch_questions(pl, run["id"])  # вариантов решения — ОДИН вопрос, а не пачка
+    assert question["attrs"]["upstream"]["target"] == "c4" and question["attrs"]["dialog"]
+    assert audit.escalate(pl, run) == [] and pl.changes.open_requests() == []  # решает человек
+    stage1.answer_question(pl, question["id"], question["attrs"]["options"][0])
     done = clarify.apply_decisions(pl, run["id"])
-    assert done["changed"] == ["c4"]
+    assert done["changed"] == ["c4"] and done["rejected"] == ["c6"] and done["added"] == []
     assert pl.bank.get("c4")["title"] == "Система должна записывать пациента на приём"
     (request,) = pl.changes.items
     assert request["status"] == "accepted" and request["decided_by"] == "studio"
+    assert pl.bank.get("c6")["status"] == "rejected"
     item = {"text": "Убрать?", "options": ["Да, отклонить", "Нет"], "about": "c6", "reject": ["c6"]}
+    pl.bank.set_status(["c6"], "proposed", "test")
     (no,) = clarify.create(pl, [item], source="audit", batch="g9")
     stage1.answer_question(pl, no["id"], "Да, отклонить")
     assert clarify.apply_decisions(pl, "g9")["rejected"] == ["c6"]

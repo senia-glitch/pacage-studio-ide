@@ -9,7 +9,7 @@ KEY = "не пройдены.\nЗамечания:"
 
 
 def make(tmp_path, answer):
-    registry, agent = agents_with([(KEY, answer)])
+    registry, agent = agents_with([(KEY, answer), ("предложи человеку ВАРИАНТЫ", {"done": True})])
     return Pipeline(tmp_path, registry), agent
 
 
