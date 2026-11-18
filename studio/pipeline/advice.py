@@ -119,7 +119,7 @@ def criterion_options(item: dict) -> list[dict]:
 def for_gate(pl: Pipeline, run: dict | None) -> dict:
     """Всё для экрана: сводка, общие действия, варианты по каждому замечанию и критерию."""
     if not run or run["state"] == "passed":
-        return {"summary": "", "lines": [], "actions": [], "findings": [], "criteria": {}}
+        return {"summary": "", "audit": None, "lines": [], "actions": [], "findings": [], "criteria": {}}
     gate_key = run["gate"]
     title = GATES[gate_key].title
     code, failing = run.get("code") or [], run.get("failing") or []
@@ -152,8 +152,11 @@ def for_gate(pl: Pipeline, run: dict | None) -> dict:
     if run["state"] == "ready":
         actions.append(_opt("accept", "Принять", "все слои пройдены", True))
     summary = f"Ворота «{title}»: {short(run)}."
+    if run.get("stalled"):
+        summary += " Оценка не растёт несколько кругов подряд."
     return {
         "summary": summary,
+        "audit": run.get("audit") or None,
         "lines": lines,
         "actions": actions,
         "findings": [finding_options(pl, f, gate_key) for f in code],
@@ -172,16 +175,21 @@ def auto_fix(pl: Pipeline, run: dict, codes: tuple[str, ...] = HANGING) -> list[
 
 
 def explain(pl: Pipeline, run: dict, rounds: int | None = None) -> str:
-    """Текст остановки автопилота: что не прошло и что можно сделать (вместо «круги закончились»)."""
+    """Текст остановки автопилота: что не прошло, что пробовали и что можно сделать."""
     data = for_gate(pl, run)
     head = f"ворота «{GATES[run['gate']].title}» не пройдены"
-    if rounds:
-        head += f" после {rounds} кругов"
+    rounds = rounds or run.get("round")
+    if rounds and rounds > 1:
+        head += f" после {rounds} кругов доработки"
+    if run.get("stalled"):
+        head += ", оценка перестала расти"
     reasons = "; ".join(data["lines"][:3]) or short(run)
     more = len(data["lines"]) - 3
     tail = f" (и ещё {more})" if more > 0 else ""
     options = ", ".join(o["label"] for o in data["actions"][:3])
-    return f"{head}: {reasons}{tail}. Что можно сделать: {options or 'откройте плашку ворот'}."
+    audit = (run.get("audit") or {}).get("summary")
+    cause = f" Причина по аудиту: {audit}." if audit else ""
+    return f"{head}: {reasons}{tail}.{cause} Что можно сделать: {options or 'откройте плашку ворот'}."
 
 
 def fix(pl: Pipeline, run_id: str, action: str) -> dict:

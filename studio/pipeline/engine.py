@@ -53,6 +53,7 @@ class Pipeline:
         if run["state"] == "rating" and rate:
             ratings = self.evaluate(run)
             run = self.keeper.rate(run["id"], ratings)
+            self._audit(run)
         if run["state"] == "ready":
             auto = self.keeper.auto(run["id"])
             if auto is not None:
@@ -89,6 +90,7 @@ class Pipeline:
             'Ответ: {"<ключ критерия>": {"score": 0-10, "evidence": "код записи и что именно"}, ...}'
         )
         system = prompts.SYSTEM["evaluator"]
+        prompt += self._recheck_note(run)
         try:
             data = self.llm.ask_json("evaluator", system, prompt)
         except PipelineError as error:
@@ -114,6 +116,33 @@ class Pipeline:
             if left:
                 run["eval_note"] = "в ответе модели нет оценок по критериям: " + ", ".join(left)
         return data
+
+    def _audit(self, run: dict) -> None:
+        """Ворота вернули по оценке: критический разбор причин (что именно исправить автору)."""
+        from . import advice, audit
+
+        if run["state"] == "returned" and not advice.evaluator_failed(run):
+            audit.make(self, run)
+
+    def _recheck_note(self, run: dict) -> str:
+        """Прошлый круг вернули: оценщик проверяет, устранены ли дефекты по существу, а не словами."""
+        from . import audit
+
+        before = self.keeper.previous_failed(run)
+        if before is None:
+            return ""
+        remarks = audit.lines(before) or [
+            f"- {f['title']}: {f['why']}" for f in before.get("failing") or []
+        ]
+        remarks += [f"- {f['message']}" for f in before.get("code") or []]
+        if not remarks:
+            return ""
+        return (
+            "\n\nПрошлый круг этих ворот не прошёл, автор доработал записи. Замечания были:\n"
+            + "\n".join(remarks)
+            + "\nПроверь по существу, что каждое устранено, а не переписано другими словами; "
+            "за формулировки оценку не повышай, новые дефекты называй."
+        )
 
     def decide_gate(self, run_id: str, decision: str, note: str = "") -> dict:
         """Решение человека на воротах (принять, вернуть, принять ниже порога)."""

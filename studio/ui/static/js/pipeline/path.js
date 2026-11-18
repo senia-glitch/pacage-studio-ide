@@ -409,8 +409,20 @@ function adviceBlock(ctx, data, run, running) {
     const more = advice.lines.length > 8 ? h("li", {class: "hint"}, `…и ещё ${advice.lines.length - 8} (ниже, в списках)`) : null;
     box.append(h("ul", {class: "lines"}, advice.lines.slice(0, 8).map((line) => h("li", null, line)), more));
   }
+  if (advice.audit) box.append(auditBlock(advice.audit));
   if (advice.actions.length) box.append(h("div", {class: "acts"}, h("span", {class: "hint"}, "Варианты: "), advice.actions.map((option) => adviceButton(ctx, option, run, running, null))));
-  if (run.stuck) box.append(h("div", {class: "pl-warn"}, "Круги доработки закончились — решайте сами: правьте записи или принимайте ниже порога."));
+  if (run.stuck) box.append(h("div", {class: "pl-warn"}, "Оценка не растёт несколько кругов подряд — нужно ваше решение: поправьте записи сами, согласуйте правку выше по цепочке или (на ваше усмотрение) примите ниже порога."));
+  return box;
+}
+
+function auditBlock(audit) {
+  const box = h("div", {class: "pl-audit"}, h("div", {class: "pl-label"}, "Аудит: в чём причина и что исправить"));
+  if (audit.summary) box.append(h("div", {class: "summary"}, audit.summary));
+  for (const item of audit.items || []) {
+    const where = item.records && item.records.length ? ` (записи ${item.records.join(", ")})` : "";
+    const head = item.cause === "upstream" ? `${item.criterion}: причина выше — запись ${item.target}` : `${item.criterion}${where}`;
+    box.append(h("div", {class: "finding"}, h("b", null, head), h("div", null, item.defect), h("div", {class: "hint"}, item.cause === "upstream" ? "Подан запрос на изменение принятой записи (вкладка «Запросы»)." : `Что исправить: ${item.fix}`), item.evaluator_ok === false ? h("div", {class: "pl-warn"}, "Аудитор сомневается в замечании оценщика: по записям оно подтверждается не полностью.") : null));
+  }
   return box;
 }
 
@@ -466,7 +478,7 @@ function decision(ctx, data, run, running) {
     box.append(h("span", {class: "ok"}, "Принято", run.below ? " ниже порога (записи помечены)" : "", run.by ? ` · решил: ${run.by}` : ""));
     return box;
   }
-  if (run.stuck) box.append(h("div", {class: "pl-warn"}, "Круги доработки закончились — решайте сами: правьте записи или принимайте ниже порога."));
+  if (run.stuck) box.append(h("div", {class: "pl-warn"}, "Оценка не растёт несколько кругов подряд — нужно ваше решение: поправьте записи сами, согласуйте правку выше по цепочке или (на ваше усмотрение) примите ниже порога."));
   const note = h("input", {type: "text", class: "pl-note", placeholder: "замечание агентам (необязательно)"});
   if (run.state === "ready") {
     box.append(h("button", {class: "pl-primary", disabled: running, onclick: () => ctx.act("/api/pipeline/gate/decide", {run: run.id, decision: "accept"})}, "Принять"));

@@ -200,6 +200,15 @@ def full_rules(evaluator=None):
         ),
         ("Слей схемы сценариев", merge),
         ("Замечания ворот к твоей работе", {"revise": [], "reject": []}),
+        (
+            "не пройдены.\nЗамечания:",
+            {
+                "summary": "формулировки расплывчаты",
+                "items": [
+                    {"criterion": "clarity", "cause": "here", "defect": "неясно", "fix": "перепиши"}
+                ],
+            },
+        ),
         ("Ворота «", evaluator or (lambda p: {**ALL_KEYS, **GATE_KEYS_2})),
     ]
     return rules

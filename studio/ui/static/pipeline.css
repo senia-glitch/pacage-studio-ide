@@ -175,3 +175,6 @@ input.pl-num{width:64px}
 .pl-advice .acts,.pl-findings .acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0 8px}
 .pl-hintopt{color:var(--dim);font-size:12px}
 .pl-gwhy{color:#e0a030;font-size:11px;margin-left:6px}
+
+.pl-audit{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0}
+.pl-audit .summary{font-weight:600;margin:4px 0}

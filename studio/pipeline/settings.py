@@ -19,7 +19,8 @@ FILE = Path(".studio") / "pipeline.json"
 MODES = ("manual", "gates", "autopilot")
 MODE_NAMES = {"manual": "Вручную", "gates": "На воротах", "autopilot": "Автопилот"}
 DEFAULT_MODE = "gates"
-MAX_ROUNDS = 3  # кругов доработки подряд, потом агент спрашивает человека
+STALL_ROUNDS = 3  # кругов подряд без роста оценки, потом агент зовёт человека
+MAX_ROUNDS = 12  # предел кругов доработки одних ворот, даже если оценка понемногу растёт
 WAVE_THRESHOLD = 8  # сценариев, после которых система предлагает «волны»
 QUICK_FIX_LIMIT = 2  # «мелкая правка»: затронуто не больше записей
 
@@ -66,15 +67,8 @@ class PipelineSettings:
         self.save()
 
     @property
-    def autopilot_accept_below(self) -> bool:
-        """Автопилот, когда круги закончились: принять ниже порога с пометкой (иначе стоп)."""
-        return bool(self.data.get("autopilot_accept_below", True))
-
-    def set_flag(self, key: str, value) -> None:
-        if key != "autopilot_accept_below":
-            raise PipelineError("bad_setting", f"Неизвестная настройка: {key!r}")
-        self.data[key] = bool(value)
-        self.save()
+    def stall_rounds(self) -> int:
+        return STALL_ROUNDS
 
     @property
     def max_rounds(self) -> int:

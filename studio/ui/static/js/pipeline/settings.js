@@ -59,8 +59,7 @@ function numbersBlock(ctx, data) {
     h("h3", null, "Пороги"),
     field("«Волны» от числа сценариев:", "wave_threshold", data.wave_threshold, "если сценариев больше — система предложит разбить этапы 3–4 на пакеты"),
     field("«Мелкая правка» — не больше записей:", "quick_fix_limit", data.quick_fix_limit, "быстрый путь без полного круга; схема БД, контракт и смысл всегда идут полным путём"),
-    h("label", {class: "pl-row"}, h("input", {type: "checkbox", "data-focus": "accept-below", checked: data.autopilot_accept_below, onchange: (e) => save(ctx, "/api/pipeline/settings", {autopilot_accept_below: e.target.checked})}), h("span", null, " Автопилот: когда круги доработки закончились, а проверки кодом чистые, принять ниже порога с пометкой (вместо остановки)")),
-    h("div", {class: "hint"}, `Кругов доработки подряд — не больше ${data.max_rounds}, потом агент спрашивает вас.`),
+    h("div", {class: "hint"}, `Ниже порога автопилот ворота не принимает: независимый аудит находит причину, автор исправляет, ворота идут заново. Если оценка не растёт ${data.stall_rounds} круга подряд (или кругов больше ${data.max_rounds}), агент зовёт вас.`),
   );
 }
 

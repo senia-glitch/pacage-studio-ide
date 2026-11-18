@@ -112,7 +112,7 @@ def test_hanging_records_are_found_rejected_and_explained(tmp_path):
     again = pl.keeper.open("problems")
     assert not [f for f in again["code"] if f["code"] in ("orphan", "duplicate")]
     text = advice.explain(pl, run, 3)
-    assert text.startswith("ворота «Проверка проблем» не пройдены после 3 кругов:")
+    assert text.startswith("ворота «Проверка проблем» не пройдены после 3 кругов доработки:")
     assert "Что можно сделать: Внедрить висящее агентом (1), Доработать агентом" in text
     many = {**run, "code": [{"code": "x", "message": f"m{i}", "ids": []} for i in range(5)]}
     assert "и ещё 2" in advice.explain(pl, many)
@@ -192,11 +192,13 @@ def test_evaluator_gives_up_with_a_note_and_survives_bad_json(tmp_path):
     assert pl.run_gate("problems")["state"] == "returned"
 
 
-def test_autopilot_does_not_accept_when_the_evaluator_never_answered(tmp_path):
+def test_stuck_gate_is_explained_and_never_accepted_below_by_the_autopilot(tmp_path):
     pl, agent = make(tmp_path)
     idea(pl.bank)
     agent.rules = [("Ворота «", "не JSON")]
     run = pl.run_gate("problems")
-    run["stuck"] = True
-    assert flow._accept_below(pl, run) == []
-    assert "оценщик не вернул" in advice.explain(pl, run, 3) or "сбой" in advice.explain(pl, run, 3)
+    assert advice.evaluator_failed(run) and run["state"] == "returned"
+    run["stalled"] = True
+    text = advice.explain(pl, run)
+    assert "оценка перестала расти" in text and ("оценщик не вернул" in text or "сбой" in text)
+    assert not hasattr(flow, "_accept_below")

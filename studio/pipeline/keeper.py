@@ -93,10 +93,12 @@ class GateKeeper:
             "decision": None,
             "by": None,
             "note": "",
-            "stuck": round_no > self.settings.max_rounds,
+            "stuck": False,
+            "deficit": None,
             "opened": time.time(),
         }
         self.runs.append(run)
+        self._mark_progress(run)
         self._save()
         return run
 
@@ -151,6 +153,61 @@ class GateKeeper:
         run["failing"] = failing
         run["state"] = "returned" if failing else "ready"
         run["reason"] = "rating" if failing else ""
+        self._mark_progress(run)
+        self._save()
+        return run
+
+    # ------------------------------------------------------------------ прогресс доработки
+
+    @staticmethod
+    def deficit(run: dict) -> int:
+        """Насколько ворота далеки от прохода: чем меньше, тем лучше (0 — проходят)."""
+        if run.get("code"):
+            return 100 * len(run["code"])  # пока проверки кодом не пройдены, оценки нет
+        total = 0
+        for item in run.get("failing") or []:
+            if "score" in item:
+                total += max(1, int(item.get("threshold", 8)) - int(item["score"]))
+            else:
+                total += int(item.get("threshold", 8))  # оценщик не вернул оценку
+        return total
+
+    def streak(self, run: dict) -> list[dict]:
+        """Подряд идущие круги этих ворот, не принятые, до ``run`` включительно."""
+        floor = int(self.floors.get(run["gate"], 0))
+        index = next((i for i, r in enumerate(self.runs) if r["id"] == run["id"]), len(self.runs))
+        chain = [run]
+        for earlier in reversed(self.runs[floor:index]):
+            if earlier["gate"] != run["gate"]:
+                continue
+            if earlier["state"] != "returned":
+                break
+            chain.append(earlier)
+        chain.reverse()
+        return chain
+
+    def previous_failed(self, run: dict) -> dict | None:
+        """Прошлый круг этих ворот, если он вернули: его замечания надо проверить заново."""
+        chain = self.streak(run)
+        return chain[-2] if len(chain) > 1 else None
+
+    def _mark_progress(self, run: dict) -> None:
+        """Оценка не растёт ``stall_rounds`` кругов подряд (или кругов слишком много): стоп."""
+        run["stuck"] = run["round"] > self.settings.max_rounds
+        if run["state"] != "returned":
+            return
+        run["deficit"] = self.deficit(run)
+        chain = self.streak(run)
+        values = [r["deficit"] if r.get("deficit") is not None else self.deficit(r) for r in chain]
+        best = values.index(min(values))  # первый круг с лучшим результатом
+        if len(chain) - 1 - best >= self.settings.stall_rounds:
+            run["stuck"] = True
+            run["stalled"] = True
+
+    def annotate(self, run_id: str, **fields) -> dict:
+        """Дописать в прогон ворот поля (аудит и т. п.)."""
+        run = self.run(run_id)
+        run.update(fields)
         self._save()
         return run
 

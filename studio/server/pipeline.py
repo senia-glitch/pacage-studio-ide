@@ -94,11 +94,14 @@ def _summary(result) -> str:
             text = f"выполнено шагов: {len(result)}"
             fixed = sum(len(e.get("fixed") or []) for e in result if isinstance(e, dict))
             steps = [e for e in result if isinstance(e, dict)]
-            below = [t for e in steps for t in e.get("accepted_below") or []]
+            rounds = sum(1 for e in steps if e.get("rework"))
+            upstream = sum(len((e.get("rework") or {}).get("upstream") or []) for e in steps)
+            if rounds:
+                text += f"; кругов доработки по аудиту: {rounds}"
+            if upstream:
+                text += f"; запросов на изменение принятого: {upstream}"
             if fixed:
-                text += f"; отклонено висящих записей: {fixed}"
-            if below:
-                text += f"; принято ниже порога: {', '.join(below)}"
+                text += f"; отклонено повторов: {fixed}"
             stop = next((e["stop"] for e in reversed(steps) if e.get("stop")), "")
             return text + (f". Остановка: {stop}" if stop else "")
         return f"создано записей: {len(result)}"
@@ -287,8 +290,8 @@ class PipelineService:
             "mode": s.mode,
             "mode_names": MODE_NAMES,
             "wave_threshold": s.wave_threshold,
-            "autopilot_accept_below": s.autopilot_accept_below,
             "quick_fix_limit": s.quick_fix_limit,
+            "stall_rounds": s.stall_rounds,
             "max_rounds": s.max_rounds,
             "gates": [
                 {"key": k, "title": g.title, "stage": g.stage, "criteria": s.criteria(k)}
@@ -484,8 +487,6 @@ class PipelineService:
         for key in ("wave_threshold", "quick_fix_limit"):
             if key in data:
                 pl.settings.set_number(key, data[key])
-        if "autopilot_accept_below" in data:
-            pl.settings.set_flag("autopilot_accept_below", data["autopilot_accept_below"])
         return self.settings()
 
     def _criterion_post(self, pl: Pipeline, data: dict) -> dict:

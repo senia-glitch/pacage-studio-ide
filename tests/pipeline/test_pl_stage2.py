@@ -229,39 +229,46 @@ def test_autopilot_reworks_after_low_score_then_passes(tmp_path):
     assert pl.llm.feedback == ""  # замечания не «залипают»
 
 
-def test_autopilot_stops_when_rounds_are_over(tmp_path):
+def low_problems(scores):
+    """Оценщик: «Актуальность» проблем — по очереди ``scores`` (последняя повторяется), остальное хорошо."""
+    queue = list(scores)
+
     def evaluator(prompt):
         bad = {**ALL_KEYS, **GATE_KEYS_2}
         if "Ворота «Проверка проблем»" in prompt:
-            bad["actuality"] = {"score": 3, "evidence": "c1"}
+            score = queue.pop(0) if len(queue) > 1 else queue[0]
+            bad["actuality"] = {"score": score, "evidence": "c1"}
         return bad
 
-    pl, _ = build(tmp_path, evaluator)
+    return evaluator
+
+
+def test_autopilot_keeps_improving_until_the_threshold_is_passed(tmp_path):
+    pl, agent = build(tmp_path, low_problems([3, 5, 7, 9]))
     pl.settings.set_mode("autopilot")
-    pl.settings.set_flag("autopilot_accept_below", False)
     stage1.set_area(pl, "Сайт")
-    log = flow.autopilot(pl)
-    assert log[-1]["stop"].startswith("ворота «Проверка проблем» не пройдены после 3 кругов")
-    assert "Критерий «" in log[-1]["stop"] and "Что можно сделать" in log[-1]["stop"]
-    assert pl.keeper.last("problems")["stuck"] is True
-    assert [e for e in log if e.get("rework")]
-
-
-def test_autopilot_accepts_below_threshold_when_rounds_are_over(tmp_path):
-    def evaluator(prompt):
-        bad = {**ALL_KEYS, **GATE_KEYS_2}
-        if "Ворота «Проверка проблем»" in prompt:
-            bad["actuality"] = {"score": 3, "evidence": "c1"}
-        return bad
-
-    pl, _ = build(tmp_path, evaluator)
-    pl.settings.set_mode("autopilot")  # принять ниже порога — по умолчанию
-    stage1.set_area(pl, "Сайт")
-    log = flow.autopilot(pl)
-    taken = [e for e in log if e.get("accepted_below")]
-    assert taken and taken[0]["accepted_below"] == ["Актуальность"]
+    log = flow.autopilot(pl, stop_after=1)
+    assert len([e for e in log if e.get("rework")]) == 3  # три круга улучшения, оценка росла
     last = pl.keeper.last("problems")
-    assert last["state"] == "passed" and last["below"] is True and last["by"] == "autopilot"
+    assert last["state"] == "passed" and not last["below"] and last["by"] == "autopilot"
+    assert log[-1] == {"stop": "этап 1 пройден"}
+    assert any("Разбор причин независимым аудитором" in c["prompt"] for c in agent.calls)
+    assert any("не растёт" not in c["prompt"] and "Прошлый круг этих ворот не прошёл" in c["prompt"] for c in agent.calls)
+
+
+def test_autopilot_stops_when_the_score_stops_growing_and_never_accepts_below(tmp_path):
+    pl, _ = build(tmp_path, low_problems([3]))
+    pl.settings.set_mode("autopilot")
+    stage1.set_area(pl, "Сайт")
+    log = flow.autopilot(pl)
+    stop = log[-1]["stop"]
+    assert stop.startswith("ворота «Проверка проблем» не пройдены после 4 кругов доработки, оценка перестала расти")
+    assert "Критерий «" in stop and "Причина по аудиту: формулировки расплывчаты" in stop
+    last = pl.keeper.last("problems")
+    assert last["stuck"] and last["stalled"] and last["state"] == "returned"
+    assert last["audit"]["items"][0]["fix"] == "перепиши"
+    assert len([e for e in log if e.get("rework")]) == 3
+    assert not [c for c in pl.bank.records() if (c.get("attrs") or {}).get("below_threshold")]
 
 
 def test_feedback_text_and_unknown_stage(tmp_path):

@@ -380,15 +380,12 @@ def test_gate_fix_integrate_lets_the_agent_place_the_record_and_rechecks(tmp_pat
     assert not [f for f in last["code"] if f["code"] == "orphan"]
 
 
-def test_settings_have_the_autopilot_accept_below_switch(tmp_path):
+def test_settings_describe_the_improvement_rounds_and_have_no_accept_below_switch(tmp_path):
     svc, _ = service(tmp_path)
     svc.post(f"{P}/start", {})
-    assert svc.get(f"{P}/settings", {})["autopilot_accept_below"] is True
-    out = svc.post(f"{P}/settings", {"autopilot_accept_below": False})
-    assert out["autopilot_accept_below"] is False
-    assert svc.pl().settings.autopilot_accept_below is False
-    with pytest.raises(PipelineError):
-        svc.pl().settings.set_flag("нет", True)
+    data = svc.get(f"{P}/settings", {})
+    assert "autopilot_accept_below" not in data
+    assert data["stall_rounds"] == 3 and data["max_rounds"] == 12
 
 
 def test_autopilot_summary_names_the_reason_it_stopped():
@@ -396,10 +393,11 @@ def test_autopilot_summary_names_the_reason_it_stopped():
 
     log = [
         {"step": "a", "fixed": ["отклонена «x»"]},
-        {"step": "gate_x", "accepted_below": ["Ясность"]},
+        {"step": "gate_x", "rework": {"upstream": ["r1", "r2"]}},
         {"step": "gate_y", "stop": "ворота «Y» не пройдены: причина"},
     ]
     text = _summary(log)
-    assert "выполнено шагов: 3" in text and "отклонено висящих записей: 1" in text
-    assert "принято ниже порога: Ясность" in text and text.endswith("Остановка: ворота «Y» не пройдены: причина")
+    assert "выполнено шагов: 3" in text and "отклонено повторов: 1" in text
+    assert "кругов доработки по аудиту: 1" in text and "запросов на изменение принятого: 2" in text
+    assert text.endswith("Остановка: ворота «Y» не пройдены: причина")
     assert _summary([{"step": "a"}]) == "выполнено шагов: 1"

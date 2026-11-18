@@ -7,11 +7,12 @@
 
 from __future__ import annotations
 
-from . import advice, integrate, prompts, stage1, stage2, stage3, stage4, stage5, waves
+from . import advice, audit, integrate, prompts, stage1, stage2, stage3, stage4, stage5, waves
 from .engine import Pipeline
 from .errors import PipelineError
 from .gates import GATES, STAGE_GATES, gate
 
+LIMIT = 600  # предел шагов за один запуск (защита от зацикливания; доработка и так ограничена)
 STAGES = {1: stage1, 2: stage2, 3: stage3, 4: stage4, 5: stage5}
 
 # Ворота → (роль-автор, шаг, который закрывает пробелы).
@@ -66,6 +67,10 @@ def feedback_text(run: dict) -> str:
     for item in run.get("failing") or []:
         mark = f"{item.get('score', '—')} из {item.get('threshold', 8)}" if "score" in item else ""
         lines.append(f"- {item['title']}: {item['why']} {mark}".strip())
+    reasons = audit.lines(run)
+    if reasons:
+        lines.append("Разбор причин независимым аудитором (что именно исправить):")
+        lines += reasons
     return "\n".join(lines) or "- доработайте по замечаниям человека"
 
 
@@ -123,31 +128,14 @@ def rework(pl: Pipeline, gate_key: str, run: dict) -> dict:
         pl.llm.feedback = ""
     # записи, у которых пропал родитель, не оставляем: агент встраивает их в цепочку или отклоняет
     integrated = integrate.run(pl) if integrate.orphans(pl) else {}
-    return {"changed": changed, "filled": filled, "integrated": integrated}
+    upstream = audit.escalate(pl, run)  # причина выше по цепочке: запрос на изменение принятого
+    return {"changed": changed, "filled": filled, "integrated": integrated, "upstream": upstream}
 
 
 # ---------------------------------------------------------------------- автопилот
 
 
-def _accept_below(pl: Pipeline, run: dict) -> list[str]:
-    """Круги доработки кончились, проверки кодом чистые, а оценщик строже порога: автопилот
-    принимает ниже порога с пометкой на записях (человек видит её и может вернуться). Если
-    оценщик не дал оценок вообще, принимать нечего: он не оценивал."""
-    failing = run.get("failing") or []
-    if (
-        run.get("code")
-        or not failing
-        or advice.evaluator_failed(run)
-        or not pl.settings.autopilot_accept_below
-        or run["state"] != "returned"
-    ):
-        return []
-    note = "автопилот: круги доработки закончились, принято ниже порога"
-    pl.keeper.decide(run["id"], "accept_below", "autopilot", note)
-    return [f["title"] for f in failing]
-
-
-def autopilot(pl: Pipeline, limit: int = 80, stop_after: int | None = None) -> list[dict]:
+def autopilot(pl: Pipeline, limit: int = LIMIT, stop_after: int | None = None) -> list[dict]:
     """Идёт по шагам, пока не потребуется человек. Журнал — что сделано и почему остановились."""
     if pl.settings.mode != "autopilot":
         raise PipelineError("not_autopilot", "Автопилот включается в Настройки → Режим участия")
@@ -214,12 +202,8 @@ def autopilot(pl: Pipeline, limit: int = 80, stop_after: int | None = None) -> l
                     log.append(entry)
                     continue  # ворота пройдут заново уже без них
                 if result.get("stuck") or gate_key not in REWORK:
-                    taken = _accept_below(pl, result)
-                    if taken:
-                        entry["accepted_below"] = taken
-                        log.append(entry)
-                        continue
-                    entry["stop"] = advice.explain(pl, result, pl.settings.max_rounds)
+                    # ниже порога автопилот не принимает: оценка перестала расти — зовём человека
+                    entry["stop"] = advice.explain(pl, result)
                     log.append(entry)
                     break
                 entry["rework"] = rework(pl, gate_key, result)
@@ -232,6 +216,8 @@ def autopilot(pl: Pipeline, limit: int = 80, stop_after: int | None = None) -> l
                 log.append(entry)
                 break
         log.append(entry)
+    else:
+        log.append({"stop": f"достигнут предел в {limit} шагов: запустите автопилот ещё раз"})
     return log
 
 

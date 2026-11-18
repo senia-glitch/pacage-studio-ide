@@ -64,7 +64,7 @@ def test_validation(tmp_path):
         settings.set_number("что-то", 3)
     settings.set_number("wave_threshold", 12)
     assert PipelineSettings(tmp_path).wave_threshold == 12
-    assert settings.quick_fix_limit == 2 and settings.max_rounds == 3
+    assert settings.quick_fix_limit == 2 and settings.stall_rounds == 3 and settings.max_rounds == 12
 
 
 def test_roles_catalog_and_assignment(tmp_path):
